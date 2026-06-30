@@ -15,6 +15,16 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
+function validateFirebaseConfig(config: Record<string, string | undefined>) {
+  for (const [key, value] of Object.entries(config)) {
+    if (value === undefined || value.trim() === "") {
+      throw new Error(`Firebase config missing: ${key}`);
+    }
+  }
+}
+
+validateFirebaseConfig(firebaseConfig);
+
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
