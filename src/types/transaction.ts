@@ -13,7 +13,7 @@ export type TransactionBase = {
   serverDate: Timestamp | null;
   localDate: string;
   description?: string;
-  amount: number;
+  amountCents: number;
 };
 
 export type IncomeTransaction = TransactionBase & {

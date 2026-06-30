@@ -3,14 +3,14 @@ import type { Distribution } from "./transaction";
 
 export type MonthRemainder = {
   destination: "ahorro" | "next_month";
-  amount: number;
+  amountCents: number;
 };
 
 export type Month = {
-  totalIncome: number;
+  totalIncomeCents: number;
   distribution: Distribution;
-  caps: Distribution;
-  spent: Distribution;
+  capsCents: Distribution;
+  spentCents: Distribution;
   closed: boolean;
   remainder?: MonthRemainder;
   createdAt: Timestamp | null;
