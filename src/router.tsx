@@ -1,54 +1,92 @@
 import {
   createBrowserRouter,
   Navigate,
-  RouterProvider,
   Outlet,
+  RouterProvider,
 } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
-
-// Importa las páginas
 import Login from "@/pages/auth/Login";
 import Onboarding from "@/pages/Onboarding";
 import Dashboard from "@/pages/Dashboard";
 
-// Layout encargado de la protección
+function LoadingScreen() {
+  return (
+    <div className="flex h-screen items-center justify-center">Cargando...</div>
+  );
+}
+
+function RootRedirect() {
+  const { user, userProfile, isAuthLoading } = useAuthStore();
+
+  if (isAuthLoading) return <LoadingScreen />;
+
+  if (!user) return <Navigate to="/login" replace />;
+
+  
+  if (userProfile === null) return <LoadingScreen />;
+
+  if (!userProfile.onboardingCompleted) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  return <Navigate to="/dashboard" replace />;
+}
+
+function OnboardingGuard() {
+  const { user, userProfile, isAuthLoading } = useAuthStore();
+
+  if (isAuthLoading) return <LoadingScreen />;
+
+  if (!user) return <Navigate to="/login" replace />;
+
+
+  if (userProfile === null) return <LoadingScreen />;
+
+  if (userProfile.onboardingCompleted) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Outlet />;
+}
+
 function ProtectedLayout() {
-  const { user, isAuthLoading } = useAuthStore();
+  const { user, userProfile, isAuthLoading } = useAuthStore();
 
-  // Estado de carga global mientras Firebase recupera la sesión
-  if (isAuthLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        Cargando...
-      </div>
-    );
+  if (isAuthLoading) return <LoadingScreen />;
+
+  if (!user) return <Navigate to="/login" replace />;
+
+  
+  if (userProfile === null) return <LoadingScreen />;
+
+  if (!userProfile.onboardingCompleted) {
+    return <Navigate to="/onboarding" replace />;
   }
 
-  // Si no hay usuario, redirige al login
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  // Si está autenticado, renderiza la ruta hija correspondiente
   return <Outlet />;
 }
 
 const router = createBrowserRouter([
   {
+    path: "/",
+    element: <RootRedirect />,
+  },
+  {
     path: "/login",
     element: <Login />,
   },
   {
-    path: "/",
-    element: <Navigate to="/login" replace />,
-  },
-  {
-    element: <ProtectedLayout />,
+    element: <OnboardingGuard />,
     children: [
       {
         path: "/onboarding",
         element: <Onboarding />,
       },
+    ],
+  },
+  {
+    element: <ProtectedLayout />,
+    children: [
       {
         path: "/dashboard",
         element: <Dashboard />,

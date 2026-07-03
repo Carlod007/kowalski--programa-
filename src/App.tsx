@@ -1,18 +1,25 @@
 import { useEffect } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./lib/firebase";
-import { useAuthStore } from "./store/authStore";
-import AppRouter from "./router";
+import { auth } from "@/lib/firebase";
+import { useAuthStore } from "@/store/authStore";
+import { getUserProfile } from "@/services/userService";
+import AppRouter from "@/router";
 
 export default function App() {
-  const setUser = useAuthStore((state) => state.setUser);
+  const { setUser, setUserProfile } = useAuthStore();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const profile = await getUserProfile(firebaseUser.uid);
+        setUserProfile(profile);
+      } else {
+        setUserProfile(null);
+      }
+      setUser(firebaseUser);
     });
     return unsubscribe;
-  }, [setUser]);
+  }, [setUser, setUserProfile]);
 
   return <AppRouter />;
 }
