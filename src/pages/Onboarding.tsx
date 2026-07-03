@@ -1,3 +1,3 @@
-export default function Dashboard() {
-  return <div>Dashboard</div>;
+export default function Onboarding() {
+  return <div>Onboarding</div>;
 }

@@ -1,4 +1,3 @@
-// src/router.tsx
 import {
   createBrowserRouter,
   Navigate,
