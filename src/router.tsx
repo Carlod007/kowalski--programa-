@@ -7,12 +7,12 @@ import {
 } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 
-// Importa tus páginas reales
+// Importa las páginas
 import Login from "@/pages/auth/Login";
 import Onboarding from "@/pages/Onboarding";
 import Dashboard from "@/pages/Dashboard";
 
-// ⚡ Layout encargado de la protección (sin necesidad de recibir children)
+// Layout encargado de la protección
 function ProtectedLayout() {
   const { user, isAuthLoading } = useAuthStore();
 
@@ -30,7 +30,7 @@ function ProtectedLayout() {
     return <Navigate to="/login" replace />;
   }
 
-  // Si está autenticado, renderiza la ruta hija correspondiente (Dashboard, Onboarding, etc.)
+  // Si está autenticado, renderiza la ruta hija correspondiente
   return <Outlet />;
 }
 
@@ -44,7 +44,6 @@ const router = createBrowserRouter([
     element: <Navigate to="/login" replace />,
   },
   {
-    // Aquí aplicas el guardia UNA SOLA VEZ
     element: <ProtectedLayout />,
     children: [
       {
