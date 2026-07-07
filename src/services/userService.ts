@@ -1,5 +1,5 @@
 // src/services/userService.ts
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { User as UserProfile } from "@/types/user";
 
@@ -45,4 +45,12 @@ export async function createUserProfile(
   };
   await setDoc(ref, profile);
   return profile;
+}
+
+export async function updateUserProfile(
+  userId: string,
+  data: Partial<UserProfile>,
+): Promise<void> {
+  const ref = doc(db, "users", userId);
+  await updateDoc(ref, data);
 }
