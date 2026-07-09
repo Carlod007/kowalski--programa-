@@ -8,6 +8,8 @@ import { useAuthStore } from "@/store/authStore";
 import Login from "@/pages/auth/Login";
 import Onboarding from "@/pages/Onboarding";
 import Dashboard from "@/pages/Dashboard";
+import RegisterIncome from "@/pages/RegisterIncome";
+import RegisterExpense from "@/pages/RegisterExpense";
 
 function LoadingScreen() {
   return (
@@ -89,6 +91,14 @@ const router = createBrowserRouter([
       {
         path: "/dashboard",
         element: <Dashboard />,
+      },
+      {
+        path: "/income/new",
+        element: <RegisterIncome />,
+      },
+      {
+        path: "/expense/new",
+        element: <RegisterExpense />,
       },
     ],
   },

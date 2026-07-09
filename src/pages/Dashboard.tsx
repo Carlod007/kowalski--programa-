@@ -1,3 +1,4 @@
+// src/pages/Dashboard.tsx — reemplaza el archivo completo
 import { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -6,34 +7,13 @@ import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth } from "@/services/monthService";
 import { getMonthId } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
+import {
+  CATEGORY_ORDER,
+  CATEGORY_META,
+  getCategoryStatus,
+} from "@/utils/category";
 import type { Month } from "@/types/month";
 import type { Category } from "@/types/transaction";
-
-const CATEGORY_ORDER: Category[] = ["necesidad", "ocio", "ahorro"];
-
-const CATEGORY_META: Record<
-  Category,
-  { label: string; bar: string; text: string; bg: string }
-> = {
-  necesidad: {
-    label: "Necesidad",
-    bar: "bg-amber-500",
-    text: "text-amber-700",
-    bg: "bg-amber-50",
-  },
-  ocio: {
-    label: "Ocio",
-    bar: "bg-blue-500",
-    text: "text-blue-700",
-    bg: "bg-blue-50",
-  },
-  ahorro: {
-    label: "Ahorro",
-    bar: "bg-teal-500",
-    text: "text-teal-700",
-    bg: "bg-teal-50",
-  },
-};
 
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user);
@@ -118,53 +98,46 @@ function CategoryCard({
   const meta = CATEGORY_META[category];
   const cap = month?.capsCents[category] ?? 0;
   const spent = month?.spentCents[category] ?? 0;
-  const disponible = cap - spent;
-
-  if (cap === 0) {
-    return (
-      <div className={`rounded-2xl border border-stone-200 ${meta.bg} p-4`}>
-        <p className={`text-sm font-medium ${meta.text}`}>{meta.label}</p>
-        <p className="mt-1 text-sm text-stone-500">
-          Aún sin ingresos registrados
-        </p>
-      </div>
-    );
-  }
-
-  const isLow = disponible <= cap * 0.15;
-  const overCap = spent > cap;
-  const barWidth = Math.min(100, Math.max(0, (spent / cap) * 100));
+  const status = getCategoryStatus(cap, spent);
 
   return (
     <div className={`rounded-2xl border border-stone-200 ${meta.bg} p-4`}>
       <div className="flex items-center justify-between">
         <p className={`text-sm font-medium ${meta.text}`}>{meta.label}</p>
-        {overCap && (
+        {status.overCap && (
           <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
             Excedido
           </span>
         )}
       </div>
 
-      <p
-        className={`mt-1 text-xl font-semibold ${isLow ? "text-red-600" : "text-stone-900"}`}
-      >
-        {formatCents(disponible)}
-        <span className="ml-1 text-sm font-normal text-stone-400">
-          disponible
-        </span>
-      </p>
+      {status.isEmpty ? (
+        <p className="mt-1 text-sm text-stone-500">
+          Aún sin ingresos registrados
+        </p>
+      ) : (
+        <>
+          <p
+            className={`mt-1 text-xl font-semibold ${status.isLow ? "text-red-600" : "text-stone-900"}`}
+          >
+            {formatCents(status.disponible)}
+            <span className="ml-1 text-sm font-normal text-stone-400">
+              disponible
+            </span>
+          </p>
 
-      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-stone-200">
-        <div
-          className={`h-full rounded-full ${overCap ? "bg-red-500" : meta.bar}`}
-          style={{ width: `${barWidth}%` }}
-        />
-      </div>
+          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-stone-200">
+            <div
+              className={`h-full rounded-full ${status.overCap ? "bg-red-500" : meta.bar}`}
+              style={{ width: `${status.barWidth}%` }}
+            />
+          </div>
 
-      <p className="mt-1 text-xs text-stone-400">
-        {formatCents(spent)} de {formatCents(cap)}
-      </p>
+          <p className="mt-1 text-xs text-stone-400">
+            {formatCents(spent)} de {formatCents(cap)}
+          </p>
+        </>
+      )}
     </div>
   );
 }
