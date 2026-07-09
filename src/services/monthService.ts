@@ -16,6 +16,7 @@ function buildEmptyMonth(distribution: Distribution): WithFieldValue<Month> {
     distribution,
     capsCents: { necesidad: 0, ocio: 0, ahorro: 0 },
     spentCents: { necesidad: 0, ocio: 0, ahorro: 0 },
+    incomeCount: 0,
     closed: false,
     createdAt: serverTimestamp(),
   };

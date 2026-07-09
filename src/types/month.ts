@@ -11,6 +11,7 @@ export type Month = {
   distribution: Distribution;
   capsCents: Distribution;
   spentCents: Distribution;
+  incomeCount: number;
   closed: boolean;
   remainder?: MonthRemainder;
   createdAt: Timestamp | null;
