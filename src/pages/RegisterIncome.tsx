@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useNavigate, Link } from "react-router-dom";
@@ -14,13 +14,15 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { getMonthId } from "@/utils/date";
+import { getMonthId, toDateInputValue, formatDateLabel } from "@/utils/date";
 import { calculateDistribution } from "@/utils/distribution";
+import { formatCents } from "@/utils/currency";
 import type { IncomeTransaction } from "@/types/transaction";
 import type { Month } from "@/types/month";
 
 const incomeSchema = z.object({
   source: z.string().min(1, "Selecciona una fuente"),
+  date: z.string().min(1, "Selecciona una fecha"),
   amount: z
     .string()
     .min(1, "Ingresa un monto")
@@ -38,16 +40,32 @@ export default function RegisterIncome() {
   const userProfile = useAuthStore((s) => s.userProfile);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const today = toDateInputValue();
+  const minDate = `${getMonthId()}-01`;
+
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeSchema),
-    defaultValues: { source: "", amount: "", description: "" },
+    defaultValues: { source: "", date: today, amount: "", description: "" },
   });
 
   const sources = userProfile?.sources ?? [];
+  const watchedDate = useWatch({ control, name: "date" });
+  const watchedAmount = useWatch({ control, name: "amount" });
+
+  const parsedAmount = parseFloat(watchedAmount);
+  const previewCents =
+    Number.isFinite(parsedAmount) && parsedAmount > 0
+      ? Math.round(parsedAmount * 100)
+      : 0;
+  const preview =
+    previewCents > 0 && userProfile
+      ? calculateDistribution(previewCents, userProfile.distribution)
+      : null;
 
   async function onSubmit(values: IncomeFormValues) {
     if (!user || !userProfile) return;
@@ -69,6 +87,7 @@ export default function RegisterIncome() {
     const tx: WithFieldValue<IncomeTransaction> = {
       type: "income",
       source: values.source,
+      transactionDate: values.date,
       amountCents,
       distribution,
       serverDate: serverTimestamp(),
@@ -126,6 +145,28 @@ export default function RegisterIncome() {
         className="mt-6 flex flex-col gap-5"
       >
         <div className="flex flex-col gap-1">
+          <label htmlFor="date" className="text-sm font-medium text-stone-700">
+            Fecha
+          </label>
+          <div className="relative">
+            <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
+              {formatDateLabel(watchedDate || today)}
+            </div>
+            <input
+              id="date"
+              type="date"
+              min={minDate}
+              max={today}
+              {...register("date")}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            />
+          </div>
+          {errors.date && (
+            <p className="text-xs text-red-600">{errors.date.message}</p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1">
           <label
             htmlFor="source"
             className="text-sm font-medium text-stone-700"
@@ -169,6 +210,19 @@ export default function RegisterIncome() {
             <p className="text-xs text-red-600">{errors.amount.message}</p>
           )}
         </div>
+
+        {preview && (
+          <div className="rounded-xl bg-sky-50 p-3">
+            <p className="text-sm font-medium text-teal-700">
+              Distribución inmediata
+            </p>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-teal-700">
+              <span>Necesidad +{formatCents(preview.necesidad)}</span>
+              <span>Ocio +{formatCents(preview.ocio)}</span>
+              <span>Ahorro +{formatCents(preview.ahorro)}</span>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <label

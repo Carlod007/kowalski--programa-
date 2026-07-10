@@ -1,3 +1,4 @@
+// src/pages/RegisterExpense.tsx — reemplaza el archivo completo
 import { useEffect, useState } from "react";
 import {
   collection,
@@ -9,15 +10,20 @@ import {
   type UpdateData,
   type WithFieldValue,
 } from "firebase/firestore";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth } from "@/services/monthService";
-import { getMonthId } from "@/utils/date";
-import { CATEGORY_ORDER, CATEGORY_META } from "@/utils/category";
+import { getMonthId, toDateInputValue, formatDateLabel } from "@/utils/date";
+import {
+  CATEGORY_ORDER,
+  CATEGORY_META,
+  getCategoryStatus,
+} from "@/utils/category";
+import { formatCents } from "@/utils/currency";
 import CategorySelectCard from "@/components/CategorySelectCard";
 import type { Month } from "@/types/month";
 import type { Category, ExpenseTransaction } from "@/types/transaction";
@@ -25,6 +31,7 @@ import type { Category, ExpenseTransaction } from "@/types/transaction";
 type Step = "category" | "detail";
 
 const detailSchema = z.object({
+  date: z.string().min(1, "Selecciona una fecha"),
   amount: z
     .string()
     .min(1, "Ingresa un monto")
@@ -68,6 +75,7 @@ export default function RegisterExpense() {
 
   function handleSelectCategory(cat: Category) {
     setCategory(cat);
+    setStep("detail");
   }
 
   if (loading) {
@@ -82,6 +90,8 @@ export default function RegisterExpense() {
     return (
       <ExpenseDetailStep
         category={category}
+        capCents={month?.capsCents[category] ?? 0}
+        spentCents={month?.spentCents[category] ?? 0}
         onBack={() => setStep("category")}
       />
     );
@@ -94,10 +104,10 @@ export default function RegisterExpense() {
       </Link>
 
       <h1 className="mt-4 text-2xl font-semibold text-stone-900">
-        ¿En qué categoría?
+        Nuevo egreso
       </h1>
       <p className="mt-1 text-sm text-stone-500">
-        El saldo negativo se muestra igual — no bloquea el registro.
+        ¿En qué categoría está este gasto?
       </p>
 
       <div className="mt-6 flex flex-col gap-3">
@@ -112,24 +122,19 @@ export default function RegisterExpense() {
           />
         ))}
       </div>
-
-      <button
-        type="button"
-        disabled={!category}
-        onClick={() => setStep("detail")}
-        className="mt-8 w-full rounded-xl bg-stone-900 py-3 font-medium text-white disabled:opacity-40"
-      >
-        Siguiente
-      </button>
     </div>
   );
 }
 
 function ExpenseDetailStep({
   category,
+  capCents,
+  spentCents,
   onBack,
 }: {
   category: Category;
+  capCents: number;
+  spentCents: number;
   onBack: () => void;
 }) {
   const navigate = useNavigate();
@@ -140,18 +145,24 @@ function ExpenseDetailStep({
   const [pickError, setPickError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const today = toDateInputValue();
+  const minDate = `${getMonthId()}-01`;
+
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<DetailFormValues>({
     resolver: zodResolver(detailSchema),
-    defaultValues: { amount: "", description: "" },
+    defaultValues: { date: today, amount: "", description: "" },
   });
 
+  const watchedDate = useWatch({ control, name: "date" });
   const subcategories = userProfile?.subcategories[category] ?? [];
   const paymentMethods = userProfile?.paymentMethods ?? [];
   const meta = CATEGORY_META[category];
+  const status = getCategoryStatus(capCents, spentCents);
 
   async function onSubmit(values: DetailFormValues) {
     if (!user) return;
@@ -178,6 +189,7 @@ function ExpenseDetailStep({
       subcategory,
       paymentMethod,
       amountCents,
+      transactionDate: values.date,
       serverDate: serverTimestamp(),
       localDate: new Date().toISOString(),
       ...(description ? { description } : {}),
@@ -203,9 +215,26 @@ function ExpenseDetailStep({
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <button type="button" onClick={onBack} className="text-sm text-stone-500">
-        ← Volver a categorías
-      </button>
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-sm text-stone-500"
+        >
+          ← Volver a categorías
+        </button>
+        {!status.isEmpty && (
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              status.isLow
+                ? "border-red-200 bg-red-50 text-red-600"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {formatCents(status.disponible)} disponible
+          </span>
+        )}
+      </div>
 
       <h1 className={`mt-4 text-2xl font-semibold ${meta.text}`}>
         {meta.label}
@@ -215,6 +244,28 @@ function ExpenseDetailStep({
         onSubmit={handleSubmit(onSubmit)}
         className="mt-6 flex flex-col gap-5"
       >
+        <div className="flex flex-col gap-1">
+          <label htmlFor="date" className="text-sm font-medium text-stone-700">
+            Fecha
+          </label>
+          <div className="relative">
+            <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
+              {formatDateLabel(watchedDate || today)}
+            </div>
+            <input
+              id="date"
+              type="date"
+              min={minDate}
+              max={today}
+              {...register("date")}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            />
+          </div>
+          {errors.date && (
+            <p className="text-xs text-red-600">{errors.date.message}</p>
+          )}
+        </div>
+
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-stone-700">Subcategoría</p>
           {subcategories.length === 0 ? (

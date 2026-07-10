@@ -12,6 +12,7 @@ export type TransactionBase = {
   type: "income" | "expense";
   serverDate: Timestamp | null;
   localDate: string;
+  transactionDate: string;
   description?: string;
   amountCents: number;
 };
