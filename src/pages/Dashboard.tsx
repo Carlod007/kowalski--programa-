@@ -1,7 +1,9 @@
+// src/pages/Dashboard.tsx — reemplaza el archivo completo
 import { useEffect, useState, type ComponentType } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { signOut } from "firebase/auth";
+import { auth, db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth } from "@/services/monthService";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
@@ -20,6 +22,7 @@ export default function Dashboard() {
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   // Corre una sola vez, sobre el mes real — nunca sobre el mes que se está navegando
   useEffect(() => {
@@ -34,6 +37,16 @@ export default function Dashboard() {
   const canGoForward = viewedMonthId < CURRENT_MONTH_ID;
   const isViewingCurrentMonth = viewedMonthId === CURRENT_MONTH_ID;
 
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("Error al cerrar sesión:", err);
+      setLoggingOut(false);
+    }
+  }
+
   return (
     <div className="min-h-dvh bg-stone-50 pb-24">
       <header className="flex items-center justify-between px-5 pt-8">
@@ -45,13 +58,24 @@ export default function Dashboard() {
             Resumen del mes
           </h1>
         </div>
-        <Link
-          to="/settings"
-          aria-label="Ajustes"
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 text-stone-500"
-        >
-          ⚙
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            aria-label="Cerrar sesión"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 text-stone-500 disabled:opacity-40"
+          >
+            ⏻
+          </button>
+          <Link
+            to="/settings"
+            aria-label="Ajustes"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 text-stone-500"
+          >
+            ⚙
+          </Link>
+        </div>
       </header>
 
       <MonthSummary

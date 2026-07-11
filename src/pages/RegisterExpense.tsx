@@ -144,6 +144,11 @@ function ExpenseDetailStep({
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showEmptyCapWarning, setShowEmptyCapWarning] = useState(false);
+  const [pendingValues, setPendingValues] = useState<DetailFormValues | null>(
+    null,
+  );
 
   const today = toDateInputValue();
   const minDate = `${getMonthId()}-01`;
@@ -164,14 +169,10 @@ function ExpenseDetailStep({
   const meta = CATEGORY_META[category];
   const status = getCategoryStatus(capCents, spentCents);
 
-  async function onSubmit(values: DetailFormValues) {
-    if (!user) return;
+  async function saveExpense(values: DetailFormValues) {
+    if (!user || !subcategory || !paymentMethod) return;
 
-    if (!subcategory || !paymentMethod) {
-      setPickError("Selecciona subcategoría y método de pago");
-      return;
-    }
-    setPickError(null);
+    setSaving(true);
     setSubmitError(null);
 
     const amountCents = Math.round(parseFloat(values.amount) * 100);
@@ -210,7 +211,36 @@ function ExpenseDetailStep({
       setSubmitError(
         "No se pudo guardar. Revisa tu conexión e intenta de nuevo.",
       );
+      setSaving(false);
     }
+  }
+
+  async function onSubmit(values: DetailFormValues) {
+    if (!subcategory || !paymentMethod) {
+      setPickError("Selecciona subcategoría y método de pago");
+      return;
+    }
+    setPickError(null);
+
+    if (status.isEmpty) {
+      setPendingValues(values);
+      setShowEmptyCapWarning(true);
+      return;
+    }
+
+    await saveExpense(values);
+  }
+
+  function handleConfirmEmptyCap() {
+    setShowEmptyCapWarning(false);
+    if (pendingValues) {
+      saveExpense(pendingValues);
+    }
+  }
+
+  function handleCancelEmptyCapWarning() {
+    setShowEmptyCapWarning(false);
+    setPendingValues(null);
   }
 
   return (
@@ -357,14 +387,40 @@ function ExpenseDetailStep({
         </div>
 
         {pickError && <p className="text-sm text-red-600">{pickError}</p>}
+
+        {showEmptyCapWarning && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+            <p className="text-sm text-amber-800">
+              Todavía no registraste ingresos este mes — este gasto va a
+              aparecer como deuda desde el inicio.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={handleCancelEmptyCapWarning}
+                className="flex-1 rounded-lg border border-amber-300 py-2 text-sm font-medium text-amber-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmEmptyCap}
+                className="flex-1 rounded-lg bg-amber-600 py-2 text-sm font-medium text-white"
+              >
+                Registrar igual
+              </button>
+            </div>
+          </div>
+        )}
+
         {submitError && <p className="text-sm text-red-600">{submitError}</p>}
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || saving}
           className="mt-2 rounded-xl bg-stone-900 py-3 font-medium text-white disabled:opacity-50"
         >
-          {isSubmitting ? "Guardando..." : "Guardar egreso"}
+          {isSubmitting || saving ? "Guardando..." : "Guardar egreso"}
         </button>
       </form>
     </div>
