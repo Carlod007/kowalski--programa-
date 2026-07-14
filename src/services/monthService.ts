@@ -7,7 +7,7 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { getMonthId } from "@/utils/date";
+import { getMonthId, shiftMonthId } from "@/utils/date";
 import { calculateDistribution } from "@/utils/distribution";
 import type { Month, MonthRemainder } from "@/types/month";
 import type { Distribution, IncomeTransaction } from "@/types/transaction";
@@ -211,24 +211,12 @@ export async function resolveMonthRemainder(
 export async function isRemainderPending(
   userId: string,
 ): Promise<{ pending: boolean; prevMonthId: string | null }> {
-  const userSnap = await getDoc(doc(db, "users", userId));
-  if (!userSnap.exists()) {
-    return { pending: false, prevMonthId: null };
-  }
-
-  const userProfile = userSnap.data() as User;
-  const lastClosed = userProfile.lastClosedMonth;
-  if (!lastClosed) {
-    return { pending: false, prevMonthId: null };
-  }
-
-  const monthSnap = await getDoc(doc(db, "users", userId, "months", lastClosed));
-  if (!monthSnap.exists()) {
-    return { pending: false, prevMonthId: null };
-  }
-
+  const prevMonthId = shiftMonthId(getMonthId(), -1);
+  const monthSnap = await getDoc(
+    doc(db, "users", userId, "months", prevMonthId),
+  );
+  if (!monthSnap.exists()) return { pending: false, prevMonthId: null };
   const month = monthSnap.data() as Month;
   const pending = month.closed && month.remainder === undefined;
-
-  return { pending, prevMonthId: pending ? lastClosed : null };
+  return { pending, prevMonthId: pending ? prevMonthId : null };
 }
