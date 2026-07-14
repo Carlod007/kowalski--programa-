@@ -2,7 +2,7 @@ import type { Timestamp } from "firebase/firestore";
 import type { Distribution } from "./transaction";
 
 export type MonthRemainder = {
-  destination: "ahorro" | "next_month";
+  destination: "ahorro" | "next_month" | "forgiven";
   amountCents: number;
 };
 

@@ -1,13 +1,16 @@
 import {
   doc,
+  getDoc,
+  increment,
   runTransaction,
   serverTimestamp,
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getMonthId } from "@/utils/date";
-import type { Month } from "@/types/month";
-import type { Distribution } from "@/types/transaction";
+import { calculateDistribution } from "@/utils/distribution";
+import type { Month, MonthRemainder } from "@/types/month";
+import type { Distribution, IncomeTransaction } from "@/types/transaction";
 import type { User } from "@/types/user";
 
 function buildEmptyMonth(distribution: Distribution): WithFieldValue<Month> {
@@ -47,11 +50,13 @@ export async function getOrCreateMonth(
   });
 }
 
-export async function checkAndCloseMonth(userId: string): Promise<void> {
+export async function checkAndCloseMonth(
+  userId: string,
+): Promise<{ prevMonthId: string | null }> {
   const currentMonthId = getMonthId();
   const userRef = doc(db, "users", userId);
 
-  await runTransaction(db, async (transaction) => {
+  const result = await runTransaction(db, async (transaction) => {
     const userSnap = await transaction.get(userRef);
     if (!userSnap.exists()) {
       throw new Error(`checkAndCloseMonth: perfil ${userId} no existe`);
@@ -59,7 +64,7 @@ export async function checkAndCloseMonth(userId: string): Promise<void> {
     const userProfile = userSnap.data() as User;
 
     if (userProfile.lastClosedMonth === currentMonthId) {
-      return;
+      return { prevMonthId: userProfile.lastClosedMonth };
     }
 
     const prevMonthId = userProfile.lastClosedMonth;
@@ -87,5 +92,153 @@ export async function checkAndCloseMonth(userId: string): Promise<void> {
     }
 
     transaction.update(userRef, { lastClosedMonth: currentMonthId });
+
+    return { prevMonthId };
   });
+
+  return result;
+}
+
+/**
+ * Resuelve el remanente del mes anterior.
+ *
+ * Invariante: la suma de capsCents del mes nuevo siempre es igual a
+ * totalIncomeCents (ahorro absorbe el residuo de redondeo).
+ */
+export async function resolveMonthRemainder(
+  userId: string,
+  prevMonthId: string,
+  newMonthId: string,
+  decision: {
+    remainderDestination?: "ahorro" | "next_month";
+    newDistribution?: Distribution;
+  },
+): Promise<void> {
+  const userRef = doc(db, "users", userId);
+  const prevMonthRef = doc(db, "users", userId, "months", prevMonthId);
+  const newMonthRef = doc(db, "users", userId, "months", newMonthId);
+
+  await runTransaction(db, async (transaction) => {
+    const [userSnap, prevMonthSnap, newMonthSnap] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(prevMonthRef),
+      transaction.get(newMonthRef),
+    ]);
+
+    if (!userSnap.exists()) {
+      throw new Error(`resolveMonthRemainder: perfil ${userId} no existe`);
+    }
+    if (!prevMonthSnap.exists()) {
+      throw new Error(
+        `resolveMonthRemainder: mes anterior ${prevMonthId} no existe`,
+      );
+    }
+    if (!newMonthSnap.exists()) {
+      throw new Error(
+        `resolveMonthRemainder: mes nuevo ${newMonthId} no existe`,
+      );
+    }
+
+    const prevMonth = prevMonthSnap.data() as Month;
+
+    // Guard de idempotencia: si ya se resolvió, salir
+    if (prevMonth.remainder !== undefined) return;
+
+    const newMonth = newMonthSnap.data() as Month;
+
+    // netCents = ingreso total - gasto total (cálculo neto entre categorías)
+    const totalSpent =
+      prevMonth.spentCents.necesidad +
+      prevMonth.spentCents.ocio +
+      prevMonth.spentCents.ahorro;
+    const netCents = prevMonth.totalIncomeCents - totalSpent;
+
+    const distributionFinal =
+      decision.newDistribution ?? newMonth.distribution;
+
+    // Double write atómico: distribución del perfil y del mes nuevo
+    if (decision.newDistribution) {
+      transaction.update(userRef, { distribution: decision.newDistribution });
+      transaction.update(newMonthRef, { distribution: decision.newDistribution });
+    }
+
+    let remainder: MonthRemainder;
+
+    if (netCents <= 0) {
+      remainder = {
+        destination: "forgiven",
+        amountCents: netCents,
+      };
+    } else if (!decision.remainderDestination) {
+      throw new Error(
+        `resolveMonthRemainder: netCents=${netCents} pero remainderDestination no definido`,
+      );
+    } else if (decision.remainderDestination === "ahorro") {
+      remainder = { destination: "ahorro", amountCents: netCents };
+      transaction.update(newMonthRef, {
+        "capsCents.ahorro": increment(netCents),
+      });
+    } else {
+      // next_month
+      remainder = { destination: "next_month", amountCents: netCents };
+
+      const split = calculateDistribution(netCents, distributionFinal);
+      const txId = crypto.randomUUID();
+      const txRef = doc(
+        db,
+        "users",
+        userId,
+        "months",
+        newMonthId,
+        "transactions",
+        txId,
+      );
+
+      const tx: WithFieldValue<IncomeTransaction> = {
+        type: "income",
+        source: "Remanente mes anterior",
+        transactionDate: `${newMonthId}-01`,
+        amountCents: netCents,
+        distribution: distributionFinal,
+        serverDate: serverTimestamp(),
+        localDate: new Date().toISOString(),
+      };
+      transaction.set(txRef, tx);
+
+      transaction.update(newMonthRef, {
+        totalIncomeCents: increment(netCents),
+        incomeCount: increment(1),
+        "capsCents.necesidad": increment(split.necesidad),
+        "capsCents.ocio": increment(split.ocio),
+        "capsCents.ahorro": increment(split.ahorro),
+      });
+    }
+
+    transaction.update(prevMonthRef, { remainder });
+  });
+}
+
+export async function isRemainderPending(
+  userId: string,
+): Promise<{ pending: boolean; prevMonthId: string | null }> {
+  const userSnap = await getDoc(doc(db, "users", userId));
+  if (!userSnap.exists()) {
+    return { pending: false, prevMonthId: null };
+  }
+
+  const userProfile = userSnap.data() as User;
+  const lastClosed = userProfile.lastClosedMonth;
+  if (!lastClosed) {
+    return { pending: false, prevMonthId: null };
+  }
+
+  const monthSnap = await getDoc(doc(db, "users", userId, "months", lastClosed));
+  if (!monthSnap.exists()) {
+    return { pending: false, prevMonthId: null };
+  }
+
+  const month = monthSnap.data() as Month;
+  const pending = month.closed && month.remainder === undefined;
+
+  return { pending, prevMonthId: pending ? lastClosed : null };
 }

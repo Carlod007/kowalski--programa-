@@ -1,4 +1,4 @@
-// src/pages/RegisterExpense.tsx — reemplaza el archivo completo
+// src/pages/RegisterExpense.tsx
 import { useEffect, useState } from "react";
 import {
   collection,
