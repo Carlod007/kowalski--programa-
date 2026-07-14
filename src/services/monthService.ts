@@ -99,12 +99,6 @@ export async function checkAndCloseMonth(
   return result;
 }
 
-/**
- * Resuelve el remanente del mes anterior.
- *
- * Invariante: la suma de capsCents del mes nuevo siempre es igual a
- * totalIncomeCents (ahorro absorbe el residuo de redondeo).
- */
 export async function resolveMonthRemainder(
   userId: string,
   prevMonthId: string,
@@ -141,12 +135,10 @@ export async function resolveMonthRemainder(
 
     const prevMonth = prevMonthSnap.data() as Month;
 
-    // Guard de idempotencia: si ya se resolvió, salir
     if (prevMonth.remainder !== undefined) return;
 
     const newMonth = newMonthSnap.data() as Month;
 
-    // netCents = ingreso total - gasto total (cálculo neto entre categorías)
     const totalSpent =
       prevMonth.spentCents.necesidad +
       prevMonth.spentCents.ocio +
@@ -156,7 +148,6 @@ export async function resolveMonthRemainder(
     const distributionFinal =
       decision.newDistribution ?? newMonth.distribution;
 
-    // Double write atómico: distribución del perfil y del mes nuevo
     if (decision.newDistribution) {
       transaction.update(userRef, { distribution: decision.newDistribution });
       transaction.update(newMonthRef, { distribution: decision.newDistribution });
@@ -179,7 +170,6 @@ export async function resolveMonthRemainder(
         "capsCents.ahorro": increment(netCents),
       });
     } else {
-      // next_month
       remainder = { destination: "next_month", amountCents: netCents };
 
       const split = calculateDistribution(netCents, distributionFinal);

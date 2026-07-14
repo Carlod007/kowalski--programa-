@@ -1,11 +1,11 @@
 // src/pages/Dashboard.tsx
 import { useEffect, useState, type ComponentType } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { checkAndCloseMonth } from "@/services/monthService";
+import { checkAndCloseMonth, isRemainderPending } from "@/services/monthService";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
@@ -16,23 +16,28 @@ import {
 import type { Month } from "@/types/month";
 import type { Category } from "@/types/transaction";
 
-const CURRENT_MONTH_ID = getMonthId(); // fijo: el mes real de hoy, no cambia al navegar
+const CURRENT_MONTH_ID = getMonthId();
 
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
+  const navigate = useNavigate();
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  // Corre una sola vez, sobre el mes real — nunca sobre el mes que se está navegando
   useEffect(() => {
     if (!user) return;
-    checkAndCloseMonth(user.uid).catch((err) => {
-      console.error("checkAndCloseMonth falló:", err);
-    });
-  }, [user]);
+    checkAndCloseMonth(user.uid)
+      .then(() => isRemainderPending(user.uid))
+      .then(({ pending }) => {
+        if (pending) navigate("/close-month", { replace: true });
+      })
+      .catch((err) => {
+        console.error("checkAndCloseMonth falló:", err);
+      });
+  }, [user, navigate]);
 
-  if (!user) return null; // ProtectedLayout ya garantiza esto, es solo para que TS no se queje abajo
+  if (!user) return null;
 
   const canGoForward = viewedMonthId < CURRENT_MONTH_ID;
   const isViewingCurrentMonth = viewedMonthId === CURRENT_MONTH_ID;
@@ -123,7 +128,7 @@ function MonthSummary({
   onNext: () => void;
 }) {
   const [month, setMonth] = useState<Month | null>(null);
-  const [loading, setLoading] = useState(true); // valor inicial — no se vuelve a forzar a mano
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const monthRef = doc(db, "users", userId, "months", monthId);

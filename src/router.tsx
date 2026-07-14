@@ -10,6 +10,7 @@ import Onboarding from "@/pages/Onboarding";
 import Dashboard from "@/pages/Dashboard";
 import RegisterIncome from "@/pages/RegisterIncome";
 import RegisterExpense from "@/pages/RegisterExpense";
+import CloseMonth from "@/pages/CloseMonth";
 
 function LoadingScreen() {
   return (
@@ -99,6 +100,10 @@ const router = createBrowserRouter([
       {
         path: "/expense/new",
         element: <RegisterExpense />,
+      },
+      {
+        path: "/close-month",
+        element: <CloseMonth />,
       },
     ],
   },
