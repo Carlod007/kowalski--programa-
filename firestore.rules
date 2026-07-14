@@ -12,7 +12,15 @@ service cloud.firestore {
       allow create: if request.auth != null && request.auth.uid == userId;
       allow update: if request.auth != null 
                     && request.auth.uid == userId 
-                    && !resource.data.closed;
+                    && (
+                      !resource.data.closed
+                      ||
+                      (
+                        resource.data.closed
+                        && resource.data.get('remainder', null) == null
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['remainder'])
+                      )
+                    );
       allow delete: if false;
     }
     match /users/{userId}/months/{monthId}/transactions/{txId} {
