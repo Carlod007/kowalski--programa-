@@ -11,6 +11,8 @@ import Dashboard from "@/pages/Dashboard";
 import RegisterIncome from "@/pages/RegisterIncome";
 import RegisterExpense from "@/pages/RegisterExpense";
 import CloseMonth from "@/pages/CloseMonth";
+import History from "@/pages/History";
+import EditTransaction from "@/pages/EditTransaction";
 
 function LoadingScreen() {
   return (
@@ -104,6 +106,14 @@ const router = createBrowserRouter([
       {
         path: "/close-month",
         element: <CloseMonth />,
+      },
+      {
+        path: "/history",
+        element: <History />,
+      },
+      {
+        path: "/history/edit/:monthId/:txId",
+        element: <EditTransaction />,
       },
     ],
   },
