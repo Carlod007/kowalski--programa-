@@ -14,6 +14,7 @@ import CloseMonth from "@/pages/CloseMonth";
 import History from "@/pages/History";
 import EditTransaction from "@/pages/EditTransaction";
 import ChartsScreen from "@/pages/ChartsScreen";
+import Settings from "@/pages/Settings";
 
 function LoadingScreen() {
   return (
@@ -119,6 +120,10 @@ const router = createBrowserRouter([
       {
         path: "/charts",
         element: <ChartsScreen />,
+      },
+      {
+        path: "/settings",
+        element: <Settings />,
       },
     ],
   },

@@ -2,8 +2,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
-import { signOut } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth, isRemainderPending } from "@/services/monthService";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
@@ -24,7 +23,6 @@ export default function Dashboard() {
   const userProfile = useAuthStore((s) => s.userProfile);
   const navigate = useNavigate();
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
-  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -43,16 +41,6 @@ export default function Dashboard() {
   const canGoForward = viewedMonthId < CURRENT_MONTH_ID;
   const isViewingCurrentMonth = viewedMonthId === CURRENT_MONTH_ID;
 
-  async function handleLogout() {
-    setLoggingOut(true);
-    try {
-      await signOut(auth);
-    } catch (err) {
-      console.error("Error al cerrar sesión:", err);
-      setLoggingOut(false);
-    }
-  }
-
   return (
     <div className="min-h-dvh bg-stone-50 pb-24">
       <header className="flex items-center justify-between px-5 pt-8">
@@ -64,16 +52,7 @@ export default function Dashboard() {
             Resumen del mes
           </h1>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={loggingOut}
-            aria-label="Cerrar sesión"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 text-stone-500 disabled:opacity-40"
-          >
-            ⏻
-          </button>
+        <div>
           <Link
             to="/settings"
             aria-label="Ajustes"
