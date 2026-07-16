@@ -1,6 +1,8 @@
-import { collection, query, where, onSnapshot, type Unsubscribe } from "firebase/firestore";
+import { collection, doc, getDoc, query, where, onSnapshot, type Unsubscribe } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { shiftMonthId } from "@/utils/date";
 import { CATEGORY_ORDER, CATEGORY_META } from "@/utils/category";
+import type { Month } from "@/types/month";
 import type { Category, Distribution, ExpenseTransaction } from "@/types/transaction";
 
 const CHART_COLORS: Record<Category, string> = {
@@ -74,4 +76,38 @@ export function computeTopPaymentMethods(
     .map(([paymentMethod, totalCents]) => ({ paymentMethod, totalCents }))
     .sort((a, b) => b.totalCents - a.totalCents)
     .slice(0, limit);
+}
+
+export type TrailingMonth = {
+  monthId: string;
+  totalIncomeCents: number;
+  expenseCents: number;
+};
+
+export async function getTrailingMonths(
+  userId: string,
+  endMonthId: string,
+  maxCount: number,
+): Promise<TrailingMonth[]> {
+  const candidateIds: string[] = [];
+  for (let i = maxCount - 1; i >= 0; i--) {
+    candidateIds.push(shiftMonthId(endMonthId, -i));
+  }
+
+  const snaps = await Promise.all(
+    candidateIds.map((id) => getDoc(doc(db, "users", userId, "months", id))),
+  );
+
+  const result: TrailingMonth[] = [];
+  for (let i = 0; i < snaps.length; i++) {
+    const snap = snaps[i];
+    if (!snap.exists()) continue;
+    const month = snap.data() as Month;
+    result.push({
+      monthId: candidateIds[i],
+      totalIncomeCents: month.totalIncomeCents,
+      expenseCents: month.spentCents.necesidad + month.spentCents.ocio,
+    });
+  }
+  return result;
 }

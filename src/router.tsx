@@ -13,6 +13,7 @@ import RegisterExpense from "@/pages/RegisterExpense";
 import CloseMonth from "@/pages/CloseMonth";
 import History from "@/pages/History";
 import EditTransaction from "@/pages/EditTransaction";
+import ChartsScreen from "@/pages/ChartsScreen";
 
 function LoadingScreen() {
   return (
@@ -114,6 +115,10 @@ const router = createBrowserRouter([
       {
         path: "/history/edit/:monthId/:txId",
         element: <EditTransaction />,
+      },
+      {
+        path: "/charts",
+        element: <ChartsScreen />,
       },
     ],
   },

@@ -56,3 +56,9 @@ export function formatDateLabel(dateValue: string): string {
   const date = new Date(year, month - 1, day);
   return `${WEEKDAYS[date.getDay()]}, ${day} ${MONTHS[month - 1]} ${year}`;
 }
+
+export function formatMonthShortLabel(monthId: string): string {
+  const [year, month] = monthId.split("-").map(Number);
+  const date = new Date(year, month - 1, 1);
+  return date.toLocaleDateString("es-PE", { month: "short" }).replace(".", "");
+}
