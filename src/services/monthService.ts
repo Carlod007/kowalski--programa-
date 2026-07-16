@@ -220,3 +220,44 @@ export async function isRemainderPending(
   const pending = month.closed && month.remainder === undefined;
   return { pending, prevMonthId: pending ? prevMonthId : null };
 }
+
+export async function updateDistributionNow(
+  userId: string,
+  newDistribution: Distribution,
+): Promise<void> {
+  const sum = newDistribution.necesidad + newDistribution.ocio + newDistribution.ahorro;
+  if (sum !== 100) {
+    throw new Error(`updateDistributionNow: la distribución debe sumar 100, recibido ${sum}`);
+  }
+
+  const currentMonthId = getMonthId();
+  const userRef = doc(db, "users", userId);
+  const monthRef = doc(db, "users", userId, "months", currentMonthId);
+
+  await runTransaction(db, async (transaction) => {
+    const [userSnap, monthSnap] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(monthRef),
+    ]);
+
+    if (!userSnap.exists()) {
+      throw new Error(`updateDistributionNow: perfil ${userId} no existe`);
+    }
+    if (!monthSnap.exists()) {
+      throw new Error(`updateDistributionNow: mes actual ${currentMonthId} no existe`);
+    }
+
+    const month = monthSnap.data() as Month;
+    if (month.closed) {
+      throw new Error("updateDistributionNow: el mes actual ya está cerrado");
+    }
+
+    const newCaps = calculateDistribution(month.totalIncomeCents, newDistribution);
+
+    transaction.update(userRef, { distribution: newDistribution });
+    transaction.update(monthRef, {
+      distribution: newDistribution,
+      capsCents: newCaps,
+    });
+  });
+}
