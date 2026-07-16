@@ -1,4 +1,3 @@
-// src/pages/onboarding/Step3Subcategories.tsx
 import { useState } from "react";
 import type { Category } from "@/types/transaction";
 
@@ -11,6 +10,12 @@ const CATEGORY_LABELS: Record<Category, string> = {
   necesidad: "Necesidad",
   ocio: "Ocio",
   ahorro: "Ahorro",
+};
+
+const CATEGORY_EXAMPLES: Record<Category, string> = {
+  necesidad: "Ejemplos: Alquiler, Comida, Transporte",
+  ocio: "Ejemplos: Salidas, Streaming, Hobbies",
+  ahorro: "Ejemplos: Fondo de emergencia, Inversiones",
 };
 
 export default function Step3Subcategories({ data, onChange }: Props) {
@@ -48,6 +53,9 @@ export default function Step3Subcategories({ data, onChange }: Props) {
       {(["necesidad", "ocio", "ahorro"] as Category[]).map((category) => (
         <div key={category} className="flex flex-col gap-2">
           <p className="text-sm font-medium">{CATEGORY_LABELS[category]}</p>
+          <p className="text-xs text-gray-400 italic">
+            {CATEGORY_EXAMPLES[category]}
+          </p>
 
           {data[category].map((sub) => (
             <div

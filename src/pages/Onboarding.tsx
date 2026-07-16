@@ -16,25 +16,14 @@ type OnboardingData = {
 };
 
 const DEFAULT_DATA: OnboardingData = {
-  sources: [
-    { id: "1", name: "Planilla" },
-    { id: "2", name: "Tomodachi" },
-    { id: "3", name: "Lesion Out" },
-    { id: "4", name: "Luis Santana" },
-  ],
-  distribution: { necesidad: 70, ocio: 10, ahorro: 20 },
+  sources: [],
+  distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
   subcategories: {
-    necesidad: ["Agua", "Luz", "Gas", "Internet", "Clínica"],
-    ocio: ["Transporte", "Comida", "Entretenimiento"],
-    ahorro: ["BCP", "Inversión BE", "Inversión BP", "Comodities"],
+    necesidad: [],
+    ocio: [],
+    ahorro: [],
   },
-  paymentMethods: [
-    { id: "1", name: "BCP", type: "digital" },
-    { id: "2", name: "Scotiabank", type: "digital" },
-    { id: "3", name: "BBVA", type: "digital" },
-    { id: "4", name: "Interbank", type: "digital" },
-    { id: "5", name: "Efectivo", type: "cash" },
-  ],
+  paymentMethods: [],
 };
 
 export default function Onboarding() {

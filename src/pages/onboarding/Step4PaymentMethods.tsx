@@ -32,6 +32,9 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
       <p className="text-xs text-gray-500">
         ¿Con qué pagas? Tarjetas, apps o efectivo.
       </p>
+      <p className="text-xs text-gray-400 italic">
+        Ejemplos: Efectivo, Yape, Tarjeta BCP
+      </p>
 
       {data.map((method) => (
         <div key={method.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-3">

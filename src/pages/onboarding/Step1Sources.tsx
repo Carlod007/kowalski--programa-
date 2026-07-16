@@ -1,4 +1,3 @@
-// src/pages/onboarding/Step1Sources.tsx
 import { useState } from "react";
 import type { Source } from "@/types/user";
 
@@ -29,6 +28,9 @@ export default function Step1Sources({ data, onChange }: Props) {
       <h2 className="text-lg font-medium">Fuentes de ingreso</h2>
       <p className="text-xs text-gray-500">
         Agrega tus fuentes. Podrás editarlas después
+      </p>
+      <p className="text-xs text-gray-400 italic">
+        Ejemplos: Sueldo, Freelance, Renta
       </p>
 
       {/* Lista de fuentes */}
