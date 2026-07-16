@@ -24,6 +24,8 @@ export default function Step3Subcategories({ data, onChange }: Props) {
     ocio: "",
     ahorro: "",
   });
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
 
   function addSubcategory(category: Category) {
     const value = inputs[category].trim();
@@ -42,6 +44,25 @@ export default function Step3Subcategories({ data, onChange }: Props) {
     });
   }
 
+  function startEdit(category: Category, sub: string) {
+    setEditingKey(`${category}::${sub}`);
+    setEditValue(sub);
+  }
+
+  function saveEdit(category: Category, original: string) {
+    const trimmed = editValue.trim();
+    if (trimmed === "") return;
+    onChange({
+      ...data,
+      [category]: data[category].map((s) => (s === original ? trimmed : s)),
+    });
+    setEditingKey(null);
+  }
+
+  function cancelEdit() {
+    setEditingKey(null);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <h2 className="text-lg font-medium">Subcategorías</h2>
@@ -57,20 +78,45 @@ export default function Step3Subcategories({ data, onChange }: Props) {
             {CATEGORY_EXAMPLES[category]}
           </p>
 
-          {data[category].map((sub) => (
-            <div
-              key={sub}
-              className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2"
-            >
-              <span className="text-sm">{sub}</span>
-              <button
-                onClick={() => removeSubcategory(category, sub)}
-                className="text-xs text-red-400"
+          {data[category].map((sub) => {
+            const key = `${category}::${sub}`;
+            return (
+              <div
+                key={sub}
+                className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2"
               >
-                Eliminar
-              </button>
-            </div>
-          ))}
+                {editingKey === key ? (
+                  <div className="flex flex-1 items-center gap-2">
+                    <input
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && saveEdit(category, sub)}
+                      autoFocus
+                      className="flex-1 rounded-lg border border-gray-300 px-2 py-1 text-sm outline-none"
+                    />
+                    <button onClick={() => saveEdit(category, sub)} className="text-xs font-medium text-teal-600">
+                      Guardar
+                    </button>
+                    <button onClick={cancelEdit} className="text-xs text-gray-400">
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <span className="text-sm">{sub}</span>
+                    <div className="flex gap-3">
+                      <button onClick={() => startEdit(category, sub)} className="text-xs text-teal-600">
+                        Editar
+                      </button>
+                      <button onClick={() => removeSubcategory(category, sub)} className="text-xs text-red-400">
+                        Eliminar
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
 
           <div className="flex gap-2">
             <input

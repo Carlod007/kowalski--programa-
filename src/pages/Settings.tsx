@@ -4,9 +4,13 @@ import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { updateUserProfile } from "@/services/userService";
+import Step1Sources from "@/pages/onboarding/Step1Sources";
 import Step2Distribution from "@/pages/onboarding/Step2Distribution";
+import Step3Subcategories from "@/pages/onboarding/Step3Subcategories";
+import Step4PaymentMethods from "@/pages/onboarding/Step4PaymentMethods";
 import { updateDistributionNow } from "@/services/monthService";
-import type { Distribution } from "@/types/transaction";
+import type { Source, PaymentMethod } from "@/types/user";
+import type { Distribution, Category } from "@/types/transaction";
 
 function ProfileSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
@@ -143,50 +147,267 @@ function DistributionSection() {
   const { necesidad, ocio, ahorro } = currentProfile.distribution;
 
   return (
-    <section className="mx-5 mt-6">
-      <h2 className="text-xs font-medium uppercase tracking-wide text-stone-400">
-        Finanzas
-      </h2>
-      <div className="mt-2 rounded-2xl border border-stone-200 bg-white">
-        {!expanded ? (
-          <button
-            type="button"
-            onClick={handleExpand}
-            className="flex w-full items-center justify-between px-4 py-3"
-          >
-            <span className="text-sm text-stone-900">Distribución</span>
-            <span className="text-sm text-stone-400">
-              {necesidad}/{ocio}/{ahorro}
-            </span>
-          </button>
-        ) : (
-          <div className="p-4">
-            <Step2Distribution data={draft!} onChange={setDraft} />
-            {error && (
-              <p className="mt-2 text-sm text-red-500">{error}</p>
-            )}
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={handleCancel}
-                disabled={saving}
-                className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {saving ? "Guardando..." : "Guardar cambios"}
-              </button>
-            </div>
+    <div>
+      {!expanded ? (
+        <button
+          type="button"
+          onClick={handleExpand}
+          className="flex w-full items-center justify-between px-4 py-3"
+        >
+          <span className="text-sm text-stone-900">Distribución</span>
+          <span className="text-sm text-stone-400">
+            {necesidad}/{ocio}/{ahorro}
+          </span>
+        </button>
+      ) : (
+        <div className="p-4">
+          <Step2Distribution data={draft!} onChange={setDraft} />
+          {error && (
+            <p className="mt-2 text-sm text-red-500">{error}</p>
+          )}
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={saving}
+              className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
           </div>
-        )}
-      </div>
-    </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SourcesSection() {
+  const { user, userProfile, setUserProfile } = useAuthStore();
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<Source[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!user || !userProfile) return null;
+  const currentUser = user;
+  const currentProfile = userProfile;
+
+  function handleExpand() {
+    setDraft(currentProfile.sources);
+    setExpanded(true);
+  }
+  function handleCancel() {
+    setDraft(null);
+    setExpanded(false);
+  }
+  async function handleSave() {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      await updateUserProfile(currentUser.uid, { sources: draft });
+      setUserProfile({ ...currentProfile, sources: draft });
+      setDraft(null);
+      setExpanded(false);
+    } catch (err) {
+      console.error("Error al actualizar fuentes:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      {!expanded ? (
+        <button
+          type="button"
+          onClick={handleExpand}
+          className="flex w-full items-center justify-between px-4 py-3"
+        >
+          <span className="text-sm text-stone-900">Fuentes de ingreso</span>
+          <span className="text-sm text-stone-400">
+            {currentProfile.sources.length}
+          </span>
+        </button>
+      ) : (
+        <div className="p-4">
+          <Step1Sources data={draft!} onChange={setDraft} />
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={saving}
+              className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SubcategoriesSection() {
+  const { user, userProfile, setUserProfile } = useAuthStore();
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<Record<Category, string[]> | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!user || !userProfile) return null;
+  const currentUser = user;
+  const currentProfile = userProfile;
+
+  const totalCount =
+    currentProfile.subcategories.necesidad.length +
+    currentProfile.subcategories.ocio.length +
+    currentProfile.subcategories.ahorro.length;
+
+  function handleExpand() {
+    setDraft(currentProfile.subcategories);
+    setExpanded(true);
+  }
+  function handleCancel() {
+    setDraft(null);
+    setExpanded(false);
+  }
+  async function handleSave() {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      await updateUserProfile(currentUser.uid, { subcategories: draft });
+      setUserProfile({ ...currentProfile, subcategories: draft });
+      setDraft(null);
+      setExpanded(false);
+    } catch (err) {
+      console.error("Error al actualizar subcategorías:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      {!expanded ? (
+        <button
+          type="button"
+          onClick={handleExpand}
+          className="flex w-full items-center justify-between px-4 py-3"
+        >
+          <span className="text-sm text-stone-900">Subcategorías</span>
+          <span className="text-sm text-stone-400">{totalCount}</span>
+        </button>
+      ) : (
+        <div className="p-4">
+          <Step3Subcategories data={draft!} onChange={setDraft} />
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={saving}
+              className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PaymentMethodsSection() {
+  const { user, userProfile, setUserProfile } = useAuthStore();
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<PaymentMethod[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!user || !userProfile) return null;
+  const currentUser = user;
+  const currentProfile = userProfile;
+
+  function handleExpand() {
+    setDraft(currentProfile.paymentMethods);
+    setExpanded(true);
+  }
+  function handleCancel() {
+    setDraft(null);
+    setExpanded(false);
+  }
+  async function handleSave() {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      await updateUserProfile(currentUser.uid, { paymentMethods: draft });
+      setUserProfile({ ...currentProfile, paymentMethods: draft });
+      setDraft(null);
+      setExpanded(false);
+    } catch (err) {
+      console.error("Error al actualizar métodos de pago:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      {!expanded ? (
+        <button
+          type="button"
+          onClick={handleExpand}
+          className="flex w-full items-center justify-between px-4 py-3"
+        >
+          <span className="text-sm text-stone-900">Métodos de pago</span>
+          <span className="text-sm text-stone-400">
+            {currentProfile.paymentMethods.length}
+          </span>
+        </button>
+      ) : (
+        <div className="p-4">
+          <Step4PaymentMethods data={draft!} onChange={setDraft} />
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={saving}
+              className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -214,7 +435,17 @@ export default function Settings() {
 
       <ProfileSection />
 
-      <DistributionSection />
+      <section className="mx-5 mt-6">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-stone-400">
+          Finanzas
+        </h2>
+        <div className="mt-2 divide-y divide-stone-200 rounded-2xl border border-stone-200 bg-white overflow-hidden">
+          <DistributionSection />
+          <SourcesSection />
+          <SubcategoriesSection />
+          <PaymentMethodsSection />
+        </div>
+      </section>
 
       <div className="mt-8 px-5">
         <button
