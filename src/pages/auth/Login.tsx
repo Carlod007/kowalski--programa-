@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { createUserProfile } from "@/services/userService";
@@ -28,6 +29,8 @@ type RegisterForm = z.infer<typeof registerSchema>;
 export default function Login() {
   const [tab, setTab] = useState<"login" | "register">("login");
   const [error, setError] = useState<string | null>(null);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const { setUserProfile } = useAuthStore();
 
   const loginForm = useForm<LoginForm>({
@@ -62,6 +65,21 @@ export default function Login() {
       setUserProfile(profile);
     } catch {
       setError("Error al crear la cuenta. Intenta con otro email");
+    }
+  }
+
+  async function handleForgotPassword() {
+    const email = loginForm.getValues("email");
+    if (!email || !z.string().email().safeParse(email).success) {
+      setResetError("Escribe tu email arriba primero");
+      return;
+    }
+    setResetError(null);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setResetSent(true);
+    } catch {
+      setResetError("No se pudo enviar el correo. Verifica el email");
     }
   }
 
@@ -141,6 +159,24 @@ export default function Login() {
                 <p className="mt-1 text-xs text-red-500">
                   {loginForm.formState.errors.password.message}
                 </p>
+              )}
+            </div>
+            <div className="text-right">
+              {resetSent ? (
+                <p className="text-xs text-teal-600">
+                  Revisa tu correo para restablecer tu contraseña
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="text-xs text-gray-500 underline"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              )}
+              {resetError && (
+                <p className="mt-1 text-xs text-red-500">{resetError}</p>
               )}
             </div>
             <button
