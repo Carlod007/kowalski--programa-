@@ -19,6 +19,7 @@ import { calculateDistribution } from "@/utils/distribution";
 import { formatCents } from "@/utils/currency";
 import type { IncomeTransaction } from "@/types/transaction";
 import type { Month } from "@/types/month";
+import { ArrowLeftIcon } from "@/components/BackButton";
 
 const incomeSchema = z.object({
   source: z.string().min(1, "Selecciona una fuente"),
@@ -132,8 +133,12 @@ export default function RegisterIncome() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <Link to="/dashboard" className="text-sm text-stone-500">
-        ← Cancelar
+      <Link
+        to="/dashboard"
+        className="flex items-center gap-1 text-sm text-stone-500"
+      >
+        <ArrowLeftIcon className="h-4 w-4" />
+        Cancelar
       </Link>
 
       <h1 className="mt-4 text-2xl font-semibold text-stone-900">

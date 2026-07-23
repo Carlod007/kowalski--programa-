@@ -27,6 +27,7 @@ import { formatCents } from "@/utils/currency";
 import CategorySelectCard from "@/components/CategorySelectCard";
 import type { Month } from "@/types/month";
 import type { Category, ExpenseTransaction } from "@/types/transaction";
+import { ArrowLeftIcon } from "@/components/BackButton";
 
 type Step = "category" | "detail";
 
@@ -99,8 +100,12 @@ export default function RegisterExpense() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <Link to="/dashboard" className="text-sm text-stone-500">
-        ← Cancelar
+      <Link
+        to="/dashboard"
+        className="flex items-center gap-1 text-sm text-stone-500"
+      >
+        <ArrowLeftIcon className="h-4 w-4" />
+        Cancelar
       </Link>
 
       <h1 className="mt-4 text-2xl font-semibold text-stone-900">
@@ -249,9 +254,10 @@ function ExpenseDetailStep({
         <button
           type="button"
           onClick={onBack}
-          className="text-sm text-stone-500"
+          className="flex items-center gap-1 text-sm text-stone-500"
         >
-          ← Volver a categorías
+          <ArrowLeftIcon className="h-4 w-4" />
+          Volver a categorías
         </button>
         {!status.isEmpty && (
           <span

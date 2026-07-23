@@ -3,22 +3,17 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import {
-  updateExpense,
-  updateIncome,
-} from "@/services/transactionService";
+import { updateExpense, updateIncome } from "@/services/transactionService";
 import { formatDateLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
-import {
-  CATEGORY_META,
-  getCategoryStatus,
-} from "@/utils/category";
+import { CATEGORY_META, getCategoryStatus } from "@/utils/category";
 import { calculateDistribution } from "@/utils/distribution";
 import type { Month } from "@/types/month";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
 } from "@/types/transaction";
+import { ArrowLeftIcon } from "@/components/BackButton";
 
 type Tx = ExpenseTransaction | IncomeTransaction;
 
@@ -208,8 +203,12 @@ export default function EditTransaction() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <Link to="/history" className="text-sm text-stone-500">
-        ← Cancelar
+      <Link
+        to="/history"
+        className="flex items-center gap-1 text-sm text-stone-500"
+      >
+        <ArrowLeftIcon className="h-4 w-4" />
+        Cancelar
       </Link>
 
       <h1 className="mt-4 text-2xl font-semibold text-stone-900">
@@ -236,7 +235,11 @@ export default function EditTransaction() {
               category={(tx as ExpenseTransaction).category}
               selected={subcategory}
               onSelect={setSubcategory}
-              options={userProfile?.subcategories?.[(tx as ExpenseTransaction).category] ?? []}
+              options={
+                userProfile?.subcategories?.[
+                  (tx as ExpenseTransaction).category
+                ] ?? []
+              }
             />
             <PaymentMethodChips
               selected={paymentMethod}

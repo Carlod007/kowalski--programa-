@@ -14,6 +14,7 @@ import SelectionCard from "@/components/SelectionCard";
 import Step2Distribution from "@/pages/onboarding/Step2Distribution";
 import type { Month } from "@/types/month";
 import type { Distribution } from "@/types/transaction";
+import { ArrowLeftIcon } from "@/components/BackButton";
 
 export default function CloseMonth() {
   const navigate = useNavigate();
@@ -122,7 +123,8 @@ export default function CloseMonth() {
   const distributionValid =
     distribution.necesidad + distribution.ocio + distribution.ahorro === 100;
   const needsChoice = netCents > 0 && remainderChoice === null;
-  const isDisabled = saving || needsChoice || (editingDistribution && !distributionValid);
+  const isDisabled =
+    saving || needsChoice || (editingDistribution && !distributionValid);
 
   async function handleConfirm() {
     if (!user || !prevMonthId) return;
@@ -143,8 +145,12 @@ export default function CloseMonth() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <Link to="/dashboard" className="text-sm text-stone-500">
-        ← Más tarde
+      <Link
+        to="/dashboard"
+        className="flex items-center gap-1 text-sm text-stone-500"
+      >
+        <ArrowLeftIcon className="h-4 w-4" />
+        Más tarde
       </Link>
 
       <h1 className="mt-4 text-2xl font-semibold text-stone-900">
@@ -161,10 +167,7 @@ export default function CloseMonth() {
         </p>
 
         <div className="mt-3 flex flex-col gap-2">
-          <Row
-            label="Ingreso total"
-            value={prevMonth.totalIncomeCents}
-          />
+          <Row label="Ingreso total" value={prevMonth.totalIncomeCents} />
           <Row
             label="Necesidad gastado"
             value={prevMonth.spentCents.necesidad}
@@ -232,7 +235,10 @@ export default function CloseMonth() {
                 className={`h-2 w-2 rounded-full ${CATEGORY_META[cat].bar}`}
               />
               <span className="text-stone-600">
-                {editingDistribution ? distribution[cat] : newMonth.distribution[cat]}%
+                {editingDistribution
+                  ? distribution[cat]
+                  : newMonth.distribution[cat]}
+                %
               </span>
             </span>
           ))}
@@ -296,7 +302,9 @@ function Row({
   return (
     <div className="flex items-center justify-between">
       <span className="text-sm text-stone-600">{label}</span>
-      <span className={`text-sm font-medium ${valueClassName ?? "text-stone-900"}`}>
+      <span
+        className={`text-sm font-medium ${valueClassName ?? "text-stone-900"}`}
+      >
         {formatCents(value)}
       </span>
     </div>
