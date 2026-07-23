@@ -32,8 +32,8 @@ export default function CloseMonth() {
   >(null);
   const [editingDistribution, setEditingDistribution] = useState(false);
   const [distribution, setDistribution] = useState<Distribution>({
-    necesidad: 70,
-    ocio: 10,
+    necesidad: 50,
+    ocio: 30,
     ahorro: 20,
   });
 
