@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   collection,
   doc,
@@ -21,6 +21,7 @@ import { deleteTransaction } from "@/services/transactionService";
 import BottomNav from "@/components/BottomNav";
 import type { Month } from "@/types/month";
 import type { Category, Transaction } from "@/types/transaction";
+import BackButton from "@/components/BackButton";
 
 type Filter = "all" | "income" | Category;
 
@@ -154,9 +155,7 @@ export default function History() {
   return (
     <div className="min-h-dvh bg-stone-50 pb-24">
       <header className="flex items-center gap-3 px-5 pt-8">
-        <Link to="/dashboard" className="text-lg text-stone-500">
-          ←
-        </Link>
+        <BackButton to="/dashboard" />
         <h1 className="text-xl font-semibold text-stone-900">Historial</h1>
       </header>
 

@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
@@ -33,6 +32,7 @@ import type { Month } from "@/types/month";
 import type { ExpenseTransaction } from "@/types/transaction";
 import RankedBar from "@/components/RankedBar";
 import BottomNav from "@/components/BottomNav";
+import BackButton from "@/components/BackButton";
 
 const CURRENT_MONTH_ID = getMonthId();
 const TOP_LIMIT = 4;
@@ -49,9 +49,7 @@ export default function ChartsScreen() {
     <div className="min-h-dvh bg-stone-50 pb-24">
       <header className="flex items-center justify-between px-5 pt-8">
         <div className="flex items-center gap-3">
-          <Link to="/dashboard" className="text-lg text-stone-500">
-            ←
-          </Link>
+          <BackButton to="/dashboard" />
           <h1 className="text-xl font-semibold text-stone-900">Análisis</h1>
         </div>
         <div className="flex items-center gap-2">

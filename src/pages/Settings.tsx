@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -11,6 +10,7 @@ import Step4PaymentMethods from "@/pages/onboarding/Step4PaymentMethods";
 import { updateDistributionNow } from "@/services/monthService";
 import type { Source, PaymentMethod } from "@/types/user";
 import type { Distribution, Category } from "@/types/transaction";
+import BackButton from "@/components/BackButton";
 
 function ProfileSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
@@ -162,9 +162,7 @@ function DistributionSection() {
       ) : (
         <div className="p-4">
           <Step2Distribution data={draft!} onChange={setDraft} />
-          {error && (
-            <p className="mt-2 text-sm text-red-500">{error}</p>
-          )}
+          {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
           <div className="mt-4 flex gap-2">
             <button
               type="button"
@@ -427,9 +425,7 @@ export default function Settings() {
   return (
     <div className="min-h-dvh bg-stone-50 pb-8">
       <header className="flex items-center gap-3 px-5 pt-8">
-        <Link to="/dashboard" className="text-lg text-stone-500">
-          ←
-        </Link>
+        <BackButton to="/dashboard" />
         <h1 className="text-xl font-semibold text-stone-900">Configuración</h1>
       </header>
 
