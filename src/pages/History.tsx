@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { collection, doc, onSnapshot, query, orderBy } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  orderBy,
+} from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import {
@@ -29,8 +35,18 @@ const FILTERS: { key: Filter; label: string }[] = [
 ];
 
 const SHORT_MONTHS = [
-  "Ene","Feb","Mar","Abr","May","Jun",
-  "Jul","Ago","Sep","Oct","Nov","Dic",
+  "Ene",
+  "Feb",
+  "Mar",
+  "Abr",
+  "May",
+  "Jun",
+  "Jul",
+  "Ago",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dic",
 ];
 
 const CURRENT_MONTH_ID = getMonthId();
@@ -56,7 +72,14 @@ export default function History() {
 
     const monthRef = doc(db, "users", user.uid, "months", viewedMonthId);
     const txQuery = query(
-      collection(db, "users", user.uid, "months", viewedMonthId, "transactions"),
+      collection(
+        db,
+        "users",
+        user.uid,
+        "months",
+        viewedMonthId,
+        "transactions",
+      ),
       orderBy("transactionDate", "desc"),
       orderBy("serverDate", "desc"),
     );
@@ -95,7 +118,8 @@ export default function History() {
     }
     if (openMenuId) {
       document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [openMenuId]);
 
@@ -236,11 +260,12 @@ export default function History() {
                         setOpenMenuId(openMenuId === tx._id ? null : tx._id)
                       }
                       onEdit={() =>
-                        navigate(
-                          `/history/edit/${viewedMonthId}/${tx._id}`,
-                        )
+                        navigate(`/history/edit/${viewedMonthId}/${tx._id}`)
                       }
-                      onDelete={() => { setDeletingId(tx._id); setOpenMenuId(null); }}
+                      onDelete={() => {
+                        setDeletingId(tx._id);
+                        setOpenMenuId(null);
+                      }}
                       menuRef={menuRef}
                     />
                   );
@@ -276,15 +301,17 @@ function TransactionRow({
   const isIncome = tx.type === "income";
   const name = isIncome ? tx.source : tx.subcategory;
   const detail = isIncome
-    ? `Ingreso - ${tx.source}`
-    : `${CATEGORY_META[tx.category].label} - ${tx.subcategory}`;
+    ? tx.description
+    : tx.description
+      ? `${CATEGORY_META[tx.category].label} - ${tx.description}`
+      : CATEGORY_META[tx.category].label;
 
   return (
     <div className="relative rounded-2xl border border-stone-200 bg-white p-4">
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <p className="truncate text-sm font-medium text-stone-900">{name}</p>
-          <p className="mt-0.5 text-xs text-stone-400">{detail}</p>
+          {detail && <p className="mt-0.5 text-xs text-stone-400">{detail}</p>}
           {!isIncome && (
             <p className="mt-0.5 text-xs text-stone-400">{tx.paymentMethod}</p>
           )}
