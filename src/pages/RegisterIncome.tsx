@@ -42,7 +42,6 @@ export default function RegisterIncome() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const today = toDateInputValue();
-  const minDate = `${getMonthId()}-01`;
 
   const {
     register,
@@ -55,7 +54,6 @@ export default function RegisterIncome() {
   });
 
   const sources = userProfile?.sources ?? [];
-  const watchedDate = useWatch({ control, name: "date" });
   const watchedAmount = useWatch({ control, name: "amount" });
 
   const parsedAmount = parseFloat(watchedAmount);
@@ -150,22 +148,13 @@ export default function RegisterIncome() {
         className="mt-6 flex flex-col gap-5"
       >
         <div className="flex flex-col gap-1">
-          <label htmlFor="date" className="text-sm font-medium text-stone-700">
+          <label className="text-sm font-medium text-stone-700">
             Fecha
           </label>
-          <div className="relative">
-            <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
-              {formatDateLabel(watchedDate || today)}
-            </div>
-            <input
-              id="date"
-              type="date"
-              min={minDate}
-              max={today}
-              {...register("date")}
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            />
+          <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
+            {formatDateLabel(today)}
           </div>
+          <input type="hidden" value={today} {...register("date")} />
           {errors.date && (
             <p className="text-xs text-red-600">{errors.date.message}</p>
           )}

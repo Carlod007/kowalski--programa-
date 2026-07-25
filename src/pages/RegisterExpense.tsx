@@ -10,7 +10,7 @@ import {
   type UpdateData,
   type WithFieldValue,
 } from "firebase/firestore";
-import { useForm, useWatch } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, useNavigate } from "react-router-dom";
@@ -156,19 +156,16 @@ function ExpenseDetailStep({
   );
 
   const today = toDateInputValue();
-  const minDate = `${getMonthId()}-01`;
 
   const {
     register,
     handleSubmit,
-    control,
     formState: { errors, isSubmitting },
   } = useForm<DetailFormValues>({
     resolver: zodResolver(detailSchema),
     defaultValues: { date: today, amount: "", description: "" },
   });
 
-  const watchedDate = useWatch({ control, name: "date" });
   const subcategories = userProfile?.subcategories[category] ?? [];
   const paymentMethods = userProfile?.paymentMethods ?? [];
   const meta = CATEGORY_META[category];
@@ -281,22 +278,11 @@ function ExpenseDetailStep({
         className="mt-6 flex flex-col gap-5"
       >
         <div className="flex flex-col gap-1">
-          <label htmlFor="date" className="text-sm font-medium text-stone-700">
-            Fecha
-          </label>
-          <div className="relative">
-            <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
-              {formatDateLabel(watchedDate || today)}
-            </div>
-            <input
-              id="date"
-              type="date"
-              min={minDate}
-              max={today}
-              {...register("date")}
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            />
+          <label className="text-sm font-medium text-stone-700">Fecha</label>
+          <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
+            {formatDateLabel(today)}
           </div>
+          <input type="hidden" value={today} {...register("date")} />
           {errors.date && (
             <p className="text-xs text-red-600">{errors.date.message}</p>
           )}
