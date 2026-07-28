@@ -1,12 +1,16 @@
 import {
+  collection,
   deleteField,
   doc,
   increment,
   runTransaction,
+  serverTimestamp,
+  type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { calculateDistribution } from "@/utils/distribution";
 import type { Month } from "@/types/month";
+import type { SavingsGoal, User } from "@/types/user";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
@@ -50,9 +54,15 @@ export async function deleteTransaction(
 
     if (tx.type === "expense") {
       const expense = tx as ExpenseTransaction;
-      transaction.update(monthRef, {
-        [`spentCents.${expense.category}`]: increment(-expense.amountCents),
-      });
+      if (expense.category === "ahorro") {
+        transaction.update(userRef, {
+          savingsTotalCents: increment(expense.amountCents),
+        });
+      } else {
+        transaction.update(monthRef, {
+          [`spentCents.${expense.category}`]: increment(-expense.amountCents),
+        });
+      }
     } else {
       const income = tx as IncomeTransaction;
       transaction.update(monthRef, {
@@ -82,6 +92,7 @@ export async function updateExpense(
     description?: string;
   },
 ): Promise<void> {
+  const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
   const txRef = doc(
     db,
@@ -112,9 +123,15 @@ export async function updateExpense(
     const tx = txSnap.data() as ExpenseTransaction;
     const delta = newValues.amountCents - tx.amountCents;
 
-    transaction.update(monthRef, {
-      [`spentCents.${tx.category}`]: increment(delta),
-    });
+    if (tx.category === "ahorro") {
+      transaction.update(userRef, {
+        savingsTotalCents: increment(-delta),
+      });
+    } else {
+      transaction.update(monthRef, {
+        [`spentCents.${tx.category}`]: increment(delta),
+      });
+    }
 
     transaction.update(txRef, {
       amountCents: newValues.amountCents,
@@ -193,6 +210,67 @@ export async function updateIncome(
       description: newValues.description
         ? newValues.description
         : deleteField(),
+    });
+  });
+}
+
+/**
+ * Compra de una Meta de Ahorro. Crea una transacción de tipo Egreso con
+ * category "ahorro" (visible en Historial como cualquier otro gasto) y
+ * descuenta el costo fijo de la meta del acumulado del usuario.
+ */
+export async function purchaseGoalExpense(
+  userId: string,
+  monthId: string,
+  input: {
+    goal: SavingsGoal;
+    paymentMethod: string;
+    description?: string;
+    date: string;
+  },
+): Promise<void> {
+  const userRef = doc(db, "users", userId);
+  const monthRef = doc(db, "users", userId, "months", monthId);
+  const txRef = doc(
+    collection(db, "users", userId, "months", monthId, "transactions"),
+  );
+
+  await runTransaction(db, async (transaction) => {
+    const [userSnap, monthSnap] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(monthRef),
+    ]);
+
+    if (!userSnap.exists()) {
+      throw new Error(`purchaseGoalExpense: perfil ${userId} no existe`);
+    }
+    if (!monthSnap.exists()) {
+      throw new Error(`purchaseGoalExpense: mes ${monthId} no existe`);
+    }
+    if (monthSnap.data().closed) {
+      throw new Error("No se puede modificar un mes cerrado");
+    }
+
+    const userProfile = userSnap.data() as User;
+    if (userProfile.savingsTotalCents < input.goal.targetCents) {
+      throw new Error("Fondos insuficientes para esta meta");
+    }
+
+    const tx: WithFieldValue<ExpenseTransaction> = {
+      type: "expense",
+      category: "ahorro",
+      subcategory: input.goal.name,
+      paymentMethod: input.paymentMethod,
+      amountCents: input.goal.targetCents,
+      transactionDate: input.date,
+      serverDate: serverTimestamp(),
+      localDate: new Date().toISOString(),
+      ...(input.description ? { description: input.description } : {}),
+    };
+    transaction.set(txRef, tx);
+
+    transaction.update(userRef, {
+      savingsTotalCents: increment(-input.goal.targetCents),
     });
   });
 }

@@ -1,5 +1,5 @@
 // src/pages/Dashboard.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -173,10 +173,11 @@ function MonthSummary({
             {CAP_CATEGORY_ORDER.map((cat) => (
               <CategoryRow key={cat} category={cat} month={month} />
             ))}
-            <SavingsRow
-              savingsTotalCents={savingsTotalCents}
-              contributedThisMonth={month.ahorroContributedCents}
-            />
+        <SavingsRow
+          savingsTotalCents={savingsTotalCents}
+          contributedThisMonth={month.ahorroContributedCents}
+          percentage={month.distribution.ahorro}
+        />
           </>
         )}
       </main>
@@ -243,30 +244,64 @@ function CategoryRow({
 function SavingsRow({
   savingsTotalCents,
   contributedThisMonth,
+  percentage,
 }: {
   savingsTotalCents: number;
   contributedThisMonth: number;
+  percentage: number;
 }) {
   const meta = CATEGORY_META.ahorro;
+  const [showInfo, setShowInfo] = useState(false);
+  const infoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) {
+        setShowInfo(false);
+      }
+    }
+    if (showInfo) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showInfo]);
 
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white p-4">
+    <div ref={infoRef} className="relative rounded-2xl border border-stone-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${meta.bar}`} />
           <p className="text-sm font-medium text-stone-900">{meta.label}</p>
         </div>
-        {contributedThisMonth > 0 && (
-          <p className="text-xs text-stone-400">
-            +{formatCents(contributedThisMonth)} este mes
-          </p>
-        )}
+        <p className="text-xs text-stone-400">
+          {percentage}% · {formatCents(contributedThisMonth)}
+        </p>
       </div>
 
       <p className="mt-3 text-2xl font-semibold text-teal-700">
-        {formatCents(savingsTotalCents)}
+        {formatCents(contributedThisMonth)}
       </p>
-      <p className="mt-1 text-xs text-stone-400">acumulado total</p>
+      <p className="mt-1 text-xs text-stone-400">este mes</p>
+
+      <div className="mt-3 flex items-center gap-1.5 border-t border-stone-100 pt-3">
+        <span className="text-xs text-stone-400">
+          Acumulado: {formatCents(savingsTotalCents)}
+        </span>
+        <button
+          type="button"
+          onClick={() => setShowInfo((v) => !v)}
+          aria-label="Qué es el acumulado"
+          className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-200 text-[10px] text-stone-500"
+        >
+          ?
+        </button>
+      </div>
+
+      {showInfo && (
+        <div className="absolute bottom-full left-4 mb-2 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
+          Tu Ahorro nunca se resetea - cada mes se suma más, y solo baja cuando comprás una meta.
+        </div>
+      )}
     </div>
   );
 }

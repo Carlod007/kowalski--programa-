@@ -131,10 +131,7 @@ function MonthAnalytics({
   }
 
   const breakdown = formatCategoryBreakdown(month.spentCents);
-  const totalSpent =
-    month.spentCents.necesidad +
-    month.spentCents.ocio +
-    month.spentCents.ahorro;
+  const totalSpent = month.spentCents.necesidad + month.spentCents.ocio;
   const topSubcategories = computeTopSubcategories(expenses, TOP_LIMIT);
   const topPaymentMethods = computeTopPaymentMethods(expenses, TOP_LIMIT);
   const maxSubcategoryCents = Math.max(

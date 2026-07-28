@@ -1,9 +1,9 @@
 import { collection, doc, getDoc, query, where, onSnapshot, type Unsubscribe } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { shiftMonthId } from "@/utils/date";
-import { CATEGORY_ORDER, CATEGORY_META } from "@/utils/category";
-import type { Month } from "@/types/month";
-import type { Category, Distribution, ExpenseTransaction } from "@/types/transaction";
+import { CAP_CATEGORY_ORDER, CATEGORY_META } from "@/utils/category";
+import type { Month, MonthCaps } from "@/types/month";
+import type { Category, ExpenseTransaction } from "@/types/transaction";
 
 const CHART_COLORS: Record<Category, string> = {
   necesidad: "#f59e0b",
@@ -11,13 +11,13 @@ const CHART_COLORS: Record<Category, string> = {
   ahorro: "#14b8a6",
 };
 
-export function formatCategoryBreakdown(spentCents: Distribution): {
+export function formatCategoryBreakdown(spentCents: MonthCaps): {
   category: Category;
   label: string;
   value: number;
   color: string;
 }[] {
-  return CATEGORY_ORDER.map((category) => ({
+  return CAP_CATEGORY_ORDER.map((category) => ({
     category,
     label: CATEGORY_META[category].label,
     value: spentCents[category],
