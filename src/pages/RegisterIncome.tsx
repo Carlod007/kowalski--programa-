@@ -101,9 +101,14 @@ export default function RegisterIncome() {
       incomeCount: increment(1),
       "capsCents.necesidad": increment(distribution.necesidad),
       "capsCents.ocio": increment(distribution.ocio),
-      "capsCents.ahorro": increment(distribution.ahorro),
+      ahorroContributedCents: increment(distribution.ahorro),
     };
     batch.update(monthRef, monthUpdate);
+
+    const userRef = doc(db, "users", user.uid);
+    batch.update(userRef, {
+      savingsTotalCents: increment(distribution.ahorro),
+    });
 
     try {
       await batch.commit();
@@ -148,9 +153,7 @@ export default function RegisterIncome() {
         className="mt-6 flex flex-col gap-5"
       >
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-stone-700">
-            Fecha
-          </label>
+          <label className="text-sm font-medium text-stone-700">Fecha</label>
           <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
             {formatDateLabel(today)}
           </div>

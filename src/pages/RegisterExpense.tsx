@@ -19,14 +19,15 @@ import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth } from "@/services/monthService";
 import { getMonthId, toDateInputValue, formatDateLabel } from "@/utils/date";
 import {
-  CATEGORY_ORDER,
+  CAP_CATEGORY_ORDER,
   CATEGORY_META,
   getCategoryStatus,
 } from "@/utils/category";
+import type { MonthCaps } from "@/types/month";
 import { formatCents } from "@/utils/currency";
 import CategorySelectCard from "@/components/CategorySelectCard";
 import type { Month } from "@/types/month";
-import type { Category, ExpenseTransaction } from "@/types/transaction";
+import type { ExpenseTransaction } from "@/types/transaction";
 import { ArrowLeftIcon } from "@/components/BackButton";
 
 type Step = "category" | "detail";
@@ -49,7 +50,7 @@ export default function RegisterExpense() {
   const [month, setMonth] = useState<Month | null>(null);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState<Step>("category");
-  const [category, setCategory] = useState<Category | null>(null);
+  const [category, setCategory] = useState<keyof MonthCaps | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -74,7 +75,7 @@ export default function RegisterExpense() {
     return () => unsubscribe();
   }, [user]);
 
-  function handleSelectCategory(cat: Category) {
+  function handleSelectCategory(cat: keyof MonthCaps) {
     setCategory(cat);
     setStep("detail");
   }
@@ -116,16 +117,20 @@ export default function RegisterExpense() {
       </p>
 
       <div className="mt-6 flex flex-col gap-3">
-        {CATEGORY_ORDER.map((cat) => (
-          <CategorySelectCard
-            key={cat}
-            category={cat}
-            capCents={month?.capsCents[cat] ?? 0}
-            spentCents={month?.spentCents[cat] ?? 0}
-            selected={category === cat}
-            onSelect={handleSelectCategory}
-          />
-        ))}
+    {CAP_CATEGORY_ORDER.map((cat) => (
+      <CategorySelectCard
+        key={cat}
+        category={cat}
+        capCents={month?.capsCents[cat] ?? 0}
+        spentCents={month?.spentCents[cat] ?? 0}
+        selected={category === cat}
+        onSelect={(selectedCat) => {
+          if (selectedCat === "necesidad" || selectedCat === "ocio") {
+            handleSelectCategory(selectedCat);
+          }
+        }}
+      />
+    ))}
       </div>
     </div>
   );
@@ -137,7 +142,7 @@ function ExpenseDetailStep({
   spentCents,
   onBack,
 }: {
-  category: Category;
+  category: keyof MonthCaps;
   capCents: number;
   spentCents: number;
   onBack: () => void;

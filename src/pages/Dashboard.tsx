@@ -1,19 +1,18 @@
 // src/pages/Dashboard.tsx
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { checkAndCloseMonth, isRemainderPending } from "@/services/monthService";
+import { checkAndCloseMonth } from "@/services/monthService";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
-  CATEGORY_ORDER,
+  CAP_CATEGORY_ORDER,
   CATEGORY_META,
   getCategoryStatus,
 } from "@/utils/category";
-import type { Month } from "@/types/month";
-import type { Category } from "@/types/transaction";
+import type { Month, MonthCaps } from "@/types/month";
 import BottomNav from "@/components/BottomNav";
 
 const CURRENT_MONTH_ID = getMonthId();
@@ -21,20 +20,14 @@ const CURRENT_MONTH_ID = getMonthId();
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
-  const navigate = useNavigate();
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
 
   useEffect(() => {
     if (!user) return;
-    checkAndCloseMonth(user.uid)
-      .then(() => isRemainderPending(user.uid))
-      .then(({ pending }) => {
-        if (pending) navigate("/close-month", { replace: true });
-      })
-      .catch((err) => {
-        console.error("checkAndCloseMonth falló:", err);
-      });
-  }, [user, navigate]);
+    checkAndCloseMonth(user.uid).catch((err) => {
+      console.error("checkAndCloseMonth falló:", err);
+    });
+  }, [user]);
 
   if (!user) return null;
 
@@ -68,6 +61,7 @@ export default function Dashboard() {
         userId={user.uid}
         monthId={viewedMonthId}
         canGoForward={canGoForward}
+        savingsTotalCents={userProfile?.savingsTotalCents ?? 0}
         onPrev={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
         onNext={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
       />
@@ -98,12 +92,14 @@ function MonthSummary({
   userId,
   monthId,
   canGoForward,
+  savingsTotalCents,
   onPrev,
   onNext,
 }: {
   userId: string;
   monthId: string;
   canGoForward: boolean;
+  savingsTotalCents: number;
   onPrev: () => void;
   onNext: () => void;
 }) {
@@ -173,9 +169,15 @@ function MonthSummary({
             Sin datos para este mes
           </p>
         ) : (
-          CATEGORY_ORDER.map((cat) => (
-            <CategoryRow key={cat} category={cat} month={month} />
-          ))
+          <>
+            {CAP_CATEGORY_ORDER.map((cat) => (
+              <CategoryRow key={cat} category={cat} month={month} />
+            ))}
+            <SavingsRow
+              savingsTotalCents={savingsTotalCents}
+              contributedThisMonth={month.ahorroContributedCents}
+            />
+          </>
         )}
       </main>
     </>
@@ -186,7 +188,7 @@ function CategoryRow({
   category,
   month,
 }: {
-  category: Category;
+  category: keyof MonthCaps;
   month: Month;
 }) {
   const meta = CATEGORY_META[category];
@@ -234,6 +236,37 @@ function CategoryRow({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function SavingsRow({
+  savingsTotalCents,
+  contributedThisMonth,
+}: {
+  savingsTotalCents: number;
+  contributedThisMonth: number;
+}) {
+  const meta = CATEGORY_META.ahorro;
+
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-white p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className={`h-2.5 w-2.5 rounded-full ${meta.bar}`} />
+          <p className="text-sm font-medium text-stone-900">{meta.label}</p>
+        </div>
+        {contributedThisMonth > 0 && (
+          <p className="text-xs text-stone-400">
+            +{formatCents(contributedThisMonth)} este mes
+          </p>
+        )}
+      </div>
+
+      <p className="mt-3 text-2xl font-semibold text-teal-700">
+        {formatCents(savingsTotalCents)}
+      </p>
+      <p className="mt-1 text-xs text-stone-400">acumulado total</p>
     </div>
   );
 }

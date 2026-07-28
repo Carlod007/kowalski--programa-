@@ -1,4 +1,9 @@
-import { deleteField, doc, increment, runTransaction } from "firebase/firestore";
+import {
+  deleteField,
+  doc,
+  increment,
+  runTransaction,
+} from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { calculateDistribution } from "@/utils/distribution";
 import type { Month } from "@/types/month";
@@ -13,8 +18,17 @@ export async function deleteTransaction(
   monthId: string,
   txId: string,
 ): Promise<void> {
+  const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
-  const txRef = doc(db, "users", userId, "months", monthId, "transactions", txId);
+  const txRef = doc(
+    db,
+    "users",
+    userId,
+    "months",
+    monthId,
+    "transactions",
+    txId,
+  );
 
   await runTransaction(db, async (transaction) => {
     const [monthSnap, txSnap] = await Promise.all([
@@ -46,7 +60,10 @@ export async function deleteTransaction(
         incomeCount: increment(-1),
         "capsCents.necesidad": increment(-income.distribution.necesidad),
         "capsCents.ocio": increment(-income.distribution.ocio),
-        "capsCents.ahorro": increment(-income.distribution.ahorro),
+        ahorroContributedCents: increment(-income.distribution.ahorro),
+      });
+      transaction.update(userRef, {
+        savingsTotalCents: increment(-income.distribution.ahorro),
       });
     }
 
@@ -66,7 +83,15 @@ export async function updateExpense(
   },
 ): Promise<void> {
   const monthRef = doc(db, "users", userId, "months", monthId);
-  const txRef = doc(db, "users", userId, "months", monthId, "transactions", txId);
+  const txRef = doc(
+    db,
+    "users",
+    userId,
+    "months",
+    monthId,
+    "transactions",
+    txId,
+  );
 
   await runTransaction(db, async (transaction) => {
     const [monthSnap, txSnap] = await Promise.all([
@@ -95,7 +120,9 @@ export async function updateExpense(
       amountCents: newValues.amountCents,
       subcategory: newValues.subcategory,
       paymentMethod: newValues.paymentMethod,
-      description: newValues.description ? newValues.description : deleteField(),
+      description: newValues.description
+        ? newValues.description
+        : deleteField(),
     });
   });
 }
@@ -110,8 +137,17 @@ export async function updateIncome(
     description?: string;
   },
 ): Promise<void> {
+  const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
-  const txRef = doc(db, "users", userId, "months", monthId, "transactions", txId);
+  const txRef = doc(
+    db,
+    "users",
+    userId,
+    "months",
+    monthId,
+    "transactions",
+    txId,
+  );
 
   await runTransaction(db, async (transaction) => {
     const [monthSnap, txSnap] = await Promise.all([
@@ -131,20 +167,32 @@ export async function updateIncome(
 
     const tx = txSnap.data() as IncomeTransaction;
     const month = monthSnap.data() as Month;
-    const newSplit = calculateDistribution(newValues.amountCents, month.distribution);
+    const newSplit = calculateDistribution(
+      newValues.amountCents,
+      month.distribution,
+    );
 
     transaction.update(monthRef, {
       totalIncomeCents: increment(newValues.amountCents - tx.amountCents),
-      "capsCents.necesidad": increment(newSplit.necesidad - tx.distribution.necesidad),
+      "capsCents.necesidad": increment(
+        newSplit.necesidad - tx.distribution.necesidad,
+      ),
       "capsCents.ocio": increment(newSplit.ocio - tx.distribution.ocio),
-      "capsCents.ahorro": increment(newSplit.ahorro - tx.distribution.ahorro),
+      ahorroContributedCents: increment(
+        newSplit.ahorro - tx.distribution.ahorro,
+      ),
+    });
+    transaction.update(userRef, {
+      savingsTotalCents: increment(newSplit.ahorro - tx.distribution.ahorro),
     });
 
     transaction.update(txRef, {
       amountCents: newValues.amountCents,
       source: newValues.source,
       distribution: newSplit,
-      description: newValues.description ? newValues.description : deleteField(),
+      description: newValues.description
+        ? newValues.description
+        : deleteField(),
     });
   });
 }

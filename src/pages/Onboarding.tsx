@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
 import { updateUserProfile } from "@/services/userService";
 import type { Source, PaymentMethod } from "@/types/user";
-import type { Distribution, Category } from "@/types/transaction";
+import type { Distribution } from "@/types/transaction";
 import Step1Sources from "./onboarding/Step1Sources";
 import Step2Distribution from "./onboarding/Step2Distribution";
 import Step3Subcategories from "./onboarding/Step3Subcategories";
@@ -11,7 +11,7 @@ import Step4PaymentMethods from "./onboarding/Step4PaymentMethods";
 type OnboardingData = {
   sources: Source[];
   distribution: Distribution;
-  subcategories: Record<Category, string[]>;
+  subcategories: Record<"necesidad" | "ocio", string[]>;
   paymentMethods: PaymentMethod[];
 };
 
@@ -21,7 +21,6 @@ const DEFAULT_DATA: OnboardingData = {
   subcategories: {
     necesidad: [],
     ocio: [],
-    ahorro: [],
   },
   paymentMethods: [],
 };

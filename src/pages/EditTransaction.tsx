@@ -8,7 +8,7 @@ import { formatDateLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import { CATEGORY_META, getCategoryStatus } from "@/utils/category";
 import { calculateDistribution } from "@/utils/distribution";
-import type { Month } from "@/types/month";
+import type { Month, MonthCaps } from "@/types/month";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
@@ -139,7 +139,8 @@ export default function EditTransaction() {
         newAmountCents,
         month.distribution,
       );
-      return (["necesidad", "ocio", "ahorro"] as const).map((cat) => {
+
+      const capRows = (["necesidad", "ocio"] as const).map((cat) => {
         const actual = getCategoryStatus(
           month.capsCents[cat],
           month.spentCents[cat],
@@ -152,10 +153,20 @@ export default function EditTransaction() {
           conCambio,
         };
       });
+
+      const ahorroActual = userProfile?.savingsTotalCents ?? 0;
+      const ahorroDelta = newSplit.ahorro - incomeTx.distribution.ahorro;
+      const ahorroRow = {
+        label: CATEGORY_META.ahorro.label,
+        actual: ahorroActual,
+        conCambio: ahorroActual + ahorroDelta,
+      };
+
+      return [...capRows, ahorroRow];
     }
 
     const expenseTx = tx as ExpenseTransaction;
-    const cat = expenseTx.category;
+    const cat = expenseTx.category as keyof MonthCaps;
     const actual = getCategoryStatus(
       month.capsCents[cat],
       month.spentCents[cat],
@@ -236,9 +247,9 @@ export default function EditTransaction() {
               selected={subcategory}
               onSelect={setSubcategory}
               options={
-                userProfile?.subcategories?.[
-                  (tx as ExpenseTransaction).category
-                ] ?? []
+            userProfile?.subcategories?.[
+              (tx as ExpenseTransaction).category as "necesidad" | "ocio"
+            ] ?? []
               }
             />
             <PaymentMethodChips

@@ -1,24 +1,24 @@
 import {
   doc,
-  getDoc,
   increment,
   runTransaction,
   serverTimestamp,
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { getMonthId, shiftMonthId } from "@/utils/date";
+import { getMonthId } from "@/utils/date";
 import { calculateDistribution } from "@/utils/distribution";
-import type { Month, MonthRemainder } from "@/types/month";
-import type { Distribution, IncomeTransaction } from "@/types/transaction";
+import type { Month, MonthCaps } from "@/types/month";
+import type { Distribution } from "@/types/transaction";
 import type { User } from "@/types/user";
 
 function buildEmptyMonth(distribution: Distribution): WithFieldValue<Month> {
   return {
     totalIncomeCents: 0,
     distribution,
-    capsCents: { necesidad: 0, ocio: 0, ahorro: 0 },
-    spentCents: { necesidad: 0, ocio: 0, ahorro: 0 },
+    capsCents: { necesidad: 0, ocio: 0 },
+    spentCents: { necesidad: 0, ocio: 0 },
+    ahorroContributedCents: 0,
     incomeCount: 0,
     closed: false,
     createdAt: serverTimestamp(),
@@ -37,13 +37,11 @@ export async function getOrCreateMonth(
     if (monthSnap.exists()) {
       return monthSnap.data() as Month;
     }
-
     const userSnap = await transaction.get(userRef);
     if (!userSnap.exists()) {
       throw new Error(`getOrCreateMonth: perfil ${userId} no existe`);
     }
     const { distribution } = userSnap.data() as User;
-
     const newMonth = buildEmptyMonth(distribution);
     transaction.set(monthRef, newMonth);
     return newMonth as Month;
@@ -78,17 +76,43 @@ export async function checkAndCloseMonth(
     const newMonthRef = doc(db, "users", userId, "months", currentMonthId);
     const newMonthSnap = await transaction.get(newMonthRef);
 
+    let inheritedNecesidadCents = 0;
+
     if (
       prevMonthRef &&
       prevMonthSnap &&
       prevMonthSnap.exists() &&
       !prevMonthSnap.data().closed
     ) {
-      transaction.update(prevMonthRef, { closed: true });
+      const prevMonth = prevMonthSnap.data() as Month;
+
+      const excedenteNecesidad = Math.max(
+        0,
+        prevMonth.capsCents.necesidad - prevMonth.spentCents.necesidad,
+      );
+      const excedenteOcio = Math.max(
+        0,
+        prevMonth.capsCents.ocio - prevMonth.spentCents.ocio,
+      );
+
+      inheritedNecesidadCents = excedenteNecesidad;
+
+      transaction.update(prevMonthRef, {
+        closed: true,
+        remainder: { ocioToAhorroCents: excedenteOcio },
+      });
+
+      if (excedenteOcio > 0) {
+        transaction.update(userRef, {
+          savingsTotalCents: increment(excedenteOcio),
+        });
+      }
     }
 
     if (!newMonthSnap.exists()) {
-      transaction.set(newMonthRef, buildEmptyMonth(userProfile.distribution));
+      const newMonth = buildEmptyMonth(userProfile.distribution);
+      (newMonth.capsCents as MonthCaps).necesidad = inheritedNecesidadCents;
+      transaction.set(newMonthRef, newMonth);
     }
 
     transaction.update(userRef, { lastClosedMonth: currentMonthId });
@@ -99,135 +123,80 @@ export async function checkAndCloseMonth(
   return result;
 }
 
-export async function resolveMonthRemainder(
+export async function registerIncomeSplit(
   userId: string,
-  prevMonthId: string,
-  newMonthId: string,
-  decision: {
-    remainderDestination?: "ahorro" | "next_month";
-    newDistribution?: Distribution;
-  },
-): Promise<void> {
+  monthId: string,
+  incomeCents: number,
+  distribution: Distribution,
+): Promise<{ necesidadCents: number; ocioCents: number; ahorroCents: number }> {
+  const split = calculateDistribution(incomeCents, distribution);
   const userRef = doc(db, "users", userId);
-  const prevMonthRef = doc(db, "users", userId, "months", prevMonthId);
-  const newMonthRef = doc(db, "users", userId, "months", newMonthId);
+  const monthRef = doc(db, "users", userId, "months", monthId);
 
   await runTransaction(db, async (transaction) => {
-    const [userSnap, prevMonthSnap, newMonthSnap] = await Promise.all([
-      transaction.get(userRef),
-      transaction.get(prevMonthRef),
-      transaction.get(newMonthRef),
-    ]);
-
-    if (!userSnap.exists()) {
-      throw new Error(`resolveMonthRemainder: perfil ${userId} no existe`);
+    const monthSnap = await transaction.get(monthRef);
+    if (!monthSnap.exists()) {
+      throw new Error(`registerIncomeSplit: mes ${monthId} no existe`);
     }
-    if (!prevMonthSnap.exists()) {
-      throw new Error(
-        `resolveMonthRemainder: mes anterior ${prevMonthId} no existe`,
-      );
-    }
-    if (!newMonthSnap.exists()) {
-      throw new Error(
-        `resolveMonthRemainder: mes nuevo ${newMonthId} no existe`,
-      );
+    if (monthSnap.data().closed) {
+      throw new Error("No se puede modificar un mes cerrado");
     }
 
-    const prevMonth = prevMonthSnap.data() as Month;
-
-    if (prevMonth.remainder !== undefined) return;
-
-    const newMonth = newMonthSnap.data() as Month;
-
-    const totalSpent =
-      prevMonth.spentCents.necesidad +
-      prevMonth.spentCents.ocio +
-      prevMonth.spentCents.ahorro;
-    const netCents = prevMonth.totalIncomeCents - totalSpent;
-
-    const distributionFinal =
-      decision.newDistribution ?? newMonth.distribution;
-
-    if (decision.newDistribution) {
-      transaction.update(userRef, { distribution: decision.newDistribution });
-      transaction.update(newMonthRef, { distribution: decision.newDistribution });
-    }
-
-    let remainder: MonthRemainder;
-
-    if (netCents <= 0) {
-      remainder = {
-        destination: "forgiven",
-        amountCents: netCents,
-      };
-    } else if (!decision.remainderDestination) {
-      throw new Error(
-        `resolveMonthRemainder: netCents=${netCents} pero remainderDestination no definido`,
-      );
-    } else if (decision.remainderDestination === "ahorro") {
-      remainder = { destination: "ahorro", amountCents: netCents };
-      transaction.update(newMonthRef, {
-        "capsCents.ahorro": increment(netCents),
-      });
-    } else {
-      remainder = { destination: "next_month", amountCents: netCents };
-
-      const split = calculateDistribution(netCents, distributionFinal);
-      const txId = crypto.randomUUID();
-      const txRef = doc(
-        db,
-        "users",
-        userId,
-        "months",
-        newMonthId,
-        "transactions",
-        txId,
-      );
-
-      const tx: WithFieldValue<IncomeTransaction> = {
-        type: "income",
-        source: "Remanente mes anterior",
-        transactionDate: `${newMonthId}-01`,
-        amountCents: netCents,
-        distribution: distributionFinal,
-        serverDate: serverTimestamp(),
-        localDate: new Date().toISOString(),
-      };
-      transaction.set(txRef, tx);
-
-      transaction.update(newMonthRef, {
-        totalIncomeCents: increment(netCents),
-        incomeCount: increment(1),
-        "capsCents.necesidad": increment(split.necesidad),
-        "capsCents.ocio": increment(split.ocio),
-        "capsCents.ahorro": increment(split.ahorro),
-      });
-    }
-
-    transaction.update(prevMonthRef, { remainder });
+    transaction.update(monthRef, {
+      totalIncomeCents: increment(incomeCents),
+      incomeCount: increment(1),
+      "capsCents.necesidad": increment(split.necesidad),
+      "capsCents.ocio": increment(split.ocio),
+      ahorroContributedCents: increment(split.ahorro),
+    });
+    transaction.update(userRef, {
+      savingsTotalCents: increment(split.ahorro),
+    });
   });
+
+  return {
+    necesidadCents: split.necesidad,
+    ocioCents: split.ocio,
+    ahorroCents: split.ahorro,
+  };
 }
 
-export async function isRemainderPending(
+export async function purchaseGoal(
   userId: string,
-): Promise<{ pending: boolean; prevMonthId: string | null }> {
-  const prevMonthId = shiftMonthId(getMonthId(), -1);
-  const monthSnap = await getDoc(
-    doc(db, "users", userId, "months", prevMonthId),
-  );
-  if (!monthSnap.exists()) return { pending: false, prevMonthId: null };
-  const month = monthSnap.data() as Month;
-  const pending = month.closed && month.remainder === undefined;
-  return { pending, prevMonthId: pending ? prevMonthId : null };
+  goalId: string,
+): Promise<void> {
+  const userRef = doc(db, "users", userId);
+
+  await runTransaction(db, async (transaction) => {
+    const userSnap = await transaction.get(userRef);
+    if (!userSnap.exists()) {
+      throw new Error(`purchaseGoal: perfil ${userId} no existe`);
+    }
+    const userProfile = userSnap.data() as User;
+    const goal = userProfile.savingsGoals.find((g) => g.id === goalId);
+    if (!goal) {
+      throw new Error(`purchaseGoal: meta ${goalId} no existe`);
+    }
+    if (userProfile.savingsTotalCents < goal.targetCents) {
+      throw new Error("Fondos insuficientes para esta meta");
+    }
+
+    transaction.update(userRef, {
+      savingsTotalCents: increment(-goal.targetCents),
+    });
+  });
 }
 
 export async function updateDistributionNow(
   userId: string,
   newDistribution: Distribution,
 ): Promise<void> {
-  const sum = newDistribution.necesidad + newDistribution.ocio + newDistribution.ahorro;
+  const sum =
+    newDistribution.necesidad + newDistribution.ocio + newDistribution.ahorro;
   if (sum !== 100) {
-    throw new Error(`updateDistributionNow: la distribución debe sumar 100, recibido ${sum}`);
+    throw new Error(
+      `updateDistributionNow: la distribución debe sumar 100, recibido ${sum}`,
+    );
   }
 
   const currentMonthId = getMonthId();
@@ -244,20 +213,26 @@ export async function updateDistributionNow(
       throw new Error(`updateDistributionNow: perfil ${userId} no existe`);
     }
     if (!monthSnap.exists()) {
-      throw new Error(`updateDistributionNow: mes actual ${currentMonthId} no existe`);
+      throw new Error(
+        `updateDistributionNow: mes actual ${currentMonthId} no existe`,
+      );
     }
 
     const month = monthSnap.data() as Month;
     if (month.closed) {
-      throw new Error("updateDistributionNow: el mes actual ya está cerrado");
+      throw new Error("No se puede modificar un mes cerrado");
     }
 
-    const newCaps = calculateDistribution(month.totalIncomeCents, newDistribution);
+    const split = calculateDistribution(
+      month.totalIncomeCents,
+      newDistribution,
+    );
 
     transaction.update(userRef, { distribution: newDistribution });
     transaction.update(monthRef, {
       distribution: newDistribution,
-      capsCents: newCaps,
+      "capsCents.necesidad": split.necesidad,
+      "capsCents.ocio": split.ocio,
     });
   });
 }

@@ -2,6 +2,10 @@
 import type { Category } from "@/types/transaction";
 
 export const CATEGORY_ORDER: Category[] = ["necesidad", "ocio", "ahorro"];
+export const CAP_CATEGORY_ORDER: ("necesidad" | "ocio")[] = [
+  "necesidad",
+  "ocio",
+];
 
 type CategoryMeta = {
   label: string;
@@ -56,11 +60,26 @@ export function getCategoryStatus(
       barWidth: 0,
     };
   }
-
   const disponible = capCents - spentCents;
   const overCap = spentCents > capCents;
   const isLow = disponible <= capCents * 0.15;
   const barWidth = Math.min(100, Math.max(0, (spentCents / capCents) * 100));
-
   return { disponible, isEmpty: false, isLow, overCap, barWidth };
+}
+
+export type GoalStatus = {
+  progressCents: number;
+  isReached: boolean;
+  barWidth: number;
+};
+
+export function getGoalStatus(
+  targetCents: number,
+  savingsTotalCents: number,
+): GoalStatus {
+  const progressCents = Math.min(savingsTotalCents, targetCents);
+  const isReached = savingsTotalCents >= targetCents;
+  const barWidth =
+    targetCents === 0 ? 0 : Math.min(100, (progressCents / targetCents) * 100);
+  return { progressCents, isReached, barWidth };
 }

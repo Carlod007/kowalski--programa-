@@ -8,8 +8,9 @@ import Step2Distribution from "@/pages/onboarding/Step2Distribution";
 import Step3Subcategories from "@/pages/onboarding/Step3Subcategories";
 import Step4PaymentMethods from "@/pages/onboarding/Step4PaymentMethods";
 import { updateDistributionNow } from "@/services/monthService";
-import type { Source, PaymentMethod } from "@/types/user";
-import type { Distribution, Category } from "@/types/transaction";
+import type { Source, PaymentMethod, SavingsGoal } from "@/types/user";
+import type { Distribution } from "@/types/transaction";
+import { formatCents } from "@/utils/currency";
 import BackButton from "@/components/BackButton";
 
 function ProfileSection() {
@@ -263,7 +264,7 @@ function SourcesSection() {
 function SubcategoriesSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState<Record<Category, string[]> | null>(null);
+  const [draft, setDraft] = useState<Record<"necesidad" | "ocio", string[]> | null>(null);
   const [saving, setSaving] = useState(false);
 
   if (!user || !userProfile) return null;
@@ -272,8 +273,7 @@ function SubcategoriesSection() {
 
   const totalCount =
     currentProfile.subcategories.necesidad.length +
-    currentProfile.subcategories.ocio.length +
-    currentProfile.subcategories.ahorro.length;
+    currentProfile.subcategories.ocio.length;
 
   function handleExpand() {
     setDraft(currentProfile.subcategories);
@@ -409,6 +409,152 @@ function PaymentMethodsSection() {
   );
 }
 
+function SavingsGoalsSection() {
+  const { user, userProfile, setUserProfile } = useAuthStore();
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<SavingsGoal[] | null>(null);
+  const [nameInput, setNameInput] = useState("");
+  const [costInput, setCostInput] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  if (!user || !userProfile) return null;
+  const currentUser = user;
+  const currentProfile = userProfile;
+
+  function handleExpand() {
+    setDraft(currentProfile.savingsGoals);
+    setExpanded(true);
+  }
+  function handleCancel() {
+    setDraft(null);
+    setNameInput("");
+    setCostInput("");
+    setExpanded(false);
+  }
+  function handleAddGoal() {
+    const name = nameInput.trim();
+    const cost = parseFloat(costInput);
+    if (!name || !Number.isFinite(cost) || cost <= 0 || !draft) return;
+    const goal: SavingsGoal = {
+      id: crypto.randomUUID(),
+      name,
+      targetCents: Math.round(cost * 100),
+      createdAt: null,
+    };
+    setDraft([...draft, goal]);
+    setNameInput("");
+    setCostInput("");
+  }
+  function handleRemoveGoal(id: string) {
+    if (!draft) return;
+    setDraft(draft.filter((g) => g.id !== id));
+  }
+  async function handleSave() {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      await updateUserProfile(currentUser.uid, { savingsGoals: draft });
+      setUserProfile({ ...currentProfile, savingsGoals: draft });
+      setDraft(null);
+      setExpanded(false);
+    } catch (err) {
+      console.error("Error al actualizar metas:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      {!expanded ? (
+        <button
+          type="button"
+          onClick={handleExpand}
+          className="flex w-full items-center justify-between px-4 py-3"
+        >
+          <span className="text-sm text-stone-900">Metas de ahorro</span>
+          <span className="text-sm text-stone-400">
+            {currentProfile.savingsGoals.length}
+          </span>
+        </button>
+      ) : (
+        <div className="p-4">
+          <p className="text-xs text-stone-500">
+            Ahorro acumulado: {formatCents(currentProfile.savingsTotalCents)}
+          </p>
+
+          <div className="mt-3 flex flex-col gap-2">
+            {draft!.map((goal) => (
+              <div
+                key={goal.id}
+                className="flex items-center justify-between rounded-lg border border-stone-200 px-3 py-2"
+              >
+                <div>
+                  <p className="text-sm text-stone-900">{goal.name}</p>
+                  <p className="text-xs text-stone-400">
+                    {formatCents(goal.targetCents)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveGoal(goal.id)}
+                  className="text-xs font-medium text-red-600"
+                >
+                  Quitar
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 flex gap-2">
+            <input
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              placeholder="Nombre (ej. Guitarra)"
+              className="flex-1 rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none"
+            />
+            <input
+              value={costInput}
+              onChange={(e) => setCostInput(e.target.value)}
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              placeholder="Costo S/"
+              className="w-24 rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleAddGoal}
+              className="rounded-lg bg-stone-900 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              +
+            </button>
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={saving}
+              className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -440,6 +586,7 @@ export default function Settings() {
           <SourcesSection />
           <SubcategoriesSection />
           <PaymentMethodsSection />
+          <SavingsGoalsSection />
         </div>
       </section>
 

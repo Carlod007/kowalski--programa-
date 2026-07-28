@@ -1,33 +1,31 @@
 import { useState } from "react";
-import type { Category } from "@/types/transaction";
+
+type SubcategoryKey = "necesidad" | "ocio";
 
 type Props = {
-  data: Record<Category, string[]>;
-  onChange: (subcategories: Record<Category, string[]>) => void;
+  data: Record<SubcategoryKey, string[]>;
+  onChange: (subcategories: Record<SubcategoryKey, string[]>) => void;
 };
 
-const CATEGORY_LABELS: Record<Category, string> = {
+const CATEGORY_LABELS: Record<SubcategoryKey, string> = {
   necesidad: "Necesidad",
   ocio: "Ocio",
-  ahorro: "Ahorro",
 };
 
-const CATEGORY_EXAMPLES: Record<Category, string> = {
+const CATEGORY_EXAMPLES: Record<SubcategoryKey, string> = {
   necesidad: "Ejemplos: Alquiler, Comida, Transporte",
   ocio: "Ejemplos: Salidas, Streaming, Hobbies",
-  ahorro: "Ejemplos: Fondo de emergencia, Inversiones",
 };
 
 export default function Step3Subcategories({ data, onChange }: Props) {
-  const [inputs, setInputs] = useState<Record<Category, string>>({
+  const [inputs, setInputs] = useState<Record<SubcategoryKey, string>>({
     necesidad: "",
     ocio: "",
-    ahorro: "",
   });
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  function addSubcategory(category: Category) {
+  function addSubcategory(category: SubcategoryKey) {
     const value = inputs[category].trim();
     if (value === "") return;
     onChange({
@@ -37,19 +35,19 @@ export default function Step3Subcategories({ data, onChange }: Props) {
     setInputs((i) => ({ ...i, [category]: "" }));
   }
 
-  function removeSubcategory(category: Category, sub: string) {
+  function removeSubcategory(category: SubcategoryKey, sub: string) {
     onChange({
       ...data,
       [category]: data[category].filter((s) => s !== sub),
     });
   }
 
-  function startEdit(category: Category, sub: string) {
+  function startEdit(category: SubcategoryKey, sub: string) {
     setEditingKey(`${category}::${sub}`);
     setEditValue(sub);
   }
 
-  function saveEdit(category: Category, original: string) {
+  function saveEdit(category: SubcategoryKey, original: string) {
     const trimmed = editValue.trim();
     if (trimmed === "") return;
     onChange({
@@ -71,7 +69,7 @@ export default function Step3Subcategories({ data, onChange }: Props) {
         Ajustes.
       </p>
 
-      {(["necesidad", "ocio", "ahorro"] as Category[]).map((category) => (
+      {(["necesidad", "ocio"] as SubcategoryKey[]).map((category) => (
         <div key={category} className="flex flex-col gap-2">
           <p className="text-sm font-medium">{CATEGORY_LABELS[category]}</p>
           <p className="text-xs text-gray-400 italic">
