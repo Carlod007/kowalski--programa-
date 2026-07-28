@@ -118,17 +118,23 @@ export default function EditTransaction() {
     );
   }
 
+  const isSavingsTx = tx.type === "expense" && (tx as ExpenseTransaction).category === "ahorro";
   const parsedAmount = parseFloat(amountStr);
-  const newAmountCents =
-    Number.isFinite(parsedAmount) && parsedAmount > 0
-      ? Math.round(parsedAmount * 100)
-      : 0;
+  const newAmountCents = isSavingsTx
+    ? tx.amountCents
+    : Number.isFinite(parsedAmount) && parsedAmount > 0
+    ? Math.round(parsedAmount * 100)
+    : 0;
 
   const isIncome = tx.type === "income";
+  const isSavingsExpense = !isIncome && (tx as ExpenseTransaction).category === "ahorro";
   const isDisabled =
     saving ||
-    newAmountCents === 0 ||
-    (isIncome ? !source : !subcategory || !paymentMethod);
+    (isIncome
+    ? !source
+    : isSavingsExpense
+    ? !paymentMethod
+    : !subcategory || !paymentMethod);
 
   function buildPreview() {
     if (!month || !tx || newAmountCents === 0) return null;
@@ -166,6 +172,8 @@ export default function EditTransaction() {
     }
 
     const expenseTx = tx as ExpenseTransaction;
+    if (expenseTx.category === "ahorro") return null;
+
     const cat = expenseTx.category as keyof MonthCaps;
     const actual = getCategoryStatus(
       month.capsCents[cat],
@@ -242,16 +250,18 @@ export default function EditTransaction() {
             <ExpenseCategoryLabel
               category={(tx as ExpenseTransaction).category}
             />
-            <SubcategoryChips
-              category={(tx as ExpenseTransaction).category}
-              selected={subcategory}
-              onSelect={setSubcategory}
-              options={
-            userProfile?.subcategories?.[
-              (tx as ExpenseTransaction).category as "necesidad" | "ocio"
-            ] ?? []
-              }
-            />
+            {(tx as ExpenseTransaction).category !== "ahorro" && (
+              <SubcategoryChips
+                category={(tx as ExpenseTransaction).category}
+                selected={subcategory}
+                onSelect={setSubcategory}
+                options={
+              userProfile?.subcategories?.[
+                (tx as ExpenseTransaction).category as "necesidad" | "ocio"
+              ] ?? []
+                }
+              />
+            )}
             <PaymentMethodChips
               selected={paymentMethod}
               onSelect={setPaymentMethod}
@@ -260,23 +270,32 @@ export default function EditTransaction() {
           </>
         )}
 
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="amount"
-            className="text-sm font-medium text-stone-700"
-          >
-            Monto (S/)
-          </label>
-          <input
-            id="amount"
-            type="number"
-            inputMode="decimal"
-            step="0.01"
-            value={amountStr}
-            onChange={(e) => setAmountStr(e.target.value)}
-            className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
-          />
-        </div>
+        {isSavingsTx ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-stone-700">Monto (S/)</span>
+            <div className="rounded-xl border border-stone-300 bg-stone-100 px-3 py-2 text-stone-500">
+              {formatCents(tx.amountCents)}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="amount"
+              className="text-sm font-medium text-stone-700"
+            >
+              Monto (S/)
+            </label>
+            <input
+              id="amount"
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              value={amountStr}
+              onChange={(e) => setAmountStr(e.target.value)}
+              className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
+            />
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <label
