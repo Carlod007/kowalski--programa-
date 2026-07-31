@@ -438,6 +438,7 @@ function SavingsGoalsSection() {
   const [nameInput, setNameInput] = useState("");
   const [costInput, setCostInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [goalError, setGoalError] = useState<string | null>(null);
 
   if (!user || !userProfile) return null;
   const currentUser = user;
@@ -451,12 +452,26 @@ function SavingsGoalsSection() {
     setDraft(null);
     setNameInput("");
     setCostInput("");
+    setGoalError(null);
     setExpanded(false);
   }
   function handleAddGoal() {
     const name = nameInput.trim();
     const cost = parseFloat(costInput);
-    if (!name || !Number.isFinite(cost) || cost <= 0 || !draft) return;
+    if (!draft) return;
+    if (!name && (!costInput || !Number.isFinite(cost) || cost <= 0)) {
+      setGoalError("Falta el nombre y el costo de la meta");
+      return;
+    }
+    if (!name) {
+      setGoalError("Falta el nombre de la meta");
+      return;
+    }
+    if (!costInput || !Number.isFinite(cost) || cost <= 0) {
+      setGoalError("El costo debe ser mayor a 0");
+      return;
+    }
+    setGoalError(null);
     const goal: SavingsGoal = {
       id: crypto.randomUUID(),
       name,
@@ -528,6 +543,9 @@ function SavingsGoalsSection() {
             ))}
           </div>
 
+          {goalError && (
+            <p className="mt-3 text-xs text-red-500">{goalError}</p>
+          )}
           <div className="mt-3 flex gap-2">
             <input
               value={nameInput}
