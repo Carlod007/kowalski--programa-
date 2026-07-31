@@ -22,8 +22,11 @@ export default function Dashboard() {
   const userProfile = useAuthStore((s) => s.userProfile);
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
 
+  const hasCheckedClose = useRef(false);
+
   useEffect(() => {
-    if (!user) return;
+    if (!user || hasCheckedClose.current) return;
+    hasCheckedClose.current = true;
     checkAndCloseMonth(user.uid).catch((err) => {
       console.error("checkAndCloseMonth falló:", err);
     });
@@ -173,11 +176,11 @@ function MonthSummary({
             {CAP_CATEGORY_ORDER.map((cat) => (
               <CategoryRow key={cat} category={cat} month={month} />
             ))}
-        <SavingsRow
-          savingsTotalCents={savingsTotalCents}
-          contributedThisMonth={month.ahorroContributedCents}
-          percentage={month.distribution.ahorro}
-        />
+            <SavingsRow
+              savingsTotalCents={savingsTotalCents}
+              contributedThisMonth={month.ahorroContributedCents}
+              percentage={month.distribution.ahorro}
+            />
           </>
         )}
       </main>
@@ -262,12 +265,16 @@ function SavingsRow({
     }
     if (showInfo) {
       document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [showInfo]);
 
   return (
-    <div ref={infoRef} className="relative rounded-2xl border border-stone-200 bg-white p-4">
+    <div
+      ref={infoRef}
+      className="relative rounded-2xl border border-stone-200 bg-white p-4"
+    >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${meta.bar}`} />
@@ -299,7 +306,8 @@ function SavingsRow({
 
       {showInfo && (
         <div className="absolute bottom-full left-4 mb-2 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
-          Tu Ahorro nunca se resetea - cada mes se suma más, y solo baja cuando comprás una meta.
+          Tu Ahorro nunca se resetea - cada mes se suma más, y solo baja cuando
+          comprás una meta.
         </div>
       )}
     </div>

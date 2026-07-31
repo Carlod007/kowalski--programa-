@@ -110,6 +110,10 @@ const router = createBrowserRouter([
         element: <CloseMonth />,
       },
       {
+        path: "/close-month/:monthId",
+        element: <CloseMonth />,
+      },
+      {
         path: "/history",
         element: <History />,
       },

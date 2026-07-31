@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
@@ -7,36 +8,35 @@ import { formatCents } from "@/utils/currency";
 import type { Month } from "@/types/month";
 import BackButton from "@/components/BackButton";
 
+const CURRENT_MONTH_ID = getMonthId();
+
 export default function CloseMonth() {
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
+  const navigate = useNavigate();
+  const { monthId: monthIdParam } = useParams<{ monthId: string }>();
 
-  const [prevMonthId, setPrevMonthId] = useState<string | null>(null);
-  const [prevMonth, setPrevMonth] = useState<Month | null>(null);
+  const viewedMonthId = monthIdParam ?? CURRENT_MONTH_ID;
+
+  const [month, setMonth] = useState<Month | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !viewedMonthId) return;
     const uid = user.uid;
+    const monthId = viewedMonthId;
     let cancelled = false;
 
     async function load() {
+      setLoading(true);
+      setError(null);
       try {
-        const pid = shiftMonthId(getMonthId(), -1);
-        const snap = await getDoc(doc(db, "users", uid, "months", pid));
+        const snap = await getDoc(doc(db, "users", uid, "months", monthId));
 
         if (cancelled) return;
 
-        if (!snap.exists() || !snap.data().closed) {
-          setPrevMonthId(null);
-          setPrevMonth(null);
-          setLoading(false);
-          return;
-        }
-
-        setPrevMonthId(pid);
-        setPrevMonth(snap.data() as Month);
+        setMonth(snap.exists() ? (snap.data() as Month) : null);
         setLoading(false);
       } catch (err) {
         console.error("CloseMonth load error:", err);
@@ -51,59 +51,109 @@ export default function CloseMonth() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, viewedMonthId]);
+
+  const isProjection = viewedMonthId === CURRENT_MONTH_ID && !month?.closed;
+  const canGoForward = !!viewedMonthId && viewedMonthId < CURRENT_MONTH_ID;
+
+  function goTo(delta: number) {
+    if (!viewedMonthId) return;
+    navigate(`/close-month/${shiftMonthId(viewedMonthId, delta)}`);
+  }
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
       <BackButton to="/dashboard" />
 
-      <h1 className="mt-4 text-2xl font-semibold text-stone-900">
-        Cierre de mes
-      </h1>
+      <div className="mt-4 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-stone-900">Cierre de mes</h1>
+        {viewedMonthId && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => goTo(-1)}
+              aria-label="Mes anterior"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={() => goTo(1)}
+              disabled={!canGoForward}
+              aria-label="Mes siguiente"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 disabled:opacity-30"
+            >
+              ›
+            </button>
+          </div>
+        )}
+      </div>
 
-      {loading ? (
+      {!viewedMonthId ? (
+        <p className="mt-8 text-center text-stone-400">
+          Todavía no hay meses cerrados para mostrar.
+        </p>
+      ) : loading ? (
         <p className="mt-8 text-center text-stone-400">Cargando...</p>
       ) : error ? (
         <p className="mt-8 text-center text-red-600">{error}</p>
-      ) : !prevMonth || !prevMonthId ? (
+      ) : !month ? (
         <p className="mt-8 text-center text-stone-400">
-          Todavía no hay meses cerrados para mostrar.
+          Sin datos para este mes.
         </p>
       ) : (
         <>
           <p className="mt-1 text-sm text-stone-500">
-            Así quedó {formatMonthLabel(prevMonthId)}
+            {isProjection
+              ? `Así va ${formatMonthLabel(viewedMonthId)}`
+              : `Así quedó ${formatMonthLabel(viewedMonthId)}`}
           </p>
+
+          {isProjection && (
+            <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2">
+              <p className="text-xs font-medium text-amber-700">
+                Proyección — el mes sigue abierto, esto no es definitivo
+                todavía.
+              </p>
+            </div>
+          )}
 
           <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-stone-400">
-              Resumen {formatMonthLabel(prevMonthId)}
+              Resumen {formatMonthLabel(viewedMonthId)}
             </p>
             <div className="mt-3 flex flex-col gap-2">
-              <Row label="Ingreso total" value={prevMonth.totalIncomeCents} />
+              <Row label="Ingreso total" value={month.totalIncomeCents} />
               <Row
                 label="Necesidad gastado"
-                value={prevMonth.spentCents.necesidad}
+                value={month.spentCents.necesidad}
               />
-              <Row label="Ocio gastado" value={prevMonth.spentCents.ocio} />
+              <Row label="Ocio gastado" value={month.spentCents.ocio} />
             </div>
           </div>
 
           <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-stone-400">
-              Qué pasó con el saldo sobrante
+              {isProjection
+                ? "Qué pasaría con el saldo sobrante si cerrara ahora"
+                : "Qué pasó con el saldo sobrante"}
             </p>
             <div className="mt-3 flex flex-col gap-2">
               <Row
-                label="Necesidad no usada → se sumó al mes nuevo"
+                label="Necesidad no usada → se sumaría al mes nuevo"
                 value={Math.max(
                   0,
-                  prevMonth.capsCents.necesidad - prevMonth.spentCents.necesidad,
+                  month.capsCents.necesidad - month.spentCents.necesidad,
                 )}
               />
               <Row
-                label="Ocio sobrante → se sumó a tu Ahorro"
-                value={prevMonth.remainder?.ocioToAhorroCents ?? 0}
+                label="Ocio sobrante → se sumaría a tu Ahorro"
+                value={
+                  isProjection
+                    ? Math.max(0, month.capsCents.ocio - month.spentCents.ocio)
+                    : (month.remainder?.ocioToAhorroCents ?? 0)
+                }
                 valueClassName="text-teal-700"
               />
             </div>

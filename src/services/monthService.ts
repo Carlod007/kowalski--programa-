@@ -161,32 +161,6 @@ export async function registerIncomeSplit(
   };
 }
 
-export async function purchaseGoal(
-  userId: string,
-  goalId: string,
-): Promise<void> {
-  const userRef = doc(db, "users", userId);
-
-  await runTransaction(db, async (transaction) => {
-    const userSnap = await transaction.get(userRef);
-    if (!userSnap.exists()) {
-      throw new Error(`purchaseGoal: perfil ${userId} no existe`);
-    }
-    const userProfile = userSnap.data() as User;
-    const goal = userProfile.savingsGoals.find((g) => g.id === goalId);
-    if (!goal) {
-      throw new Error(`purchaseGoal: meta ${goalId} no existe`);
-    }
-    if (userProfile.savingsTotalCents < goal.targetCents) {
-      throw new Error("Fondos insuficientes para esta meta");
-    }
-
-    transaction.update(userRef, {
-      savingsTotalCents: increment(-goal.targetCents),
-    });
-  });
-}
-
 export async function updateDistributionNow(
   userId: string,
   newDistribution: Distribution,
@@ -221,6 +195,14 @@ export async function updateDistributionNow(
     const month = monthSnap.data() as Month;
     if (month.closed) {
       throw new Error("No se puede modificar un mes cerrado");
+    }
+    if (
+      month.incomeCount > 0 &&
+      newDistribution.ahorro !== month.distribution.ahorro
+    ) {
+      throw new Error(
+        "El % de Ahorro ya se aplicó este mes — se puede cambiar recién el próximo mes",
+      );
     }
 
     const split = calculateDistribution(

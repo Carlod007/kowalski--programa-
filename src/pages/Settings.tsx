@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
@@ -12,6 +12,10 @@ import type { Source, PaymentMethod, SavingsGoal } from "@/types/user";
 import type { Distribution } from "@/types/transaction";
 import { formatCents } from "@/utils/currency";
 import BackButton from "@/components/BackButton";
+import { Link } from "react-router-dom";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { getMonthId } from "@/utils/date";
 
 function ProfileSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
@@ -106,6 +110,17 @@ function DistributionSection() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [incomeCount, setIncomeCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    const monthRef = doc(db, "users", user.uid, "months", getMonthId());
+    const unsub = onSnapshot(monthRef, (snap) => {
+      setIncomeCount(snap.exists() ? (snap.data().incomeCount ?? 0) : 0);
+    });
+    return () => unsub();
+  }, [user]);
+
   if (!user || !userProfile) return null;
 
   const currentUser = user;
@@ -162,7 +177,11 @@ function DistributionSection() {
         </button>
       ) : (
         <div className="p-4">
-          <Step2Distribution data={draft!} onChange={setDraft} />
+          <Step2Distribution
+            data={draft!}
+            onChange={setDraft}
+            disabledKeys={incomeCount > 0 ? ["ahorro"] : []}
+          />
           {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
           <div className="mt-4 flex gap-2">
             <button
@@ -264,7 +283,10 @@ function SourcesSection() {
 function SubcategoriesSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState<Record<"necesidad" | "ocio", string[]> | null>(null);
+  const [draft, setDraft] = useState<Record<
+    "necesidad" | "ocio",
+    string[]
+  > | null>(null);
   const [saving, setSaving] = useState(false);
 
   if (!user || !userProfile) return null;
@@ -587,6 +609,15 @@ export default function Settings() {
           <SubcategoriesSection />
           <PaymentMethodsSection />
           <SavingsGoalsSection />
+          <Link
+            to="/close-month"
+            className="flex w-full items-center justify-between px-4 py-3"
+          >
+            <span className="text-sm text-stone-900">
+              Resumen de cierre de mes
+            </span>
+            <span className="text-sm text-stone-400">›</span>
+          </Link>
         </div>
       </section>
 

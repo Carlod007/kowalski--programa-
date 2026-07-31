@@ -90,6 +90,44 @@ export default function ChartsScreen() {
   );
 }
 
+type CategoryFilter = "all" | "necesidad" | "ocio";
+
+const FILTER_TABS: { value: CategoryFilter; label: string }[] = [
+  { value: "all", label: "Todo" },
+  { value: "necesidad", label: "Necesidad" },
+  { value: "ocio", label: "Ocio" },
+];
+
+function CategoryTabs({
+  value,
+  onChange,
+}: {
+  value: CategoryFilter;
+  onChange: (v: CategoryFilter) => void;
+}) {
+  return (
+    <div className="flex gap-1.5 rounded-full bg-stone-100 p-1">
+      {FILTER_TABS.map((tab) => {
+        const isActive = value === tab.value;
+        const activeBg =
+          tab.value === "all" ? "bg-stone-900" : CATEGORY_META[tab.value].bar;
+        return (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => onChange(tab.value)}
+            className={`flex-1 rounded-full py-1.5 text-xs font-medium transition-colors ${
+              isActive ? `${activeBg} text-white` : "text-stone-500"
+            }`}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function MonthAnalytics({
   userId,
   monthId,
@@ -100,6 +138,7 @@ function MonthAnalytics({
   const [month, setMonth] = useState<Month | null>(null);
   const [expenses, setExpenses] = useState<ExpenseTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<CategoryFilter>("all");
 
   useEffect(() => {
     let active = true;
@@ -132,8 +171,13 @@ function MonthAnalytics({
 
   const breakdown = formatCategoryBreakdown(month.spentCents);
   const totalSpent = month.spentCents.necesidad + month.spentCents.ocio;
-  const topSubcategories = computeTopSubcategories(expenses, TOP_LIMIT);
-  const topPaymentMethods = computeTopPaymentMethods(expenses, TOP_LIMIT);
+  const filteredExpenses =
+    filter === "all" ? expenses : expenses.filter((e) => e.category === filter);
+  const topSubcategories = computeTopSubcategories(filteredExpenses, TOP_LIMIT);
+  const topPaymentMethods = computeTopPaymentMethods(
+    filteredExpenses,
+    TOP_LIMIT,
+  );
   const maxSubcategoryCents = Math.max(
     0,
     ...topSubcategories.map((i) => i.totalCents),
@@ -195,6 +239,10 @@ function MonthAnalytics({
           </div>
         </div>
       </section>
+
+      <div className="mx-5 mt-6">
+        <CategoryTabs value={filter} onChange={setFilter} />
+      </div>
 
       <section className="mx-5 mt-8">
         <h2 className="text-sm font-medium text-stone-500">
