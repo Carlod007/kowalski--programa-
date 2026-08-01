@@ -88,14 +88,22 @@ export default function Step3Subcategories({ data, onChange }: Props) {
                     <input
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && saveEdit(category, sub)}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && saveEdit(category, sub)
+                      }
                       autoFocus
                       className="flex-1 rounded-lg border border-gray-300 px-2 py-1 text-sm outline-none"
                     />
-                    <button onClick={() => saveEdit(category, sub)} className="text-xs font-medium text-teal-600">
+                    <button
+                      onClick={() => saveEdit(category, sub)}
+                      className="text-xs font-medium text-teal-600"
+                    >
                       Guardar
                     </button>
-                    <button onClick={cancelEdit} className="text-xs text-gray-400">
+                    <button
+                      onClick={cancelEdit}
+                      className="text-xs text-gray-400"
+                    >
                       Cancelar
                     </button>
                   </div>
@@ -103,10 +111,16 @@ export default function Step3Subcategories({ data, onChange }: Props) {
                   <>
                     <span className="text-sm">{sub}</span>
                     <div className="flex gap-3">
-                      <button onClick={() => startEdit(category, sub)} className="text-xs text-teal-600">
+                      <button
+                        onClick={() => startEdit(category, sub)}
+                        className="text-xs text-teal-600"
+                      >
                         Editar
                       </button>
-                      <button onClick={() => removeSubcategory(category, sub)} className="text-xs text-red-400">
+                      <button
+                        onClick={() => removeSubcategory(category, sub)}
+                        className="text-xs text-red-400"
+                      >
                         Eliminar
                       </button>
                     </div>
@@ -124,7 +138,7 @@ export default function Step3Subcategories({ data, onChange }: Props) {
               }
               onKeyDown={(e) => e.key === "Enter" && addSubcategory(category)}
               placeholder={`Nueva subcategoría`}
-              className="flex-1 rounded-lg bg-gray-50 px-3 py-2 text-sm outline-none"
+              className="min-w-0 flex-1 rounded-lg bg-gray-50 px-3 py-2 text-sm outline-none"
             />
             <button
               onClick={() => addSubcategory(category)}

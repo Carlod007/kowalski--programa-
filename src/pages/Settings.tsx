@@ -551,7 +551,7 @@ function SavingsGoalsSection() {
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
               placeholder="Nombre (ej. Guitarra)"
-              className="flex-1 rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none"
+              className="min-w-0 flex-1 rounded-lg border border-stone-300 px-2 py-1.5 text-sm outline-none"
             />
             <input
               value={costInput}
