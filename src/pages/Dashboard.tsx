@@ -4,7 +4,10 @@ import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { checkAndCloseMonth } from "@/services/monthService";
+import {
+  checkAndCloseMonth,
+  moveNecesidadSurplus,
+} from "@/services/monthService";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
@@ -64,6 +67,7 @@ export default function Dashboard() {
         userId={user.uid}
         monthId={viewedMonthId}
         canGoForward={canGoForward}
+        isCurrentMonth={isViewingCurrentMonth}
         savingsTotalCents={userProfile?.savingsTotalCents ?? 0}
         onPrev={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
         onNext={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
@@ -95,6 +99,7 @@ function MonthSummary({
   userId,
   monthId,
   canGoForward,
+  isCurrentMonth,
   savingsTotalCents,
   onPrev,
   onNext,
@@ -102,6 +107,7 @@ function MonthSummary({
   userId: string;
   monthId: string;
   canGoForward: boolean;
+  isCurrentMonth: boolean;
   savingsTotalCents: number;
   onPrev: () => void;
   onNext: () => void;
@@ -174,7 +180,15 @@ function MonthSummary({
         ) : (
           <>
             {CAP_CATEGORY_ORDER.map((cat) => (
-              <CategoryRow key={cat} category={cat} month={month} />
+              <CategoryRow
+                key={cat}
+                category={cat}
+                month={month}
+                userId={userId}
+                monthId={monthId}
+                isCurrentMonth={isCurrentMonth}
+                savingsTotalCents={savingsTotalCents}
+              />
             ))}
             <SavingsRow
               savingsTotalCents={savingsTotalCents}
@@ -191,15 +205,30 @@ function MonthSummary({
 function CategoryRow({
   category,
   month,
+  userId,
+  monthId,
+  isCurrentMonth,
+  savingsTotalCents,
 }: {
   category: keyof MonthCaps;
   month: Month;
+  userId: string;
+  monthId: string;
+  isCurrentMonth: boolean;
+  savingsTotalCents: number;
 }) {
   const meta = CATEGORY_META[category];
   const cap = month.capsCents[category];
   const spent = month.spentCents[category];
   const pct = month.distribution[category];
   const status = getCategoryStatus(cap, spent);
+  const [showMove, setShowMove] = useState(false);
+
+  const canMoveSurplus =
+    category === "necesidad" &&
+    isCurrentMonth &&
+    !status.isEmpty &&
+    status.disponible > 0;
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-4">
@@ -238,8 +267,145 @@ function CategoryRow({
               {formatCents(status.disponible)} disponible
             </span>
           </div>
+
+          {canMoveSurplus && !showMove && (
+            <button
+              type="button"
+              onClick={() => setShowMove(true)}
+              className="mt-2 text-xs font-medium text-teal-600"
+            >
+              Mover excedente →
+            </button>
+          )}
+
+          {showMove && (
+            <MoveSurplusPanel
+              userId={userId}
+              monthId={monthId}
+              disponibleCents={status.disponible}
+              necesidadCapCents={cap}
+              ocioCapCents={month.capsCents.ocio}
+              savingsTotalCents={savingsTotalCents}
+              onClose={() => setShowMove(false)}
+            />
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+function MoveSurplusPanel({
+  userId,
+  monthId,
+  disponibleCents,
+  necesidadCapCents,
+  ocioCapCents,
+  savingsTotalCents,
+  onClose,
+}: {
+  userId: string;
+  monthId: string;
+  disponibleCents: number;
+  necesidadCapCents: number;
+  ocioCapCents: number;
+  savingsTotalCents: number;
+  onClose: () => void;
+}) {
+  const [amountInput, setAmountInput] = useState("");
+  const [destination, setDestination] = useState<"ocio" | "ahorro">("ocio");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const parsedAmount = parseFloat(amountInput);
+  const amountCents =
+    Number.isFinite(parsedAmount) && parsedAmount > 0
+      ? Math.round(parsedAmount * 100)
+      : 0;
+  const exceedsAvailable = amountCents > disponibleCents;
+
+  async function handleConfirm() {
+    if (amountCents <= 0) {
+      setError("Ingresa un monto mayor a 0");
+      return;
+    }
+    if (exceedsAvailable) {
+      setError("El monto supera el excedente disponible");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await moveNecesidadSurplus(userId, monthId, amountCents, destination);
+      onClose();
+    } catch (err) {
+      console.error("Error al mover excedente:", err);
+      setError(
+        err instanceof Error ? err.message : "No se pudo mover el excedente",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-xl bg-sky-50 p-3">
+      <p className="text-sm font-medium text-teal-700">Mover excedente</p>
+
+      <div className="mt-2 flex gap-2">
+        <input
+          value={amountInput}
+          onChange={(e) => setAmountInput(e.target.value)}
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          placeholder="Monto S/"
+          className="flex-1 rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-sm outline-none"
+        />
+        <select
+          value={destination}
+          onChange={(e) => setDestination(e.target.value as "ocio" | "ahorro")}
+          className="rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-sm"
+        >
+          <option value="ocio">A Ocio</option>
+          <option value="ahorro">A Ahorro</option>
+        </select>
+      </div>
+
+      {amountCents > 0 && !exceedsAvailable && (
+        <p className="mt-2 text-xs text-teal-700">
+          Necesidad quedaría en {formatCents(necesidadCapCents - amountCents)}
+          {destination === "ocio"
+            ? ` · Ocio pasaría a ${formatCents(ocioCapCents + amountCents)}`
+            : ` · Ahorro acumulado pasaría a ${formatCents(savingsTotalCents + amountCents)}`}
+        </p>
+      )}
+
+      {exceedsAvailable && (
+        <p className="mt-2 text-xs text-red-500">
+          Supera el excedente disponible ({formatCents(disponibleCents)})
+        </p>
+      )}
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={saving}
+          className="flex-1 rounded-lg border border-stone-300 py-1.5 text-xs text-stone-600"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={saving || amountCents <= 0 || exceedsAvailable}
+          className="flex-1 rounded-lg bg-teal-600 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+        >
+          {saving ? "Moviendo..." : "Confirmar"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -280,28 +446,26 @@ function SavingsRow({
           <span className={`h-2.5 w-2.5 rounded-full ${meta.bar}`} />
           <p className="text-sm font-medium text-stone-900">{meta.label}</p>
         </div>
-        <p className="text-xs text-stone-400">
-          {percentage}% · {formatCents(contributedThisMonth)}
-        </p>
+        <div className="flex items-center gap-1">
+          <p className="text-xs text-stone-400">Acumulado</p>
+          <button
+            type="button"
+            onClick={() => setShowInfo((v) => !v)}
+            aria-label="Qué es el acumulado"
+            className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-200 text-[10px] text-stone-500"
+          >
+            ?
+          </button>
+        </div>
       </div>
 
       <p className="mt-3 text-2xl font-semibold text-teal-700">
-        {formatCents(contributedThisMonth)}
+        {formatCents(savingsTotalCents)}
       </p>
-      <p className="mt-1 text-xs text-stone-400">este mes</p>
 
-      <div className="mt-3 flex items-center gap-1.5 border-t border-stone-100 pt-3">
-        <span className="text-xs text-stone-400">
-          Acumulado: {formatCents(savingsTotalCents)}
-        </span>
-        <button
-          type="button"
-          onClick={() => setShowInfo((v) => !v)}
-          aria-label="Qué es el acumulado"
-          className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-200 text-[10px] text-stone-500"
-        >
-          ?
-        </button>
+      <div className="mt-3 flex items-center justify-between border-t border-stone-100 pt-3 text-xs text-stone-400">
+        <span>{percentage}% este mes</span>
+        <span>+{formatCents(contributedThisMonth)}</span>
       </div>
 
       {showInfo && (
