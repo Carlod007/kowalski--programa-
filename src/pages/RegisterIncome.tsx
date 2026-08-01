@@ -12,6 +12,7 @@ import {
   type UpdateData,
   type WithFieldValue,
 } from "firebase/firestore";
+import { Calendar, User, ChevronDown, FileText, Save } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { getMonthId, toDateInputValue, formatDateLabel } from "@/utils/date";
@@ -138,73 +139,95 @@ export default function RegisterIncome() {
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
       <Link
         to="/dashboard"
-        className="flex items-center gap-1 text-sm text-stone-500"
+        className="flex items-center gap-1 text-sm text-emerald-600"
       >
         <ArrowLeftIcon className="h-4 w-4" />
         Cancelar
       </Link>
 
-      <h1 className="mt-4 text-2xl font-semibold text-stone-900">
+      <h1 className="mt-4 text-3xl font-bold text-stone-900">
         Registrar ingreso
       </h1>
+      <p className="mt-1 text-sm text-stone-500">
+        Ingresa los detalles de tu ingreso.
+      </p>
 
       <form
         onSubmit={handleSubmit(onSubmit)}
-        className="mt-6 flex flex-col gap-5"
+        className="mt-6 flex flex-col gap-4"
       >
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-stone-700">Fecha</label>
-          <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
-            {formatDateLabel(today)}
+        <div className="rounded-2xl border border-stone-200 bg-white p-4">
+          <label className="text-sm font-semibold text-stone-900">Fecha</label>
+          <div className="mt-2 flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-emerald-600">
+              <Calendar size={18} />
+            </span>
+            <span className="flex-1 text-sm text-stone-900">
+              {formatDateLabel(today)}
+            </span>
           </div>
           <input type="hidden" value={today} {...register("date")} />
           {errors.date && (
-            <p className="text-xs text-red-600">{errors.date.message}</p>
+            <p className="mt-1 text-xs text-red-600">{errors.date.message}</p>
           )}
         </div>
 
-        <div className="flex flex-col gap-1">
+        <div className="rounded-2xl border border-stone-200 bg-white p-4">
           <label
             htmlFor="source"
-            className="text-sm font-medium text-stone-700"
+            className="text-sm font-semibold text-stone-900"
           >
             Fuente
           </label>
-          <select
-            id="source"
-            {...register("source")}
-            className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
-          >
-            <option value="">Selecciona una fuente</option>
-            {sources.map((s) => (
-              <option key={s.id} value={s.name}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <div className="relative mt-2 flex items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+              <User size={18} />
+            </span>
+            <select
+              id="source"
+              {...register("source")}
+              className="flex-1 appearance-none bg-transparent text-sm text-stone-900 outline-none"
+            >
+              <option value="">Selecciona una fuente</option>
+              {sources.map((s) => (
+                <option key={s.id} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              size={18}
+              className="pointer-events-none text-stone-400"
+            />
+          </div>
           {errors.source && (
-            <p className="text-xs text-red-600">{errors.source.message}</p>
+            <p className="mt-1 text-xs text-red-600">{errors.source.message}</p>
           )}
         </div>
 
-        <div className="flex flex-col gap-1">
+        <div className="rounded-2xl border border-stone-200 bg-white p-4">
           <label
             htmlFor="amount"
-            className="text-sm font-medium text-stone-700"
+            className="text-sm font-semibold text-stone-900"
           >
             Monto (S/)
           </label>
-          <input
-            id="amount"
-            type="number"
-            inputMode="decimal"
-            step="0.01"
-            placeholder="0.00"
-            {...register("amount")}
-            className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
-          />
+          <div className="mt-2 flex items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-600">
+              S/
+            </span>
+            <input
+              id="amount"
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              placeholder="0.00"
+              {...register("amount")}
+              className="flex-1 bg-transparent text-sm text-stone-900 outline-none"
+            />
+          </div>
           {errors.amount && (
-            <p className="text-xs text-red-600">{errors.amount.message}</p>
+            <p className="mt-1 text-xs text-red-600">{errors.amount.message}</p>
           )}
         </div>
 
@@ -221,19 +244,26 @@ export default function RegisterIncome() {
           </div>
         )}
 
-        <div className="flex flex-col gap-1">
+        <div className="rounded-2xl border border-stone-200 bg-white p-4">
           <label
             htmlFor="description"
-            className="text-sm font-medium text-stone-700"
+            className="text-sm font-semibold text-stone-900"
           >
-            Descripción <span className="text-stone-400">(opcional)</span>
+            Descripción{" "}
+            <span className="font-normal text-emerald-600">(opcional)</span>
           </label>
-          <input
-            id="description"
-            type="text"
-            {...register("description")}
-            className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
-          />
+          <div className="mt-2 flex items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+              <FileText size={18} />
+            </span>
+            <input
+              id="description"
+              type="text"
+              placeholder="Agrega una descripción"
+              {...register("description")}
+              className="flex-1 bg-transparent text-sm text-stone-900 outline-none"
+            />
+          </div>
         </div>
 
         {submitError && <p className="text-sm text-red-600">{submitError}</p>}
@@ -241,8 +271,9 @@ export default function RegisterIncome() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="mt-2 rounded-xl bg-teal-600 py-3 font-medium text-white disabled:opacity-50"
+          className="mt-2 flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 py-4 font-semibold text-white disabled:opacity-50"
         >
+          <Save size={18} />
           {isSubmitting ? "Guardando..." : "Guardar ingreso"}
         </button>
       </form>

@@ -13,8 +13,10 @@ import RegisterExpense from "@/pages/RegisterExpense";
 import CloseMonth from "@/pages/CloseMonth";
 import History from "@/pages/History";
 import EditTransaction from "@/pages/EditTransaction";
-import ChartsScreen from "@/pages/ChartsScreen";
+import { lazy, Suspense } from "react";
 import Settings from "@/pages/Settings";
+
+const ChartsScreen = lazy(() => import("@/pages/ChartsScreen"));
 
 function LoadingScreen() {
   return (
@@ -123,7 +125,17 @@ const router = createBrowserRouter([
       },
       {
         path: "/charts",
-        element: <ChartsScreen />,
+        element: (
+          <Suspense
+            fallback={
+              <div className="flex h-dvh items-center justify-center text-stone-400">
+                Cargando...
+              </div>
+            }
+          >
+            <ChartsScreen />
+          </Suspense>
+        ),
       },
       {
         path: "/settings",

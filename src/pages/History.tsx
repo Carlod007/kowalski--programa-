@@ -7,6 +7,13 @@ import {
   query,
   orderBy,
 } from "firebase/firestore";
+import {
+  Calendar,
+  Download,
+  MoreVertical,
+  ArrowDown,
+  ArrowUp,
+} from "lucide-react";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import {
@@ -163,15 +170,15 @@ export default function History() {
       <header className="flex items-center justify-between gap-3 px-5 pt-8">
         <div className="flex items-center gap-3">
           <BackButton to="/dashboard" />
-          <h1 className="text-xl font-semibold text-stone-900">Historial</h1>
+          <h1 className="text-3xl font-bold text-stone-900">Historial</h1>
         </div>
         <button
           type="button"
           onClick={() => setShowExport((v) => !v)}
           aria-label="Exportar historial"
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 text-stone-500"
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white text-emerald-600"
         >
-          ⇩
+          <Download size={18} />
         </button>
       </header>
 
@@ -183,25 +190,28 @@ export default function History() {
         />
       )}
 
-      <div className="flex items-center justify-center gap-2 px-5 pt-4">
-        <button
-          type="button"
-          onClick={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
-          className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200"
-        >
-          ‹
-        </button>
-        <span className="text-sm font-medium text-stone-900">
-          {formatMonthLabel(viewedMonthId)}
-        </span>
-        <button
-          type="button"
-          onClick={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
-          disabled={viewedMonthId >= CURRENT_MONTH_ID}
-          className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 disabled:opacity-30"
-        >
-          ›
-        </button>
+      <div className="flex items-center justify-center px-5 pt-5">
+        <div className="flex items-center gap-2 rounded-full bg-stone-100 px-2 py-1.5">
+          <button
+            type="button"
+            onClick={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
+            className="flex h-6 w-6 items-center justify-center rounded-full text-stone-500"
+          >
+            ‹
+          </button>
+          <Calendar size={16} className="text-emerald-600" />
+          <span className="text-sm font-semibold text-stone-900">
+            {formatMonthLabel(viewedMonthId)}
+          </span>
+          <button
+            type="button"
+            onClick={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
+            disabled={viewedMonthId >= CURRENT_MONTH_ID}
+            className="flex h-6 w-6 items-center justify-center rounded-full text-stone-500 disabled:opacity-30"
+          >
+            ›
+          </button>
+        </div>
       </div>
 
       {isClosed && (
@@ -216,10 +226,10 @@ export default function History() {
             key={f.key}
             type="button"
             onClick={() => setFilter(f.key)}
-            className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+            className={`whitespace-nowrap rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
               filter === f.key
-                ? "border-stone-900 bg-stone-900 text-white"
-                : "border-stone-300 text-stone-600"
+                ? "border-emerald-600 bg-emerald-600 text-white"
+                : "border-stone-200 bg-white text-stone-700"
             }`}
           >
             {f.label}
@@ -331,21 +341,34 @@ function TransactionRow({
 
   return (
     <div className="relative rounded-2xl border border-stone-200 bg-white p-4">
-      <div className="flex items-start justify-between">
+      <div className="flex items-start gap-3">
+        <span
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+            isIncome
+              ? "bg-emerald-50 text-emerald-600"
+              : "bg-red-50 text-red-600"
+          }`}
+        >
+          {isIncome ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
+        </span>
+
         <div className="flex-1 min-w-0">
-          <p className="truncate text-sm font-medium text-stone-900">{name}</p>
+          <p className="truncate text-sm font-semibold text-stone-900">
+            {name}
+          </p>
           {detail && <p className="mt-0.5 text-xs text-stone-400">{detail}</p>}
           {!isIncome && (
             <p className="mt-0.5 text-xs text-stone-400">{tx.paymentMethod}</p>
           )}
         </div>
+
         <div className="flex items-center gap-2">
           <span
             className={`text-sm font-medium ${
               isIncome ? "text-emerald-600" : "text-red-600"
             }`}
           >
-            {isIncome ? "+" : "-"}
+            {isIncome ? "+ " : "- "}
             {formatCents(tx.amountCents)}
           </span>
           {isOpen && (
@@ -355,7 +378,7 @@ function TransactionRow({
                 onClick={onToggleMenu}
                 className="flex h-6 w-6 items-center justify-center text-stone-400"
               >
-                ⋮
+                <MoreVertical size={16} />
               </button>
               {isMenuOpen && (
                 <div className="absolute right-0 top-8 z-10 w-36 rounded-xl border border-stone-200 bg-white py-1 shadow-lg">

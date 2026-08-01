@@ -79,13 +79,13 @@ export default function Dashboard() {
             to="/income/new"
             className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-100 py-4 font-medium text-emerald-700"
           >
-            ↓ Ingreso
+            ↑ Ingreso
           </Link>
           <Link
             to="/expense/new"
             className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-red-100 py-4 font-medium text-red-600"
           >
-            ↑ Egreso
+            ↓ Egreso
           </Link>
         </div>
       )}
@@ -133,7 +133,7 @@ function MonthSummary({
 
   return (
     <>
-      <div className="mx-5 mt-4 rounded-3xl bg-emerald-500 p-5 text-white">
+      <div className="mx-5 mt-4 rounded-3xl bg-emerald-600 p-5 text-white">
         <p className="text-sm text-emerald-50">Ingreso total</p>
         <p className="mt-1 text-3xl font-semibold">
           {loading ? "···" : formatCents(month?.totalIncomeCents ?? 0)}
@@ -145,16 +145,16 @@ function MonthSummary({
               ? "entrada registrada"
               : "entradas registradas"}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-full bg-white/15 px-1.5 py-1">
             <button
               type="button"
               onClick={onPrev}
               aria-label="Mes anterior"
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20"
+              className="flex h-5 w-5 items-center justify-center rounded-full text-xs"
             >
               ‹
             </button>
-            <span className="text-sm font-medium">
+            <span className="px-1 text-xs font-medium">
               {formatMonthLabel(monthId)}
             </span>
             <button
@@ -162,7 +162,7 @@ function MonthSummary({
               onClick={onNext}
               disabled={!canGoForward}
               aria-label="Mes siguiente"
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 disabled:opacity-30"
+              className="flex h-5 w-5 items-center justify-center rounded-full text-xs disabled:opacity-30"
             >
               ›
             </button>
