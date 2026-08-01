@@ -69,7 +69,10 @@ export default function Step1Sources({ data, onChange }: Props) {
                   autoFocus
                   className="flex-1 rounded-lg border border-gray-300 px-2 py-1 text-sm outline-none"
                 />
-                <button onClick={saveEdit} className="text-xs font-medium text-teal-600">
+                <button
+                  onClick={saveEdit}
+                  className="text-xs font-medium text-teal-600"
+                >
                   Guardar
                 </button>
                 <button onClick={cancelEdit} className="text-xs text-gray-400">
@@ -80,10 +83,16 @@ export default function Step1Sources({ data, onChange }: Props) {
               <>
                 <span className="text-sm">{source.name}</span>
                 <div className="flex gap-3">
-                  <button onClick={() => startEdit(source)} className="text-xs text-teal-600">
+                  <button
+                    onClick={() => startEdit(source)}
+                    className="text-xs text-teal-600"
+                  >
                     Editar
                   </button>
-                  <button onClick={() => removeSource(source.id)} className="text-xs text-red-400">
+                  <button
+                    onClick={() => removeSource(source.id)}
+                    className="text-xs text-red-400"
+                  >
                     Eliminar
                   </button>
                 </div>
@@ -100,13 +109,13 @@ export default function Step1Sources({ data, onChange }: Props) {
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addSource()}
           placeholder="Nueva fuente"
-          className="flex-1 rounded-lg bg-gray-50 px-3 py-3 text-sm outline-none"
+          className="min-w-0 flex-1 rounded-lg bg-gray-50 px-3 py-3 text-sm outline-none"
         />
         <button
           onClick={addSource}
-          className="rounded-lg bg-teal-600 px-4 text-sm font-medium text-white"
+          className="shrink-0 rounded-lg bg-teal-600 px-4 text-sm font-medium text-white"
         >
-          + Agregar
+          +
         </button>
       </div>
     </div>
