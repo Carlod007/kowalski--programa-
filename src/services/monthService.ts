@@ -219,46 +219,73 @@ export async function updateDistributionNow(
   });
 }
 
-export async function moveNecesidadSurplus(
+export async function moveSurplus(
   userId: string,
   monthId: string,
   amountCents: number,
-  destination: "ocio" | "ahorro",
+  origin: "necesidad" | "ocio" | "ahorro",
+  destination: "necesidad" | "ocio" | "ahorro",
 ): Promise<void> {
   if (amountCents <= 0) {
     throw new Error("El monto debe ser mayor a 0");
+  }
+  if (origin === destination) {
+    throw new Error("El origen y el destino no pueden ser la misma categoría");
   }
 
   const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
 
   await runTransaction(db, async (transaction) => {
-    const monthSnap = await transaction.get(monthRef);
-    if (!monthSnap.exists()) {
-      throw new Error(`moveNecesidadSurplus: mes ${monthId} no existe`);
+    const [userSnap, monthSnap] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(monthRef),
+    ]);
+
+    if (!userSnap.exists()) {
+      throw new Error(`moveSurplus: perfil ${userId} no existe`);
     }
+    if (!monthSnap.exists()) {
+      throw new Error(`moveSurplus: mes ${monthId} no existe`);
+    }
+
     const month = monthSnap.data() as Month;
+    const user = userSnap.data() as User;
+
     if (month.closed) {
       throw new Error("No se puede modificar un mes cerrado");
     }
 
-    const disponible = month.capsCents.necesidad - month.spentCents.necesidad;
-    if (amountCents > disponible) {
-      throw new Error("El monto supera el excedente disponible de Necesidad");
+    if (origin === "necesidad" || origin === "ocio") {
+      const disponible = month.capsCents[origin] - month.spentCents[origin];
+      if (amountCents > disponible) {
+        const label = origin === "necesidad" ? "Necesidad" : "Ocio";
+        throw new Error(`El monto supera el excedente disponible de ${label}`);
+      }
+    } else if (amountCents > user.savingsTotalCents) {
+      throw new Error("El monto supera el acumulado disponible en Ahorro");
     }
 
-    if (destination === "ocio") {
-      transaction.update(monthRef, {
-        "capsCents.necesidad": increment(-amountCents),
-        "capsCents.ocio": increment(amountCents),
-      });
+    const monthUpdate: Record<string, unknown> = {};
+    let savingsTotalDelta = 0;
+
+    if (origin === "necesidad" || origin === "ocio") {
+      monthUpdate[`capsCents.${origin}`] = increment(-amountCents);
     } else {
-      transaction.update(monthRef, {
-        "capsCents.necesidad": increment(-amountCents),
-        ahorroContributedCents: increment(amountCents),
-      });
+      savingsTotalDelta -= amountCents;
+    }
+
+    if (destination === "necesidad" || destination === "ocio") {
+      monthUpdate[`capsCents.${destination}`] = increment(amountCents);
+    } else {
+      monthUpdate.ahorroContributedCents = increment(amountCents);
+      savingsTotalDelta += amountCents;
+    }
+
+    transaction.update(monthRef, monthUpdate);
+    if (savingsTotalDelta !== 0) {
       transaction.update(userRef, {
-        savingsTotalCents: increment(amountCents),
+        savingsTotalCents: increment(savingsTotalDelta),
       });
     }
   });

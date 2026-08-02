@@ -4,10 +4,7 @@ import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import {
-  checkAndCloseMonth,
-  moveNecesidadSurplus,
-} from "@/services/monthService";
+import { checkAndCloseMonth, moveSurplus } from "@/services/monthService";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
@@ -15,10 +12,13 @@ import {
   CATEGORY_META,
   getCategoryStatus,
 } from "@/utils/category";
+import { calculateDistribution } from "@/utils/distribution";
 import type { Month, MonthCaps } from "@/types/month";
 import BottomNav from "@/components/BottomNav";
 
 const CURRENT_MONTH_ID = getMonthId();
+
+type CategoryKey = "necesidad" | "ocio" | "ahorro";
 
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user);
@@ -191,6 +191,10 @@ function MonthSummary({
               />
             ))}
             <SavingsRow
+              userId={userId}
+              monthId={monthId}
+              isCurrentMonth={isCurrentMonth}
+              capsCents={month.capsCents}
               savingsTotalCents={savingsTotalCents}
               contributedThisMonth={month.ahorroContributedCents}
               percentage={month.distribution.ahorro}
@@ -223,23 +227,55 @@ function CategoryRow({
   const pct = month.distribution[category];
   const status = getCategoryStatus(cap, spent);
   const [showMove, setShowMove] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const infoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) {
+        setShowInfo(false);
+      }
+    }
+    if (showInfo) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showInfo]);
 
   const canMoveSurplus =
-    category === "necesidad" &&
-    isCurrentMonth &&
-    !status.isEmpty &&
-    status.disponible > 0;
+    isCurrentMonth && !status.isEmpty && status.disponible > 0;
+
+  const destinations: CategoryKey[] =
+    category === "necesidad" ? ["ocio", "ahorro"] : ["necesidad", "ahorro"];
+
+  const pureCap = calculateDistribution(
+    month.totalIncomeCents,
+    month.distribution,
+  )[category];
+  const capWasAdjusted = cap !== pureCap;
 
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white p-4">
+    <div
+      ref={infoRef}
+      className="relative rounded-2xl border border-stone-200 bg-white p-4"
+    >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${meta.bar}`} />
           <p className="text-sm font-medium text-stone-900">{meta.label}</p>
         </div>
-        <p className="text-xs text-stone-400">
-          {pct}% · {formatCents(cap)}
-        </p>
+        <div className="flex items-center gap-1">
+          <p className="text-xs text-stone-400">{pct}%</p>
+          <button
+            type="button"
+            onClick={() => setShowInfo((v) => !v)}
+            aria-label={`Qué es el tope de ${meta.label}`}
+            className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-200 text-[10px] text-stone-500"
+          >
+            ?
+          </button>
+        </div>
       </div>
 
       {status.isEmpty ? (
@@ -248,6 +284,17 @@ function CategoryRow({
         </p>
       ) : (
         <>
+          <p
+            className={`mt-3 text-2xl font-semibold ${
+              status.isLow ? "text-red-600" : "text-emerald-600"
+            }`}
+          >
+            {formatCents(status.disponible)}{" "}
+            <span className="text-sm font-normal text-stone-400">
+              disponible
+            </span>
+          </p>
+
           <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-stone-200">
             <div
               className={`h-full rounded-full ${status.overCap ? "bg-red-500" : meta.bar}`}
@@ -255,18 +302,9 @@ function CategoryRow({
             />
           </div>
 
-          <div className="mt-2 flex items-center justify-between text-xs">
-            <span className="text-stone-400">{formatCents(spent)} gastado</span>
-            <span
-              className={
-                status.isLow
-                  ? "font-medium text-red-600"
-                  : "font-medium text-emerald-600"
-              }
-            >
-              {formatCents(status.disponible)} disponible
-            </span>
-          </div>
+          <p className="mt-2 text-xs text-stone-400">
+            Gastado {formatCents(spent)} de {formatCents(cap)}
+          </p>
 
           {canMoveSurplus && !showMove && (
             <button
@@ -282,14 +320,23 @@ function CategoryRow({
             <MoveSurplusPanel
               userId={userId}
               monthId={monthId}
+              origin={category}
               disponibleCents={status.disponible}
-              necesidadCapCents={cap}
-              ocioCapCents={month.capsCents.ocio}
+              destinations={destinations}
+              capsCents={month.capsCents}
               savingsTotalCents={savingsTotalCents}
               onClose={() => setShowMove(false)}
             />
           )}
         </>
+      )}
+
+      {showInfo && (
+        <div className="absolute right-4 top-10 z-10 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
+          {capWasAdjusted
+            ? `Tu tope es ${formatCents(cap)} porque moviste plata entre categorías este mes.`
+            : `Tu tope es ${formatCents(cap)}, según tu ${pct}% configurado.`}
+        </div>
       )}
     </div>
   );
@@ -298,22 +345,24 @@ function CategoryRow({
 function MoveSurplusPanel({
   userId,
   monthId,
+  origin,
   disponibleCents,
-  necesidadCapCents,
-  ocioCapCents,
+  destinations,
+  capsCents,
   savingsTotalCents,
   onClose,
 }: {
   userId: string;
   monthId: string;
+  origin: CategoryKey;
   disponibleCents: number;
-  necesidadCapCents: number;
-  ocioCapCents: number;
+  destinations: CategoryKey[];
+  capsCents: MonthCaps;
   savingsTotalCents: number;
   onClose: () => void;
 }) {
   const [amountInput, setAmountInput] = useState("");
-  const [destination, setDestination] = useState<"ocio" | "ahorro">("ocio");
+  const [destination, setDestination] = useState<CategoryKey>(destinations[0]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -324,19 +373,23 @@ function MoveSurplusPanel({
       : 0;
   const exceedsAvailable = amountCents > disponibleCents;
 
+  function currentValue(cat: CategoryKey): number {
+    return cat === "ahorro" ? savingsTotalCents : capsCents[cat];
+  }
+
   async function handleConfirm() {
     if (amountCents <= 0) {
       setError("Ingresa un monto mayor a 0");
       return;
     }
     if (exceedsAvailable) {
-      setError("El monto supera el excedente disponible");
+      setError("El monto supera el disponible");
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      await moveNecesidadSurplus(userId, monthId, amountCents, destination);
+      await moveSurplus(userId, monthId, amountCents, origin, destination);
       onClose();
     } catch (err) {
       console.error("Error al mover excedente:", err);
@@ -360,30 +413,33 @@ function MoveSurplusPanel({
           inputMode="decimal"
           step="0.01"
           placeholder="Monto S/"
-          className="flex-1 rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-sm outline-none"
+          className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-sm outline-none"
         />
         <select
           value={destination}
-          onChange={(e) => setDestination(e.target.value as "ocio" | "ahorro")}
+          onChange={(e) => setDestination(e.target.value as CategoryKey)}
           className="rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-sm"
         >
-          <option value="ocio">A Ocio</option>
-          <option value="ahorro">A Ahorro</option>
+          {destinations.map((dest) => (
+            <option key={dest} value={dest}>
+              A {CATEGORY_META[dest].label}
+            </option>
+          ))}
         </select>
       </div>
 
       {amountCents > 0 && !exceedsAvailable && (
         <p className="mt-2 text-xs text-teal-700">
-          Necesidad quedaría en {formatCents(necesidadCapCents - amountCents)}
-          {destination === "ocio"
-            ? ` · Ocio pasaría a ${formatCents(ocioCapCents + amountCents)}`
-            : ` · Ahorro acumulado pasaría a ${formatCents(savingsTotalCents + amountCents)}`}
+          {CATEGORY_META[origin].label} quedaría en{" "}
+          {formatCents(currentValue(origin) - amountCents)} ·{" "}
+          {CATEGORY_META[destination].label} pasaría a{" "}
+          {formatCents(currentValue(destination) + amountCents)}
         </p>
       )}
 
       {exceedsAvailable && (
         <p className="mt-2 text-xs text-red-500">
-          Supera el excedente disponible ({formatCents(disponibleCents)})
+          Supera el disponible ({formatCents(disponibleCents)})
         </p>
       )}
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
@@ -411,16 +467,25 @@ function MoveSurplusPanel({
 }
 
 function SavingsRow({
+  userId,
+  monthId,
+  isCurrentMonth,
+  capsCents,
   savingsTotalCents,
   contributedThisMonth,
   percentage,
 }: {
+  userId: string;
+  monthId: string;
+  isCurrentMonth: boolean;
+  capsCents: MonthCaps;
   savingsTotalCents: number;
   contributedThisMonth: number;
   percentage: number;
 }) {
   const meta = CATEGORY_META.ahorro;
   const [showInfo, setShowInfo] = useState(false);
+  const [showMove, setShowMove] = useState(false);
   const infoRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -435,6 +500,8 @@ function SavingsRow({
         document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [showInfo]);
+
+  const canMoveSurplus = isCurrentMonth && savingsTotalCents > 0;
 
   return (
     <div
@@ -467,6 +534,29 @@ function SavingsRow({
         <span>{percentage}% este mes</span>
         <span>+{formatCents(contributedThisMonth)}</span>
       </div>
+
+      {canMoveSurplus && !showMove && (
+        <button
+          type="button"
+          onClick={() => setShowMove(true)}
+          className="mt-2 text-xs font-medium text-teal-600"
+        >
+          Usar ahorro →
+        </button>
+      )}
+
+      {showMove && (
+        <MoveSurplusPanel
+          userId={userId}
+          monthId={monthId}
+          origin="ahorro"
+          disponibleCents={savingsTotalCents}
+          destinations={["necesidad", "ocio"]}
+          capsCents={capsCents}
+          savingsTotalCents={savingsTotalCents}
+          onClose={() => setShowMove(false)}
+        />
+      )}
 
       {showInfo && (
         <div className="absolute bottom-full left-4 mb-2 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
