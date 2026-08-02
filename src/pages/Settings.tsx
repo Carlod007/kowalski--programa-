@@ -111,6 +111,7 @@ function DistributionSection() {
   const [error, setError] = useState<string | null>(null);
 
   const [incomeCount, setIncomeCount] = useState(0);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -138,15 +139,21 @@ function DistributionSection() {
     setExpanded(false);
   }
 
-  async function handleSave() {
+  function handleSave() {
     if (!draft) return;
     const sum = draft.necesidad + draft.ocio + draft.ahorro;
     if (sum !== 100) {
       setError("Los porcentajes deben sumar 100%");
       return;
     }
-    setSaving(true);
     setError(null);
+    setShowConfirm(true);
+  }
+
+  async function confirmSave() {
+    if (!draft) return;
+    setShowConfirm(false);
+    setSaving(true);
     try {
       await updateDistributionNow(currentUser.uid, draft);
       setUserProfile({ ...currentProfile, distribution: draft });
@@ -200,6 +207,33 @@ function DistributionSection() {
             >
               {saving ? "Guardando..." : "Guardar cambios"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <p className="text-sm text-stone-900">
+              El nuevo reparto se aplicará a los próximos ingresos. Los topes de
+              Necesidad y Ocio de este mes no se recalculan.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmSave}
+                className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white"
+              >
+                Confirmar
+              </button>
+            </div>
           </div>
         </div>
       )}

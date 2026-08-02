@@ -134,7 +134,7 @@ function MonthSummary({
   return (
     <>
       <div className="mx-5 mt-4 rounded-3xl bg-emerald-600 p-5 text-white">
-        <p className="text-sm text-emerald-50">Ingreso total</p>
+        <p className="text-sm text-emerald-50">Ingreso total del mes</p>
         <p className="mt-1 text-3xl font-semibold">
           {loading ? "···" : formatCents(month?.totalIncomeCents ?? 0)}
         </p>
@@ -334,7 +334,7 @@ function CategoryRow({
       {showInfo && (
         <div className="absolute right-4 top-10 z-10 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
           {capWasAdjusted
-            ? `Tu tope es ${formatCents(cap)} porque moviste plata entre categorías este mes.`
+            ? `Tu tope es ${formatCents(cap)}. No es solo tu ${pct}% actual: incluye ingresos recibidos con otro % o plata movida entre categorías este mes.`
             : `Tu tope es ${formatCents(cap)}, según tu ${pct}% configurado.`}
         </div>
       )}
@@ -561,7 +561,8 @@ function SavingsRow({
       {showInfo && (
         <div className="absolute bottom-full left-4 mb-2 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
           Tu Ahorro nunca se resetea - cada mes se suma más, y solo baja cuando
-          comprás una meta.
+          comprás una meta. El "+" de abajo es lo que entró este mes, no tu
+          crecimiento neto: si sacaste plata de Ahorro, no se resta de ahí.
         </div>
       )}
     </div>

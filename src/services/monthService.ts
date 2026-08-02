@@ -205,17 +205,8 @@ export async function updateDistributionNow(
       );
     }
 
-    const split = calculateDistribution(
-      month.totalIncomeCents,
-      newDistribution,
-    );
-
     transaction.update(userRef, { distribution: newDistribution });
-    transaction.update(monthRef, {
-      distribution: newDistribution,
-      "capsCents.necesidad": split.necesidad,
-      "capsCents.ocio": split.ocio,
-    });
+    transaction.update(monthRef, { distribution: newDistribution });
   });
 }
 
