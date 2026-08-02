@@ -8,8 +8,6 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { calculateDistribution } from "@/utils/distribution";
-import type { Month } from "@/types/month";
 import type { SavingsGoal, User } from "@/types/user";
 import type {
   ExpenseTransaction,
@@ -183,11 +181,31 @@ export async function updateIncome(
     }
 
     const tx = txSnap.data() as IncomeTransaction;
-    const month = monthSnap.data() as Month;
-    const newSplit = calculateDistribution(
-      newValues.amountCents,
-      month.distribution,
-    );
+
+    if (tx.amountCents <= 0) {
+      throw new Error(
+        "Esta transacción no se puede editar por un problema en sus datos. Bórrala y regístrala de nuevo.",
+      );
+    }
+    if (newValues.amountCents <= 0) {
+      throw new Error("El monto debe ser mayor a 0");
+    }
+
+    const originalTotal = tx.amountCents;
+    const necesidadShare =
+      originalTotal > 0 ? tx.distribution.necesidad / originalTotal : 0;
+    const ocioShare =
+      originalTotal > 0 ? tx.distribution.ocio / originalTotal : 0;
+
+    const newNecesidad = Math.floor(newValues.amountCents * necesidadShare);
+    const newOcio = Math.floor(newValues.amountCents * ocioShare);
+    const newAhorro = newValues.amountCents - newNecesidad - newOcio;
+
+    const newSplit = {
+      necesidad: newNecesidad,
+      ocio: newOcio,
+      ahorro: newAhorro,
+    };
 
     transaction.update(monthRef, {
       totalIncomeCents: increment(newValues.amountCents - tx.amountCents),

@@ -192,21 +192,7 @@ export async function updateDistributionNow(
       );
     }
 
-    const month = monthSnap.data() as Month;
-    if (month.closed) {
-      throw new Error("No se puede modificar un mes cerrado");
-    }
-    if (
-      month.incomeCount > 0 &&
-      newDistribution.ahorro !== month.distribution.ahorro
-    ) {
-      throw new Error(
-        "El % de Ahorro ya se aplicó este mes — se puede cambiar recién el próximo mes",
-      );
-    }
-
     transaction.update(userRef, { distribution: newDistribution });
-    transaction.update(monthRef, { distribution: newDistribution });
   });
 }
 

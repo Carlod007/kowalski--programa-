@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
@@ -13,9 +13,6 @@ import type { Distribution } from "@/types/transaction";
 import { formatCents } from "@/utils/currency";
 import BackButton from "@/components/BackButton";
 import { Link } from "react-router-dom";
-import { doc, onSnapshot } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { getMonthId } from "@/utils/date";
 
 function ProfileSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
@@ -110,17 +107,7 @@ function DistributionSection() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [incomeCount, setIncomeCount] = useState(0);
   const [showConfirm, setShowConfirm] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    const monthRef = doc(db, "users", user.uid, "months", getMonthId());
-    const unsub = onSnapshot(monthRef, (snap) => {
-      setIncomeCount(snap.exists() ? (snap.data().incomeCount ?? 0) : 0);
-    });
-    return () => unsub();
-  }, [user]);
 
   if (!user || !userProfile) return null;
 
@@ -184,11 +171,7 @@ function DistributionSection() {
         </button>
       ) : (
         <div className="p-4">
-          <Step2Distribution
-            data={draft!}
-            onChange={setDraft}
-            disabledKeys={incomeCount > 0 ? ["ahorro"] : []}
-          />
+          <Step2Distribution data={draft!} onChange={setDraft} />
           {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
           <div className="mt-4 flex gap-2">
             <button
@@ -215,8 +198,8 @@ function DistributionSection() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5">
             <p className="text-sm text-stone-900">
-              El nuevo reparto se aplicará a los próximos ingresos. Los topes de
-              Necesidad y Ocio de este mes no se recalculan.
+              El nuevo reparto se aplicará desde el próximo mes. Este mes sigue
+              con la distribución actual.
             </p>
             <div className="mt-4 flex gap-2">
               <button

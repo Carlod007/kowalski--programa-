@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -17,8 +17,9 @@ import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { getMonthId, toDateInputValue, formatDateLabel } from "@/utils/date";
 import { calculateDistribution } from "@/utils/distribution";
+import { doc as firestoreDoc, getDoc } from "firebase/firestore";
 import { formatCents } from "@/utils/currency";
-import type { IncomeTransaction } from "@/types/transaction";
+import type { IncomeTransaction, Distribution } from "@/types/transaction";
 import type { Month } from "@/types/month";
 import { ArrowLeftIcon } from "@/components/BackButton";
 
@@ -41,8 +42,24 @@ export default function RegisterIncome() {
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [monthDistribution, setMonthDistribution] =
+    useState<Distribution | null>(null);
 
   const today = toDateInputValue();
+
+  useEffect(() => {
+    if (!user) return;
+    const monthId = getMonthId();
+    getDoc(firestoreDoc(db, "users", user.uid, "months", monthId))
+      .then((snap) => {
+        if (snap.exists()) {
+          setMonthDistribution((snap.data() as Month).distribution);
+        }
+      })
+      .catch((err) => {
+        console.error("Error al cargar distribución del mes:", err);
+      });
+  }, [user]);
 
   const {
     register,
@@ -63,20 +80,21 @@ export default function RegisterIncome() {
       ? Math.round(parsedAmount * 100)
       : 0;
   const preview =
-    previewCents > 0 && userProfile
-      ? calculateDistribution(previewCents, userProfile.distribution)
+    previewCents > 0 && monthDistribution
+      ? calculateDistribution(previewCents, monthDistribution)
       : null;
 
   async function onSubmit(values: IncomeFormValues) {
     if (!user || !userProfile) return;
     setSubmitError(null);
 
+    if (!monthDistribution) {
+      setSubmitError("No se pudo cargar el mes. Intenta de nuevo.");
+      return;
+    }
     const amountCents = Math.round(parseFloat(values.amount) * 100);
-    const distribution = calculateDistribution(
-      amountCents,
-      userProfile.distribution,
-    );
     const monthId = getMonthId();
+    const distribution = calculateDistribution(amountCents, monthDistribution);
     const description = values.description?.trim();
 
     const batch = writeBatch(db);
