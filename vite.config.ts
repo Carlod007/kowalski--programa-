@@ -9,10 +9,14 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
+      injectRegister: false,
       workbox: {
-        skipWaiting: true,
-        clientsClaim: true,
+        // false: en modo "prompt" el SW nuevo debe quedar "waiting" hasta
+        // que el usuario confirme; si se activa solo, needRefresh no se
+        // detecta de forma confiable.
+        skipWaiting: false,
+        clientsClaim: false,
       },
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {

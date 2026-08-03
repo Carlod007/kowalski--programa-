@@ -5,6 +5,7 @@ import { auth, db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import type { User as UserProfile } from "@/types/user";
 import AppRouter from "@/router";
+import UpdatePrompt from "@/components/UpdatePrompt";
 
 export default function App() {
   const { setUser, setUserProfile } = useAuthStore();
@@ -47,5 +48,10 @@ export default function App() {
     };
   }, [setUser, setUserProfile]);
 
-  return <AppRouter />;
+  return (
+    <>
+      <UpdatePrompt />
+      <AppRouter />
+    </>
+  );
 }
