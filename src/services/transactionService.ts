@@ -270,7 +270,7 @@ export async function purchaseGoalExpense(
     }
 
     const userProfile = userSnap.data() as User;
-    if (userProfile.savingsTotalCents < input.goal.targetCents) {
+    if ((userProfile.savingsTotalCents ?? 0) < input.goal.targetCents) {
       throw new Error("Fondos insuficientes para esta meta");
     }
 
