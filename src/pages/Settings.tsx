@@ -462,7 +462,7 @@ function SavingsGoalsSection() {
   const currentProfile = userProfile;
 
   function handleExpand() {
-    setDraft(currentProfile.savingsGoals);
+    setDraft(currentProfile.savingsGoals ?? []);
     setExpanded(true);
   }
   function handleCancel() {
@@ -528,13 +528,13 @@ function SavingsGoalsSection() {
         >
           <span className="text-sm text-stone-900">Metas de ahorro</span>
           <span className="text-sm text-stone-400">
-            {currentProfile.savingsGoals.length}
+            {(currentProfile.savingsGoals ?? []).length}
           </span>
         </button>
       ) : (
         <div className="p-4">
           <p className="text-xs text-stone-500">
-            Ahorro acumulado: {formatCents(currentProfile.savingsTotalCents)}
+            Ahorro acumulado: {formatCents(currentProfile.savingsTotalCents ?? 0)}
           </p>
 
           <div className="mt-3 flex flex-col gap-2">
