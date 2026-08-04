@@ -225,11 +225,6 @@ export async function updateIncome(
   });
 }
 
-/**
- * Compra de una Meta de Ahorro. Crea una transacción de tipo Egreso con
- * category "ahorro" (visible en Historial como cualquier otro gasto) y
- * descuenta el costo fijo de la meta del acumulado del usuario.
- */
 export async function purchaseGoalExpense(
   userId: string,
   monthId: string,

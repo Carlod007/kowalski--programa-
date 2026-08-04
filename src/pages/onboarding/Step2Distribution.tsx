@@ -60,7 +60,7 @@ export default function Step2Distribution({
               />
               {isDisabled && (
                 <p className="text-xs text-stone-400">
-                  Ya se acreditó este mes — se aplicará desde el próximo
+                  Ya se acreditó este mes - se aplicará desde el próximo
                 </p>
               )}
               {key === "necesidad" && belowMinimum && (
@@ -86,7 +86,7 @@ export default function Step2Distribution({
       <p
         className={`text-sm font-medium ${isValid ? "text-teal-600" : "text-red-500"}`}
       >
-        Total: {total}% {isValid ? "✓" : "— debe sumar 100%"}
+        Total: {total}% {isValid ? "✓" : "- debe sumar 100%"}
       </p>
     </div>
   );

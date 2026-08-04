@@ -28,9 +28,6 @@ type Props = {
   initialData: OnboardingData;
   onFinish: (data: OnboardingData) => Promise<void>;
   finishLabel: string;
-  /** Si se pasa, el botón final muestra un modal de confirmación con este
-   * texto antes de llamar a onFinish. Si no, guarda directo (comportamiento
-   * original del onboarding de registro). */
   confirmMessage?: string;
 };
 
@@ -62,9 +59,6 @@ export default function OnboardingFlow({
     essentialNeedsTotalCents,
   );
   const hasDeficit = minNecesidad > 100;
-  // Atar el "aceptado" a los totales actuales: si el usuario vuelve atrás y
-  // cambia ingresos/necesidades, la clave deja de coincidir y se invalida
-  // solo, sin necesitar un efecto que resetee estado manualmente.
   const deficitKey = `${fixedIncomesTotalCents}:${essentialNeedsTotalCents}`;
   const deficitAcknowledged = acknowledgedDeficitKey === deficitKey;
 

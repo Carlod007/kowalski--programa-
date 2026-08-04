@@ -1,4 +1,3 @@
-// src/pages/Dashboard.tsx
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";

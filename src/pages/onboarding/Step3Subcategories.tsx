@@ -33,8 +33,6 @@ function buildNecesidadRows(
     monthlyAmountCents:
       essentialNeeds.find((n) => n.name === name)?.monthlyAmountCents ?? 0,
   }));
-  // Necesidades declaradas antes de esta pantalla, sin una subcategoría del
-  // mismo nombre todavía: se agregan como fila propia para no perderlas.
   const linkedNames = new Set(names);
   for (const n of essentialNeeds) {
     if (!linkedNames.has(n.name)) {
@@ -162,9 +160,9 @@ export default function Step3Subcategories({
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium">Necesidad</p>
         <p className="text-xs text-gray-400 italic">
-          Si es un gasto fijo mensual (ej. Alquiler), poné el monto — con eso
+          Si es un gasto fijo mensual (ej. Alquiler), pon el monto - con eso
           calculamos tu % mínimo recomendado. Si es variable (ej. Comida),
-          dejalo sin monto.
+          déjalo sin monto.
         </p>
 
         {necesidadRows.map((row) => (

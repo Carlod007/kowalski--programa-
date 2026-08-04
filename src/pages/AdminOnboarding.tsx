@@ -23,9 +23,6 @@ export default function AdminOnboarding() {
   };
 
   async function handleFinish(data: OnboardingData) {
-    // No incluye onboardingCompleted ni ningún campo financiero: solo
-    // reemplaza estos 6 campos de configuración, sin tocar meses,
-    // transacciones, ahorro acumulado ni metas.
     await updateUserProfile(currentUser.uid, data);
     setUserProfile({ ...currentProfile, ...data });
   }

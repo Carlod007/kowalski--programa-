@@ -20,9 +20,6 @@ export type TransactionBase = {
 export type IncomeTransaction = TransactionBase & {
   type: "income";
   source: string;
-  /** Id de la fuente al momento de registrar, para vincular con
-   * fixedIncomes de forma robusta a renombres. Ausente en transacciones
-   * anteriores a este campo. */
   sourceId?: string;
   distribution: Distribution;
 };

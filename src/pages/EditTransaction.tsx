@@ -66,9 +66,6 @@ export default function EditTransaction() {
         setAmountStr((transaction.amountCents / 100).toString());
 
         if (transaction.type === "income") {
-          // Transacciones nuevas ya traen sourceId. Las viejas (de antes de
-          // este campo) lo resuelven por nombre una sola vez, al cargar; se
-          // termina de "rellenar" al guardar cualquier edición.
           const resolvedSourceId =
             transaction.sourceId ??
             (userProfile?.sources ?? []).find(
@@ -94,10 +91,6 @@ export default function EditTransaction() {
     }
 
     load();
-    // userProfile se lee deliberadamente sin ser dependencia: solo se usa
-    // para resolver el sourceId inicial una vez; incluirlo recargaría (y
-    // resetearía) el formulario cada vez que el perfil cambie por otro
-    // motivo mientras el usuario está editando.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, monthId, txId]);
 
@@ -332,7 +325,7 @@ export default function EditTransaction() {
               <p className="text-xs text-stone-400">
                 Este ingreso está configurado como fijo:{" "}
                 {formatCents(matchedFixedIncome.monthlyAmountCents)}. Para
-                cambiarlo de forma permanente, andá a Ajustes → Ingresos.
+                cambiarlo de forma permanente, ve a Ajustes → Ingresos.
               </p>
             )}
           </div>
@@ -403,8 +396,8 @@ export default function EditTransaction() {
             <p className="text-sm text-stone-900">
               Este monto no coincide con tu ingreso fijo configurado (
               {formatCents(matchedFixedIncome.monthlyAmountCents)}). Esto
-              corrige solo esta transacción, no cambia tu ingreso fijo — para
-              eso usá Ajustes → Ingresos.
+              corrige solo esta transacción, no cambia tu ingreso fijo - para
+              eso usa Ajustes → Ingresos.
             </p>
             <div className="mt-4 flex gap-2">
               <button

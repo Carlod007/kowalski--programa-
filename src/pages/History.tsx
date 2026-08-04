@@ -216,7 +216,7 @@ export default function History() {
 
       {isClosed && (
         <p className="mt-3 px-5 text-center text-sm text-stone-500">
-          Mes cerrado — solo lectura
+          Mes cerrado - solo lectura
         </p>
       )}
 
@@ -260,7 +260,8 @@ export default function History() {
                         className="rounded-2xl border border-amber-300 bg-amber-50 p-4"
                       >
                         <p className="text-sm text-amber-800">
-                          Esta acción no se puede deshacer. ¿Borrar esta
+                          Esta acción no se puede deshacer y el monto se
+                          revertirá de tus topes o ahorro. ¿Borrar esta
                           transacción?
                         </p>
                         <div className="mt-2 flex gap-2">

@@ -78,8 +78,6 @@ export default function RegisterIncome() {
   const watchedSource = useWatch({ control, name: "source" });
 
   const [overriddenFor, setOverriddenFor] = useState<string | null>(null);
-  // watchedSource guarda el id de la fuente (no el nombre), así el
-  // matching es robusto a renombres y a nombres duplicados.
   const matchedFixedIncome =
     fixedIncomes.find((f) => f.id === watchedSource) ?? null;
   const isLocked = !!matchedFixedIncome && overriddenFor !== watchedSource;
@@ -165,7 +163,7 @@ export default function RegisterIncome() {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-3 px-6 text-center">
         <p className="text-stone-600">
-          Todavía no tenés fuentes de ingreso configuradas.
+          Todavía no tienes fuentes de ingreso configuradas.
         </p>
         <Link to="/dashboard" className="text-sm font-medium text-teal-700">
           Volver al inicio

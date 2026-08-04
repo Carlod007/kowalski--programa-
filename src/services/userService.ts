@@ -1,4 +1,3 @@
-// src/services/userService.ts
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { User as UserProfile } from "@/types/user";

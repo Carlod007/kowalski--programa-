@@ -113,7 +113,7 @@ export default function CloseMonth() {
           {isProjection && (
             <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2">
               <p className="text-xs font-medium text-amber-700">
-                Proyección — el mes sigue abierto, esto no es definitivo
+                Proyección - el mes sigue abierto, esto no es definitivo
                 todavía.
               </p>
             </div>

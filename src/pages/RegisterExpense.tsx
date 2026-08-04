@@ -1,4 +1,3 @@
-// src/pages/RegisterExpense.tsx
 import { useEffect, useState } from "react";
 import {
   collection,
@@ -409,7 +408,7 @@ function ExpenseDetailStep({
         {showEmptyCapWarning && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
             <p className="text-sm text-amber-800">
-              Todavía no registraste ingresos este mes — este gasto va a
+              Todavía no registraste ingresos este mes - este gasto va a
               aparecer como deuda desde el inicio.
             </p>
             <div className="mt-2 flex gap-2">
@@ -524,7 +523,7 @@ function GoalPurchaseStep({ onBack }: { onBack: () => void }) {
           <p className="text-sm font-medium text-stone-700">Meta</p>
           {goals.length === 0 ? (
             <p className="text-sm text-stone-500">
-              Todavía no configuraste metas de ahorro. Podés crearlas desde
+              Todavía no configuraste metas de ahorro. Puedes crearlas desde
               Ajustes.
             </p>
           ) : (

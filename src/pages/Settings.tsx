@@ -137,8 +137,6 @@ function DistributionSection() {
     essentialNeedsTotalCents,
   );
   const hasDeficit = minNecesidad > 100;
-  // Atar el "aceptado" a los totales actuales: si cambian (ej. editando
-  // Ingresos fijos en otra sección abierta), la clave deja de coincidir.
   const deficitKey = `${fixedIncomesTotalCents}:${essentialNeedsTotalCents}`;
   const deficitAcknowledged = acknowledgedDeficitKey === deficitKey;
 
@@ -164,7 +162,7 @@ function DistributionSection() {
       return;
     }
     if (hasDeficit && !deficitAcknowledged) {
-      setError("Marca \"Continuar con déficit\" para guardar de todas formas");
+      setError('Marca "Continuar con déficit" para guardar de todas formas');
       return;
     }
     if (!hasDeficit && draft.necesidad < minNecesidad) {
@@ -220,8 +218,8 @@ function DistributionSection() {
             <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
               <p className="text-sm text-amber-800">
                 Tus necesidades ({formatCents(essentialNeedsTotalCents)})
-                superan tus ingresos fijos ({formatCents(fixedIncomesTotalCents)}
-                ) en{" "}
+                superan tus ingresos fijos (
+                {formatCents(fixedIncomesTotalCents)}) en{" "}
                 {formatCents(essentialNeedsTotalCents - fixedIncomesTotalCents)}
                 . Ningún reparto puede cubrir esto sin corregir esos datos.
               </p>
@@ -463,8 +461,8 @@ function SubcategoriesSection() {
             }}
           />
           <p className="mt-2 text-xs text-stone-400">
-            El monto en Necesidad solo actualiza el % mínimo sugerido. No
-            cambia el mes en curso.
+            El monto en Necesidad solo actualiza el % mínimo sugerido. No cambia
+            el mes en curso.
           </p>
           <div className="mt-4 flex gap-2">
             <button
@@ -649,7 +647,8 @@ function SavingsGoalsSection() {
       ) : (
         <div className="p-4">
           <p className="text-xs text-stone-500">
-            Ahorro acumulado: {formatCents(currentProfile.savingsTotalCents ?? 0)}
+            Ahorro acumulado:{" "}
+            {formatCents(currentProfile.savingsTotalCents ?? 0)}
           </p>
 
           <div className="mt-3 flex flex-col gap-2">

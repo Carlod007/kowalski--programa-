@@ -11,13 +11,6 @@ export function calculateDistribution(
   return { necesidad, ocio, ahorro };
 }
 
-/**
- * % mínimo de Necesidad recomendado para cubrir las necesidades esenciales
- * declaradas sin déficit. Se redondea hacia arriba (Math.ceil) para no
- * quedar corto. Puede superar 100 si las necesidades superan los ingresos
- * fijos: eso se muestra al usuario como déficit, nunca se oculta ni se
- * recorta a 100 en esta función.
- */
 export function calculateMinimumNecesidadPercentage(
   fixedIncomesCents: number,
   essentialNeedsCents: number,
@@ -26,14 +19,6 @@ export function calculateMinimumNecesidadPercentage(
   return Math.ceil((essentialNeedsCents / fixedIncomesCents) * 100);
 }
 
-/**
- * Reparto proporcional al editar el monto de un ingreso ya registrado:
- * preserva la proporción con la que quedó dividido originalmente (derivada
- * de tx.distribution/tx.amountCents), en vez de recalcular con el % actual
- * de distribution.necesidad/ocio/ahorro. Debe ser la ÚNICA implementación
- * de este cálculo — usarla tanto al guardar (transactionService.ts) como en
- * cualquier vista previa, para que nunca muestren cifras distintas.
- */
 export function calculateProportionalSplit(
   newAmountCents: number,
   originalAmountCents: number,

@@ -1,4 +1,3 @@
-// src/components/SavingsSelectCard.tsx
 import { CATEGORY_META } from "@/utils/category";
 import { formatCents } from "@/utils/currency";
 

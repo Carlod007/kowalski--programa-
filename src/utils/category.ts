@@ -1,4 +1,3 @@
-// src/utils/category.ts
 import type { Category } from "@/types/transaction";
 
 export const CATEGORY_ORDER: Category[] = ["necesidad", "ocio", "ahorro"];

@@ -25,9 +25,6 @@ function buildRows(sources: Source[], fixedIncomes: FixedIncome[]): IncomeRow[] 
       monthlyAmountCents: fixed?.monthlyAmountCents ?? 0,
     };
   });
-  // Ingresos fijos "huérfanos" (creados con el flujo viejo de 2 pasos, sin
-  // una fuente con el mismo id): se agregan como fila propia para no perder
-  // el dato. El usuario los reconcilia a mano si corresponde.
   const linkedIds = new Set(sources.map((s) => s.id));
   for (const f of fixedIncomes) {
     if (!linkedIds.has(f.id)) {
@@ -138,7 +135,7 @@ export default function StepIncomeSources({
       <h2 className="text-lg font-medium">Ingresos</h2>
       <p className="text-xs text-gray-500">
         Agrega tus fuentes de ingreso. Si alguna es fija todos los meses
-        (sueldo, pensión), marcala como fija e indicá cuánto — con eso
+        (sueldo, pensión), márcala como fija e indica cuánto - con eso
         calculamos el % mínimo recomendado de Necesidad.
       </p>
       <p className="text-xs text-gray-400 italic">
