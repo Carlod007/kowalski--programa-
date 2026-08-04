@@ -7,7 +7,7 @@ import { updateExpense, updateIncome } from "@/services/transactionService";
 import { formatDateLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import { CATEGORY_META, getCategoryStatus } from "@/utils/category";
-import { calculateDistribution } from "@/utils/distribution";
+import { calculateProportionalSplit } from "@/utils/distribution";
 import type { Month, MonthCaps } from "@/types/month";
 import type {
   ExpenseTransaction,
@@ -33,10 +33,11 @@ export default function EditTransaction() {
   const [saving, setSaving] = useState(false);
 
   const [amountStr, setAmountStr] = useState("");
-  const [source, setSource] = useState("");
+  const [sourceId, setSourceId] = useState("");
   const [subcategory, setSubcategory] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [description, setDescription] = useState("");
+  const [showAmountConfirm, setShowAmountConfirm] = useState(false);
 
   useEffect(() => {
     if (!user || !monthId || !txId) return;
@@ -65,7 +66,16 @@ export default function EditTransaction() {
         setAmountStr((transaction.amountCents / 100).toString());
 
         if (transaction.type === "income") {
-          setSource(transaction.source);
+          // Transacciones nuevas ya traen sourceId. Las viejas (de antes de
+          // este campo) lo resuelven por nombre una sola vez, al cargar; se
+          // termina de "rellenar" al guardar cualquier edición.
+          const resolvedSourceId =
+            transaction.sourceId ??
+            (userProfile?.sources ?? []).find(
+              (s) => s.name === transaction.source,
+            )?.id ??
+            "";
+          setSourceId(resolvedSourceId);
         } else {
           setSubcategory(transaction.subcategory);
           setPaymentMethod(transaction.paymentMethod);
@@ -84,6 +94,11 @@ export default function EditTransaction() {
     }
 
     load();
+    // userProfile se lee deliberadamente sin ser dependencia: solo se usa
+    // para resolver el sourceId inicial una vez; incluirlo recargaría (y
+    // resetearía) el formulario cada vez que el perfil cambie por otro
+    // motivo mientras el usuario está editando.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, monthId, txId]);
 
   if (loading) {
@@ -127,11 +142,16 @@ export default function EditTransaction() {
     : 0;
 
   const isIncome = tx.type === "income";
+  const matchedFixedIncome = isIncome
+    ? (userProfile?.fixedIncomes ?? []).find((f) => f.id === sourceId) ?? null
+    : null;
+  const amountDiffersFromFixed =
+    !!matchedFixedIncome && newAmountCents !== matchedFixedIncome.monthlyAmountCents;
   const isSavingsExpense = !isIncome && (tx as ExpenseTransaction).category === "ahorro";
   const isDisabled =
     saving ||
     (isIncome
-    ? !source
+    ? !sourceId
     : isSavingsExpense
     ? !paymentMethod
     : !subcategory || !paymentMethod);
@@ -141,9 +161,10 @@ export default function EditTransaction() {
 
     if (isIncome) {
       const incomeTx = tx as IncomeTransaction;
-      const newSplit = calculateDistribution(
+      const newSplit = calculateProportionalSplit(
         newAmountCents,
-        month.distribution,
+        incomeTx.amountCents,
+        incomeTx.distribution,
       );
 
       const capRows = (["necesidad", "ocio"] as const).map((cat) => {
@@ -192,16 +213,29 @@ export default function EditTransaction() {
 
   const preview = buildPreview();
 
+  function handleSaveClick() {
+    if (amountDiffersFromFixed) {
+      setShowAmountConfirm(true);
+      return;
+    }
+    handleSave();
+  }
+
   async function handleSave() {
     if (!user || !monthId || !txId) return;
+    setShowAmountConfirm(false);
     setSaving(true);
     setError(null);
 
     try {
       if (isIncome) {
+        const selectedSource = (userProfile?.sources ?? []).find(
+          (s) => s.id === sourceId,
+        );
         await updateIncome(user.uid, monthId, txId, {
           amountCents: newAmountCents,
-          source,
+          source: selectedSource?.name ?? "",
+          sourceId,
           description: description.trim() || undefined,
         });
       } else {
@@ -241,8 +275,8 @@ export default function EditTransaction() {
       <div className="mt-6 flex flex-col gap-5">
         {isIncome ? (
           <IncomeFields
-            source={source}
-            onSourceChange={setSource}
+            sourceId={sourceId}
+            onSourceIdChange={setSourceId}
             sources={userProfile?.sources ?? []}
           />
         ) : (
@@ -294,6 +328,13 @@ export default function EditTransaction() {
               onChange={(e) => setAmountStr(e.target.value)}
               className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
             />
+            {matchedFixedIncome && (
+              <p className="text-xs text-stone-400">
+                Este ingreso está configurado como fijo:{" "}
+                {formatCents(matchedFixedIncome.monthlyAmountCents)}. Para
+                cambiarlo de forma permanente, andá a Ajustes → Ingresos.
+              </p>
+            )}
           </div>
         )}
 
@@ -348,24 +389,53 @@ export default function EditTransaction() {
 
         <button
           type="button"
-          onClick={handleSave}
+          onClick={handleSaveClick}
           disabled={isDisabled}
           className="mt-2 rounded-xl bg-stone-900 py-3 font-medium text-white disabled:opacity-50"
         >
           {saving ? "Guardando..." : "Guardar cambios"}
         </button>
       </div>
+
+      {showAmountConfirm && matchedFixedIncome && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <p className="text-sm text-stone-900">
+              Este monto no coincide con tu ingreso fijo configurado (
+              {formatCents(matchedFixedIncome.monthlyAmountCents)}). Esto
+              corrige solo esta transacción, no cambia tu ingreso fijo — para
+              eso usá Ajustes → Ingresos.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAmountConfirm(false)}
+                className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                className="flex-1 rounded-lg bg-stone-900 py-2 text-sm font-medium text-white"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function IncomeFields({
-  source,
-  onSourceChange,
+  sourceId,
+  onSourceIdChange,
   sources,
 }: {
-  source: string;
-  onSourceChange: (v: string) => void;
+  sourceId: string;
+  onSourceIdChange: (v: string) => void;
   sources: { id: string; name: string }[];
 }) {
   return (
@@ -375,13 +445,13 @@ function IncomeFields({
       </label>
       <select
         id="source"
-        value={source}
-        onChange={(e) => onSourceChange(e.target.value)}
+        value={sourceId}
+        onChange={(e) => onSourceIdChange(e.target.value)}
         className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
       >
         <option value="">Selecciona una fuente</option>
         {sources.map((s) => (
-          <option key={s.id} value={s.name}>
+          <option key={s.id} value={s.id}>
             {s.name}
           </option>
         ))}

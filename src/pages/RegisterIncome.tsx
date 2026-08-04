@@ -65,6 +65,7 @@ export default function RegisterIncome() {
     register,
     handleSubmit,
     control,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeSchema),
@@ -72,7 +73,25 @@ export default function RegisterIncome() {
   });
 
   const sources = userProfile?.sources ?? [];
+  const fixedIncomes = userProfile?.fixedIncomes ?? [];
   const watchedAmount = useWatch({ control, name: "amount" });
+  const watchedSource = useWatch({ control, name: "source" });
+
+  const [overriddenFor, setOverriddenFor] = useState<string | null>(null);
+  // watchedSource guarda el id de la fuente (no el nombre), así el
+  // matching es robusto a renombres y a nombres duplicados.
+  const matchedFixedIncome =
+    fixedIncomes.find((f) => f.id === watchedSource) ?? null;
+  const isLocked = !!matchedFixedIncome && overriddenFor !== watchedSource;
+
+  useEffect(() => {
+    if (matchedFixedIncome && overriddenFor !== watchedSource) {
+      setValue(
+        "amount",
+        (matchedFixedIncome.monthlyAmountCents / 100).toString(),
+      );
+    }
+  }, [matchedFixedIncome, watchedSource, overriddenFor, setValue]);
 
   const parsedAmount = parseFloat(watchedAmount);
   const previewCents =
@@ -96,6 +115,7 @@ export default function RegisterIncome() {
     const monthId = getMonthId();
     const distribution = calculateDistribution(amountCents, monthDistribution);
     const description = values.description?.trim();
+    const selectedSource = sources.find((s) => s.id === values.source);
 
     const batch = writeBatch(db);
 
@@ -104,7 +124,8 @@ export default function RegisterIncome() {
     );
     const tx: WithFieldValue<IncomeTransaction> = {
       type: "income",
-      source: values.source,
+      source: selectedSource?.name ?? "",
+      sourceId: values.source,
       transactionDate: values.date,
       amountCents,
       distribution,
@@ -208,7 +229,7 @@ export default function RegisterIncome() {
             >
               <option value="">Selecciona una fuente</option>
               {sources.map((s) => (
-                <option key={s.id} value={s.name}>
+                <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
               ))}
@@ -241,11 +262,42 @@ export default function RegisterIncome() {
               step="0.01"
               placeholder="0.00"
               {...register("amount")}
-              className="flex-1 bg-transparent text-sm text-stone-900 outline-none"
+              readOnly={isLocked}
+              className={`flex-1 bg-transparent text-sm outline-none ${
+                isLocked ? "text-stone-500" : "text-stone-900"
+              }`}
             />
           </div>
           {errors.amount && (
             <p className="mt-1 text-xs text-red-600">{errors.amount.message}</p>
+          )}
+          {matchedFixedIncome && (
+            <p className="mt-1 text-xs text-stone-400">
+              {isLocked ? (
+                <>
+                  Ingreso fijo configurado.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setOverriddenFor(watchedSource ?? null)}
+                    className="font-medium text-emerald-700 underline"
+                  >
+                    Registrar monto diferente este mes
+                  </button>
+                </>
+              ) : (
+                <>
+                  Esto no cambia tu ingreso fijo configurado, solo esta
+                  transacción.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setOverriddenFor(null)}
+                    className="font-medium text-emerald-700 underline"
+                  >
+                    Usar monto fijo
+                  </button>
+                </>
+              )}
+            </p>
           )}
         </div>
 

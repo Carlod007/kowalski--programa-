@@ -3,12 +3,19 @@ import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { updateUserProfile } from "@/services/userService";
-import Step1Sources from "@/pages/onboarding/Step1Sources";
+import StepIncomeSources from "@/pages/onboarding/StepIncomeSources";
 import Step2Distribution from "@/pages/onboarding/Step2Distribution";
 import Step3Subcategories from "@/pages/onboarding/Step3Subcategories";
 import Step4PaymentMethods from "@/pages/onboarding/Step4PaymentMethods";
 import { updateDistributionNow } from "@/services/monthService";
-import type { Source, PaymentMethod, SavingsGoal } from "@/types/user";
+import { calculateMinimumNecesidadPercentage } from "@/utils/distribution";
+import type {
+  Source,
+  PaymentMethod,
+  SavingsGoal,
+  FixedIncome,
+  EssentialNeed,
+} from "@/types/user";
 import type { Distribution } from "@/types/transaction";
 import { formatCents } from "@/utils/currency";
 import BackButton from "@/components/BackButton";
@@ -106,6 +113,9 @@ function DistributionSection() {
   const [draft, setDraft] = useState<Distribution | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [acknowledgedDeficitKey, setAcknowledgedDeficitKey] = useState<
+    string | null
+  >(null);
 
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -114,15 +124,35 @@ function DistributionSection() {
   const currentUser = user;
   const currentProfile = userProfile;
 
+  const fixedIncomesTotalCents = (currentProfile.fixedIncomes ?? []).reduce(
+    (sum, i) => sum + i.monthlyAmountCents,
+    0,
+  );
+  const essentialNeedsTotalCents = (currentProfile.essentialNeeds ?? []).reduce(
+    (sum, n) => sum + n.monthlyAmountCents,
+    0,
+  );
+  const minNecesidad = calculateMinimumNecesidadPercentage(
+    fixedIncomesTotalCents,
+    essentialNeedsTotalCents,
+  );
+  const hasDeficit = minNecesidad > 100;
+  // Atar el "aceptado" a los totales actuales: si cambian (ej. editando
+  // Ingresos fijos en otra sección abierta), la clave deja de coincidir.
+  const deficitKey = `${fixedIncomesTotalCents}:${essentialNeedsTotalCents}`;
+  const deficitAcknowledged = acknowledgedDeficitKey === deficitKey;
+
   function handleExpand() {
     setDraft(currentProfile.distribution);
     setError(null);
+    setAcknowledgedDeficitKey(null);
     setExpanded(true);
   }
 
   function handleCancel() {
     setDraft(null);
     setError(null);
+    setAcknowledgedDeficitKey(null);
     setExpanded(false);
   }
 
@@ -131,6 +161,16 @@ function DistributionSection() {
     const sum = draft.necesidad + draft.ocio + draft.ahorro;
     if (sum !== 100) {
       setError("Los porcentajes deben sumar 100%");
+      return;
+    }
+    if (hasDeficit && !deficitAcknowledged) {
+      setError("Marca \"Continuar con déficit\" para guardar de todas formas");
+      return;
+    }
+    if (!hasDeficit && draft.necesidad < minNecesidad) {
+      setError(
+        `Según tus ingresos y necesidades declaradas, Necesidad debería ser al menos ${minNecesidad}%`,
+      );
       return;
     }
     setError(null);
@@ -171,7 +211,34 @@ function DistributionSection() {
         </button>
       ) : (
         <div className="p-4">
-          <Step2Distribution data={draft!} onChange={setDraft} />
+          <Step2Distribution
+            data={draft!}
+            onChange={setDraft}
+            minNecesidad={hasDeficit ? undefined : minNecesidad}
+          />
+          {hasDeficit && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+              <p className="text-sm text-amber-800">
+                Tus necesidades ({formatCents(essentialNeedsTotalCents)})
+                superan tus ingresos fijos ({formatCents(fixedIncomesTotalCents)}
+                ) en{" "}
+                {formatCents(essentialNeedsTotalCents - fixedIncomesTotalCents)}
+                . Ningún reparto puede cubrir esto sin corregir esos datos.
+              </p>
+              <label className="mt-2 flex items-center gap-2 text-sm text-amber-800">
+                <input
+                  type="checkbox"
+                  checked={deficitAcknowledged}
+                  onChange={(e) =>
+                    setAcknowledgedDeficitKey(
+                      e.target.checked ? deficitKey : null,
+                    )
+                  }
+                />
+                Continuar con déficit
+              </label>
+            </div>
+          )}
           {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
           <div className="mt-4 flex gap-2">
             <button
@@ -224,10 +291,13 @@ function DistributionSection() {
   );
 }
 
-function SourcesSection() {
+function IncomeSourcesSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState<Source[] | null>(null);
+  const [sourcesDraft, setSourcesDraft] = useState<Source[] | null>(null);
+  const [fixedIncomesDraft, setFixedIncomesDraft] = useState<
+    FixedIncome[] | null
+  >(null);
   const [saving, setSaving] = useState(false);
 
   if (!user || !userProfile) return null;
@@ -235,23 +305,33 @@ function SourcesSection() {
   const currentProfile = userProfile;
 
   function handleExpand() {
-    setDraft(currentProfile.sources);
+    setSourcesDraft(currentProfile.sources);
+    setFixedIncomesDraft(currentProfile.fixedIncomes ?? []);
     setExpanded(true);
   }
   function handleCancel() {
-    setDraft(null);
+    setSourcesDraft(null);
+    setFixedIncomesDraft(null);
     setExpanded(false);
   }
   async function handleSave() {
-    if (!draft) return;
+    if (!sourcesDraft || !fixedIncomesDraft) return;
     setSaving(true);
     try {
-      await updateUserProfile(currentUser.uid, { sources: draft });
-      setUserProfile({ ...currentProfile, sources: draft });
-      setDraft(null);
+      await updateUserProfile(currentUser.uid, {
+        sources: sourcesDraft,
+        fixedIncomes: fixedIncomesDraft,
+      });
+      setUserProfile({
+        ...currentProfile,
+        sources: sourcesDraft,
+        fixedIncomes: fixedIncomesDraft,
+      });
+      setSourcesDraft(null);
+      setFixedIncomesDraft(null);
       setExpanded(false);
     } catch (err) {
-      console.error("Error al actualizar fuentes:", err);
+      console.error("Error al actualizar ingresos:", err);
     } finally {
       setSaving(false);
     }
@@ -265,14 +345,25 @@ function SourcesSection() {
           onClick={handleExpand}
           className="flex w-full items-center justify-between px-4 py-3"
         >
-          <span className="text-sm text-stone-900">Fuentes de ingreso</span>
+          <span className="text-sm text-stone-900">Ingresos</span>
           <span className="text-sm text-stone-400">
             {currentProfile.sources.length}
           </span>
         </button>
       ) : (
         <div className="p-4">
-          <Step1Sources data={draft!} onChange={setDraft} />
+          <StepIncomeSources
+            sources={sourcesDraft!}
+            fixedIncomes={fixedIncomesDraft!}
+            onChange={(sources, fixedIncomes) => {
+              setSourcesDraft(sources);
+              setFixedIncomesDraft(fixedIncomes);
+            }}
+          />
+          <p className="mt-2 text-xs text-stone-400">
+            El monto fijo solo actualiza el % mínimo de Necesidad sugerido. No
+            cambia el mes en curso.
+          </p>
           <div className="mt-4 flex gap-2">
             <button
               type="button"
@@ -300,10 +391,13 @@ function SourcesSection() {
 function SubcategoriesSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState<Record<
+  const [subcategoriesDraft, setSubcategoriesDraft] = useState<Record<
     "necesidad" | "ocio",
     string[]
   > | null>(null);
+  const [essentialNeedsDraft, setEssentialNeedsDraft] = useState<
+    EssentialNeed[] | null
+  >(null);
   const [saving, setSaving] = useState(false);
 
   if (!user || !userProfile) return null;
@@ -315,20 +409,30 @@ function SubcategoriesSection() {
     currentProfile.subcategories.ocio.length;
 
   function handleExpand() {
-    setDraft(currentProfile.subcategories);
+    setSubcategoriesDraft(currentProfile.subcategories);
+    setEssentialNeedsDraft(currentProfile.essentialNeeds ?? []);
     setExpanded(true);
   }
   function handleCancel() {
-    setDraft(null);
+    setSubcategoriesDraft(null);
+    setEssentialNeedsDraft(null);
     setExpanded(false);
   }
   async function handleSave() {
-    if (!draft) return;
+    if (!subcategoriesDraft || !essentialNeedsDraft) return;
     setSaving(true);
     try {
-      await updateUserProfile(currentUser.uid, { subcategories: draft });
-      setUserProfile({ ...currentProfile, subcategories: draft });
-      setDraft(null);
+      await updateUserProfile(currentUser.uid, {
+        subcategories: subcategoriesDraft,
+        essentialNeeds: essentialNeedsDraft,
+      });
+      setUserProfile({
+        ...currentProfile,
+        subcategories: subcategoriesDraft,
+        essentialNeeds: essentialNeedsDraft,
+      });
+      setSubcategoriesDraft(null);
+      setEssentialNeedsDraft(null);
       setExpanded(false);
     } catch (err) {
       console.error("Error al actualizar subcategorías:", err);
@@ -350,7 +454,18 @@ function SubcategoriesSection() {
         </button>
       ) : (
         <div className="p-4">
-          <Step3Subcategories data={draft!} onChange={setDraft} />
+          <Step3Subcategories
+            data={subcategoriesDraft!}
+            essentialNeeds={essentialNeedsDraft!}
+            onChange={(subcategories, essentialNeeds) => {
+              setSubcategoriesDraft(subcategories);
+              setEssentialNeedsDraft(essentialNeeds);
+            }}
+          />
+          <p className="mt-2 text-xs text-stone-400">
+            El monto en Necesidad solo actualiza el % mínimo sugerido. No
+            cambia el mes en curso.
+          </p>
           <div className="mt-4 flex gap-2">
             <button
               type="button"
@@ -612,8 +727,12 @@ function SavingsGoalsSection() {
   );
 }
 
+const ADMIN_UID = import.meta.env.VITE_ADMIN_UID;
+
 export default function Settings() {
+  const { user } = useAuthStore();
   const [loggingOut, setLoggingOut] = useState(false);
+  const isAdmin = !!ADMIN_UID && user?.uid === ADMIN_UID;
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -640,10 +759,21 @@ export default function Settings() {
         </h2>
         <div className="mt-2 divide-y divide-stone-200 rounded-2xl border border-stone-200 bg-white overflow-hidden">
           <DistributionSection />
-          <SourcesSection />
+          <IncomeSourcesSection />
           <SubcategoriesSection />
           <PaymentMethodsSection />
           <SavingsGoalsSection />
+          {isAdmin && (
+            <Link
+              to="/admin"
+              className="flex w-full items-center justify-between px-4 py-3"
+            >
+              <span className="text-sm text-stone-900">
+                Panel de administrador
+              </span>
+              <span className="text-sm text-stone-400">›</span>
+            </Link>
+          )}
           <Link
             to="/close-month"
             className="flex w-full items-center justify-between px-4 py-3"

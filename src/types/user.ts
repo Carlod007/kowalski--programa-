@@ -24,6 +24,18 @@ export type SavingsGoal = {
   createdAt: Timestamp | null;
 };
 
+export type FixedIncome = {
+  id: string;
+  name: string;
+  monthlyAmountCents: number;
+};
+
+export type EssentialNeed = {
+  id: string;
+  name: string;
+  monthlyAmountCents: number;
+};
+
 export type User = {
   name: string;
   email: string;
@@ -36,4 +48,6 @@ export type User = {
   lastClosedMonth: string | null;
   savingsTotalCents: number;
   savingsGoals: SavingsGoal[];
+  fixedIncomes?: FixedIncome[];
+  essentialNeeds?: EssentialNeed[];
 };

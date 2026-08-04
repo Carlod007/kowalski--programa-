@@ -15,8 +15,10 @@ import History from "@/pages/History";
 import EditTransaction from "@/pages/EditTransaction";
 import { lazy, Suspense } from "react";
 import Settings from "@/pages/Settings";
+import AdminOnboarding from "@/pages/AdminOnboarding";
 
 const ChartsScreen = lazy(() => import("@/pages/ChartsScreen"));
+const ADMIN_UID = import.meta.env.VITE_ADMIN_UID;
 
 function LoadingScreen() {
   return (
@@ -65,6 +67,13 @@ function ProtectedLayout() {
   if (!userProfile) return <Navigate to="/login" replace />;
   if (!userProfile.onboardingCompleted)
     return <Navigate to="/onboarding" replace />;
+  return <Outlet />;
+}
+
+function AdminGuard() {
+  const { user } = useAuthStore();
+  if (!ADMIN_UID || user?.uid !== ADMIN_UID)
+    return <Navigate to="/dashboard" replace />;
   return <Outlet />;
 }
 
@@ -140,6 +149,15 @@ const router = createBrowserRouter([
       {
         path: "/settings",
         element: <Settings />,
+      },
+      {
+        element: <AdminGuard />,
+        children: [
+          {
+            path: "/admin",
+            element: <AdminOnboarding />,
+          },
+        ],
       },
     ],
   },

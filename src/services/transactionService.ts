@@ -8,6 +8,7 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { calculateProportionalSplit } from "@/utils/distribution";
 import type { SavingsGoal, User } from "@/types/user";
 import type {
   ExpenseTransaction,
@@ -149,6 +150,7 @@ export async function updateIncome(
   newValues: {
     amountCents: number;
     source: string;
+    sourceId?: string;
     description?: string;
   },
 ): Promise<void> {
@@ -191,21 +193,11 @@ export async function updateIncome(
       throw new Error("El monto debe ser mayor a 0");
     }
 
-    const originalTotal = tx.amountCents;
-    const necesidadShare =
-      originalTotal > 0 ? tx.distribution.necesidad / originalTotal : 0;
-    const ocioShare =
-      originalTotal > 0 ? tx.distribution.ocio / originalTotal : 0;
-
-    const newNecesidad = Math.floor(newValues.amountCents * necesidadShare);
-    const newOcio = Math.floor(newValues.amountCents * ocioShare);
-    const newAhorro = newValues.amountCents - newNecesidad - newOcio;
-
-    const newSplit = {
-      necesidad: newNecesidad,
-      ocio: newOcio,
-      ahorro: newAhorro,
-    };
+    const newSplit = calculateProportionalSplit(
+      newValues.amountCents,
+      tx.amountCents,
+      tx.distribution,
+    );
 
     transaction.update(monthRef, {
       totalIncomeCents: increment(newValues.amountCents - tx.amountCents),
@@ -224,6 +216,7 @@ export async function updateIncome(
     transaction.update(txRef, {
       amountCents: newValues.amountCents,
       source: newValues.source,
+      ...(newValues.sourceId ? { sourceId: newValues.sourceId } : {}),
       distribution: newSplit,
       description: newValues.description
         ? newValues.description

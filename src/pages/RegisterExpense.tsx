@@ -174,6 +174,7 @@ function ExpenseDetailStep({
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<DetailFormValues>({
     resolver: zodResolver(detailSchema),
@@ -182,8 +183,19 @@ function ExpenseDetailStep({
 
   const subcategories = userProfile?.subcategories[category] ?? [];
   const paymentMethods = userProfile?.paymentMethods ?? [];
+  const essentialNeeds = userProfile?.essentialNeeds ?? [];
   const meta = CATEGORY_META[category];
   const status = getCategoryStatus(capCents, spentCents);
+
+  function handleSelectSubcategory(sub: string) {
+    setSubcategory(sub);
+    if (category === "necesidad") {
+      const matched = essentialNeeds.find((n) => n.name === sub);
+      if (matched) {
+        setValue("amount", (matched.monthlyAmountCents / 100).toString());
+      }
+    }
+  }
 
   async function saveExpense(values: DetailFormValues) {
     if (!user || !subcategory || !paymentMethod) return;
@@ -314,7 +326,7 @@ function ExpenseDetailStep({
                 <button
                   key={sub}
                   type="button"
-                  onClick={() => setSubcategory(sub)}
+                  onClick={() => handleSelectSubcategory(sub)}
                   aria-pressed={subcategory === sub}
                   className={`rounded-full border px-3 py-1.5 text-sm ${
                     subcategory === sub

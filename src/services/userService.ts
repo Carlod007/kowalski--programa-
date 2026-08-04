@@ -32,6 +32,8 @@ export async function createUserProfile(
     lastClosedMonth: null,
     savingsTotalCents: 0,
     savingsGoals: [],
+    fixedIncomes: [],
+    essentialNeeds: [],
   };
   await setDoc(ref, profile);
   return profile;
