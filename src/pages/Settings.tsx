@@ -212,7 +212,11 @@ function DistributionSection() {
           <Step2Distribution
             data={draft!}
             onChange={setDraft}
-            minNecesidad={hasDeficit ? undefined : minNecesidad}
+            minNecesidad={
+              fixedIncomesTotalCents > 0 && !hasDeficit
+                ? minNecesidad
+                : undefined
+            }
           />
           {hasDeficit && (
             <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">

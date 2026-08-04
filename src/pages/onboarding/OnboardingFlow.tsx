@@ -136,7 +136,11 @@ export default function OnboardingFlow({
             onChange={(distribution) =>
               setFormData((d) => ({ ...d, distribution }))
             }
-            minNecesidad={hasDeficit ? undefined : minNecesidad}
+            minNecesidad={
+              fixedIncomesTotalCents > 0 && !hasDeficit
+                ? minNecesidad
+                : undefined
+            }
           />
           {hasDeficit && (
             <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3">

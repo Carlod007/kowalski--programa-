@@ -63,21 +63,28 @@ export default function Step2Distribution({
                   Ya se acreditó este mes - se aplicará desde el próximo
                 </p>
               )}
-              {key === "necesidad" && belowMinimum && (
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-red-500">
-                    Según tus ingresos y necesidades declaradas, Necesidad
-                    debería ser al menos {minNecesidad}%
+              {key === "necesidad" &&
+                minNecesidad !== undefined &&
+                (belowMinimum ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-red-500">
+                      Según tus ingresos y necesidades declaradas, Necesidad
+                      debería ser al menos {minNecesidad}%
+                    </p>
+                    <button
+                      type="button"
+                      onClick={applyRecommendation}
+                      className="shrink-0 text-xs font-medium text-teal-600 underline"
+                    >
+                      Aplicar recomendación
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-stone-400">
+                    Mínimo recomendado según tus ingresos y necesidades:{" "}
+                    {minNecesidad}% (ya lo cumples)
                   </p>
-                  <button
-                    type="button"
-                    onClick={applyRecommendation}
-                    className="shrink-0 text-xs font-medium text-teal-600 underline"
-                  >
-                    Aplicar recomendación
-                  </button>
-                </div>
-              )}
+                ))}
             </div>
           );
         },
