@@ -4,12 +4,13 @@ import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import {
   getMonthMovements,
-  getMonthInitialAhorroSplit,
+  getMonthInitialSplit,
   type MovementWithId,
 } from "@/services/movementService";
 import { getMonthId, shiftMonthId, formatMonthLabel, formatDateLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import { CATEGORY_META } from "@/utils/category";
+import { calculateDistribution } from "@/utils/distribution";
 import type { Month } from "@/types/month";
 import type { Category } from "@/types/transaction";
 import BackButton from "@/components/BackButton";
@@ -18,55 +19,12 @@ const CURRENT_MONTH_ID = getMonthId();
 
 export default function Movements() {
   const user = useAuthStore((s) => s.user);
+  const savingsTotalCents = useAuthStore(
+    (s) => s.userProfile?.savingsTotalCents ?? 0,
+  );
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
-  const [month, setMonth] = useState<Month | null>(null);
-  const [movements, setMovements] = useState<MovementWithId[]>([]);
-  const [initialSplitAhorroCents, setInitialSplitAhorroCents] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!user) return;
-
-    const monthRef = doc(db, "users", user.uid, "months", viewedMonthId);
-    const unsubMonth = onSnapshot(
-      monthRef,
-      (snap) => {
-        setMonth(snap.exists() ? (snap.data() as Month) : null);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("onSnapshot mes falló:", err);
-        setLoading(false);
-      },
-    );
-
-    const unsubMovements = getMonthMovements(user.uid, viewedMonthId, setMovements);
-    const unsubInitialSplit = getMonthInitialAhorroSplit(
-      user.uid,
-      viewedMonthId,
-      setInitialSplitAhorroCents,
-    );
-
-    return () => {
-      unsubMonth();
-      unsubMovements();
-      unsubInitialSplit();
-    };
-  }, [user, viewedMonthId]);
 
   if (!user) return null;
-
-  const movedToAhorroCents = movements
-    .filter((m) => m.destination === "ahorro")
-    .reduce((sum, m) => sum + m.amountCents, 0);
-  const ahorroContributedCents = month?.ahorroContributedCents ?? 0;
-  // No se infiere por resta: el reparto inicial se lee directo de cada
-  // ingreso. Lo que sobra sin explicar (viejos ajustes anteriores a este
-  // historial, o correcciones de datos) se muestra aparte, nunca se le
-  // atribuye al reparto inicial.
-  const untrackedCents =
-    ahorroContributedCents - initialSplitAhorroCents - movedToAhorroCents;
-  const isUntrackedDeterminable = untrackedCents >= 0;
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
@@ -106,6 +64,99 @@ export default function Movements() {
         </p>
       </div>
 
+      <MovementsContent
+        key={viewedMonthId}
+        userId={user.uid}
+        monthId={viewedMonthId}
+        savingsTotalCents={savingsTotalCents}
+      />
+    </div>
+  );
+}
+
+function MovementsContent({
+  userId,
+  monthId,
+  savingsTotalCents,
+}: {
+  userId: string;
+  monthId: string;
+  savingsTotalCents: number;
+}) {
+  const [month, setMonth] = useState<Month | null>(null);
+  const [movements, setMovements] = useState<MovementWithId[]>([]);
+  const [initialSplitAhorroCents, setInitialSplitAhorroCents] = useState(0);
+  const [isInitialSplitDeterminable, setIsInitialSplitDeterminable] =
+    useState(true);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const monthRef = doc(db, "users", userId, "months", monthId);
+    const unsubMonth = onSnapshot(
+      monthRef,
+      (snap) => {
+        setMonth(snap.exists() ? (snap.data() as Month) : null);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("onSnapshot mes falló:", err);
+        setLoading(false);
+      },
+    );
+
+    const unsubMovements = getMonthMovements(userId, monthId, setMovements);
+    const unsubInitialSplit = getMonthInitialSplit(
+      userId,
+      monthId,
+      (split) => {
+        setInitialSplitAhorroCents(split?.ahorro ?? 0);
+        setIsInitialSplitDeterminable(split !== null);
+      },
+    );
+
+    return () => {
+      unsubMonth();
+      unsubMovements();
+      unsubInitialSplit();
+    };
+  }, [userId, monthId]);
+
+  const movedToAhorroCents = movements
+    .filter((m) => m.destination === "ahorro")
+    .reduce((sum, m) => sum + m.amountCents, 0);
+  const movedOutOfAhorroCents = movements
+    .filter((m) => m.origin === "ahorro")
+    .reduce((sum, m) => sum + m.amountCents, 0);
+  const ahorroContributedCents = month?.ahorroContributedCents ?? 0;
+  // No se infiere por resta: el reparto inicial se lee directo de cada
+  // ingreso. Lo que sobra sin explicar (viejos ajustes anteriores a este
+  // historial, o correcciones de datos) se muestra aparte, nunca se le
+  // atribuye al reparto inicial.
+  const untrackedCents =
+    ahorroContributedCents - initialSplitAhorroCents - movedToAhorroCents;
+  const isUntrackedDeterminable =
+    isInitialSplitDeterminable && untrackedCents >= 0;
+  // "Aporte neto" sí resta las salidas (a diferencia de ahorroContributedCents,
+  // que el código nunca decrementa cuando se saca plata de Ahorro) - es un
+  // dato adicional más honesto, no reemplaza al de arriba.
+  const netContributionCents =
+    initialSplitAhorroCents + movedToAhorroCents - movedOutOfAhorroCents;
+  const pureAhorroCap = month
+    ? calculateDistribution(month.totalIncomeCents, month.distribution).ahorro
+    : 0;
+  // % actual de Ahorro: siempre desde el aporte neto de ESTE mes, nunca
+  // desde savingsTotalCents (es acumulado de varios meses, no comparable
+  // contra el ingreso de un solo mes). Si hay un ajuste sin rastrear, no se
+  // inventa un %: se muestra "no determinable".
+  const ahorroActualPct =
+    month && month.totalIncomeCents > 0
+      ? ((netContributionCents / month.totalIncomeCents) * 100).toFixed(1)
+      : null;
+  const isAhorroActualDeterminable =
+    isInitialSplitDeterminable && untrackedCents === 0;
+
+  return (
+    <>
       {loading ? (
         <p className="mt-8 text-center text-stone-400">Cargando...</p>
       ) : !month ? (
@@ -125,7 +176,9 @@ export default function Movements() {
               <div className="flex items-center justify-between">
                 <span className="text-stone-600">Del reparto inicial</span>
                 <span className="font-medium text-stone-900">
-                  {formatCents(initialSplitAhorroCents)}
+                  {isInitialSplitDeterminable
+                    ? formatCents(initialSplitAhorroCents)
+                    : "No determinable"}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -134,7 +187,7 @@ export default function Movements() {
                   {formatCents(movedToAhorroCents)}
                 </span>
               </div>
-              {untrackedCents !== 0 && (
+              {(untrackedCents !== 0 || !isInitialSplitDeterminable) && (
                 <div className="flex items-center justify-between">
                   <span className="text-stone-600">
                     {isUntrackedDeterminable
@@ -151,6 +204,59 @@ export default function Movements() {
             </div>
           </div>
 
+          <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-stone-400">
+              Balance de Ahorro este mes
+            </p>
+            <div className="mt-3 flex flex-col gap-1 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-stone-600">Plan inicial</span>
+                <span className="font-medium text-stone-900">
+                  {month.distribution.ahorro}% ·{" "}
+                  {formatCents(pureAhorroCap)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-stone-600">Actual</span>
+                <span className="font-medium text-stone-900">
+                  {!isAhorroActualDeterminable
+                    ? "No determinable"
+                    : netContributionCents < 0
+                      ? "Aporte neto negativo"
+                      : ahorroActualPct !== null
+                        ? `${ahorroActualPct}%`
+                        : "—"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-stone-600">Movido hacia Ahorro</span>
+                <span className="font-medium text-emerald-700">
+                  +{formatCents(movedToAhorroCents)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-stone-600">Movido fuera de Ahorro</span>
+                <span className="font-medium text-red-600">
+                  -{formatCents(movedOutOfAhorroCents)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between border-t border-stone-100 pt-2">
+                <span className="text-stone-600">Aporte neto del mes</span>
+                <span className="font-medium text-stone-900">
+                  {formatCents(netContributionCents)}
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between border-t border-stone-100 pt-3">
+              <span className="text-sm text-stone-600">
+                Saldo acumulado global
+              </span>
+              <span className="text-lg font-semibold text-teal-700">
+                {formatCents(savingsTotalCents)}
+              </span>
+            </div>
+          </div>
+
           <div className="mt-6 flex flex-col gap-3">
             {movements.length === 0 ? (
               <p className="py-8 text-center text-stone-400">
@@ -164,7 +270,7 @@ export default function Movements() {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
 

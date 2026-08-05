@@ -4,6 +4,7 @@ import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth, moveSurplus } from "@/services/monthService";
+import { getMonthInitialSplit } from "@/services/movementService";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
@@ -11,8 +12,8 @@ import {
   CATEGORY_META,
   getCategoryStatus,
 } from "@/utils/category";
-import { calculateDistribution } from "@/utils/distribution";
 import type { Month, MonthCaps } from "@/types/month";
+import type { Distribution } from "@/types/transaction";
 import BottomNav from "@/components/BottomNav";
 
 const CURRENT_MONTH_ID = getMonthId();
@@ -38,6 +39,10 @@ export default function Dashboard() {
 
   const canGoForward = viewedMonthId < CURRENT_MONTH_ID;
   const isViewingCurrentMonth = viewedMonthId === CURRENT_MONTH_ID;
+  const essentialNeedsTotalCents = (userProfile?.essentialNeeds ?? []).reduce(
+    (sum, n) => sum + n.monthlyAmountCents,
+    0,
+  );
 
   return (
     <div className="min-h-dvh bg-stone-50 pb-24">
@@ -68,6 +73,7 @@ export default function Dashboard() {
         canGoForward={canGoForward}
         isCurrentMonth={isViewingCurrentMonth}
         savingsTotalCents={userProfile?.savingsTotalCents ?? 0}
+        essentialNeedsTotalCents={essentialNeedsTotalCents}
         onPrev={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
         onNext={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
       />
@@ -100,6 +106,7 @@ function MonthSummary({
   canGoForward,
   isCurrentMonth,
   savingsTotalCents,
+  essentialNeedsTotalCents,
   onPrev,
   onNext,
 }: {
@@ -108,11 +115,15 @@ function MonthSummary({
   canGoForward: boolean;
   isCurrentMonth: boolean;
   savingsTotalCents: number;
+  essentialNeedsTotalCents: number;
   onPrev: () => void;
   onNext: () => void;
 }) {
   const [month, setMonth] = useState<Month | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initialSplit, setInitialSplit] = useState<Distribution | null>(null);
+  const [initialSplitDeterminable, setInitialSplitDeterminable] =
+    useState(true);
 
   useEffect(() => {
     const monthRef = doc(db, "users", userId, "months", monthId);
@@ -127,6 +138,14 @@ function MonthSummary({
         setLoading(false);
       },
     );
+    return () => unsubscribe();
+  }, [userId, monthId]);
+
+  useEffect(() => {
+    const unsubscribe = getMonthInitialSplit(userId, monthId, (split) => {
+      setInitialSplit(split);
+      setInitialSplitDeterminable(split !== null);
+    });
     return () => unsubscribe();
   }, [userId, monthId]);
 
@@ -187,6 +206,9 @@ function MonthSummary({
                 monthId={monthId}
                 isCurrentMonth={isCurrentMonth}
                 savingsTotalCents={savingsTotalCents}
+                essentialNeedsTotalCents={essentialNeedsTotalCents}
+                initialSplit={initialSplit}
+                initialSplitDeterminable={initialSplitDeterminable}
               />
             ))}
             <SavingsRow
@@ -212,6 +234,9 @@ function CategoryRow({
   monthId,
   isCurrentMonth,
   savingsTotalCents,
+  essentialNeedsTotalCents,
+  initialSplit,
+  initialSplitDeterminable,
 }: {
   category: keyof MonthCaps;
   month: Month;
@@ -219,6 +244,9 @@ function CategoryRow({
   monthId: string;
   isCurrentMonth: boolean;
   savingsTotalCents: number;
+  essentialNeedsTotalCents: number;
+  initialSplit: Distribution | null;
+  initialSplitDeterminable: boolean;
 }) {
   const meta = CATEGORY_META[category];
   const cap = month.capsCents[category];
@@ -248,11 +276,17 @@ function CategoryRow({
   const destinations: CategoryKey[] =
     category === "necesidad" ? ["ocio", "ahorro"] : ["necesidad", "ahorro"];
 
-  const pureCap = calculateDistribution(
-    month.totalIncomeCents,
-    month.distribution,
-  )[category];
-  const capWasAdjusted = cap !== pureCap;
+  // Reparto inicial real: suma de lo que quedó guardado en cada transacción
+  // de ingreso (no un cálculo aproximado), así que la comparación es exacta
+  // - cualquier diferencia, aunque sea de 1 centavo, es un ajuste real (un
+  // excedente heredado del mes anterior o un movimiento entre categorías),
+  // nunca una suposición por redondeo.
+  const realInitialCap = initialSplit ? initialSplit[category] : null;
+  const capWasAdjusted = realInitialCap !== null && cap !== realInitialCap;
+  const actualPct =
+    month.totalIncomeCents > 0
+      ? ((cap / month.totalIncomeCents) * 100).toFixed(1)
+      : "0.0";
 
   return (
     <div
@@ -308,6 +342,19 @@ function CategoryRow({
             {formatCents(cap)}
           </p>
 
+          {!initialSplitDeterminable ? (
+            <p className="mt-1 text-xs text-stone-400">
+              Reparto inicial no determinable
+            </p>
+          ) : (
+            capWasAdjusted && (
+              <p className="mt-1 text-xs text-stone-400">
+                Plan inicial: {formatCents(realInitialCap ?? 0)} ({pct}%) ·
+                Actual: {actualPct}%
+              </p>
+            )
+          )}
+
           {canMoveSurplus && !showMove && (
             <button
               type="button"
@@ -327,6 +374,7 @@ function CategoryRow({
               destinations={destinations}
               capsCents={month.capsCents}
               savingsTotalCents={savingsTotalCents}
+              essentialNeedsTotalCents={essentialNeedsTotalCents}
               onClose={() => setShowMove(false)}
             />
           )}
@@ -335,7 +383,9 @@ function CategoryRow({
 
       {showInfo && (
         <div className="absolute right-4 top-10 z-10 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
-          {capWasAdjusted
+          {!initialSplitDeterminable
+            ? `Tu tope actual es ${formatCents(cap)}. No pudimos determinar si corresponde exactamente a tu ${pct}% inicial de este mes (datos incompletos).`
+            : capWasAdjusted
             ? `Tu tope actual es ${formatCents(cap)}. No es solo tu ${pct}% inicial: incluye ingresos recibidos con otro % o plata movida entre categorías este mes.`
             : `Tu tope actual es ${formatCents(cap)}, según tu ${pct}% inicial de este mes.`}
         </div>
@@ -352,6 +402,7 @@ function MoveSurplusPanel({
   destinations,
   capsCents,
   savingsTotalCents,
+  essentialNeedsTotalCents,
   onClose,
 }: {
   userId: string;
@@ -361,12 +412,16 @@ function MoveSurplusPanel({
   destinations: CategoryKey[];
   capsCents: MonthCaps;
   savingsTotalCents: number;
+  essentialNeedsTotalCents: number;
   onClose: () => void;
 }) {
   const [amountInput, setAmountInput] = useState("");
   const [destination, setDestination] = useState<CategoryKey>(destinations[0]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [acknowledgedWarningFor, setAcknowledgedWarningFor] = useState<
+    string | null
+  >(null);
 
   const parsedAmount = parseFloat(amountInput);
   const amountCents =
@@ -374,6 +429,27 @@ function MoveSurplusPanel({
       ? Math.round(parsedAmount * 100)
       : 0;
   const exceedsAvailable = amountCents > disponibleCents;
+
+  // Sacar excedente de Necesidad podría dejar menos que lo que aún falta
+  // cubrir de tus necesidades esenciales declaradas este mes. Se compara
+  // contra lo PENDIENTE (declarado menos ya gastado en Necesidad), no
+  // contra el total - si ya cubriste tus necesidades con lo gastado, no
+  // debería seguir avisando. Aviso, no bloqueo: el excedente es tuyo.
+  const remainingDisponibleCents = disponibleCents - amountCents;
+  const spentNecesidadCents =
+    origin === "necesidad" ? capsCents.necesidad - disponibleCents : 0;
+  const needsStillPendingCents = Math.max(
+    0,
+    essentialNeedsTotalCents - spentNecesidadCents,
+  );
+  const needsWarning =
+    origin === "necesidad" &&
+    needsStillPendingCents > 0 &&
+    amountCents > 0 &&
+    !exceedsAvailable &&
+    remainingDisponibleCents < needsStillPendingCents;
+  const warningKey = `${amountCents}:${destination}`;
+  const warningAcknowledged = acknowledgedWarningFor === warningKey;
 
   function currentValue(cat: CategoryKey): number {
     return cat === "ahorro" ? savingsTotalCents : capsCents[cat];
@@ -386,6 +462,10 @@ function MoveSurplusPanel({
     }
     if (exceedsAvailable) {
       setError("El monto supera el disponible");
+      return;
+    }
+    if (needsWarning && !warningAcknowledged) {
+      setError('Marca "Continuar de todas formas" para confirmar');
       return;
     }
     setSaving(true);
@@ -444,6 +524,28 @@ function MoveSurplusPanel({
           Supera el disponible ({formatCents(disponibleCents)})
         </p>
       )}
+
+      {needsWarning && (
+        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2">
+          <p className="text-xs text-amber-800">
+            Aún te faltan {formatCents(needsStillPendingCents)} por cubrir de
+            tus necesidades esenciales este mes. Con este movimiento te
+            quedaría {formatCents(remainingDisponibleCents)} disponible en
+            Necesidad - podría no alcanzarte.
+          </p>
+          <label className="mt-1.5 flex items-center gap-2 text-xs text-amber-800">
+            <input
+              type="checkbox"
+              checked={warningAcknowledged}
+              onChange={(e) =>
+                setAcknowledgedWarningFor(e.target.checked ? warningKey : null)
+              }
+            />
+            Continuar de todas formas
+          </label>
+        </div>
+      )}
+
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
 
       <div className="mt-3 flex gap-2">
@@ -458,7 +560,12 @@ function MoveSurplusPanel({
         <button
           type="button"
           onClick={handleConfirm}
-          disabled={saving || amountCents <= 0 || exceedsAvailable}
+          disabled={
+            saving ||
+            amountCents <= 0 ||
+            exceedsAvailable ||
+            (needsWarning && !warningAcknowledged)
+          }
           className="flex-1 rounded-lg bg-teal-600 py-1.5 text-xs font-medium text-white disabled:opacity-50"
         >
           {saving ? "Moviendo..." : "Confirmar"}
@@ -562,6 +669,7 @@ function SavingsRow({
           destinations={["necesidad", "ocio"]}
           capsCents={capsCents}
           savingsTotalCents={savingsTotalCents}
+          essentialNeedsTotalCents={0}
           onClose={() => setShowMove(false)}
         />
       )}
