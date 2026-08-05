@@ -265,7 +265,9 @@ function CategoryRow({
           <p className="text-sm font-medium text-stone-900">{meta.label}</p>
         </div>
         <div className="flex items-center gap-1">
-          <p className="text-xs text-stone-400">{pct}%</p>
+          <p className="text-xs text-stone-400">
+            {capWasAdjusted ? `${pct}% inicial` : `${pct}%`}
+          </p>
           <button
             type="button"
             onClick={() => setShowInfo((v) => !v)}
@@ -302,7 +304,8 @@ function CategoryRow({
           </div>
 
           <p className="mt-2 text-xs text-stone-400">
-            Gastado {formatCents(spent)} de {formatCents(cap)}
+            Gastado {formatCents(spent)} de tu tope actual:{" "}
+            {formatCents(cap)}
           </p>
 
           {canMoveSurplus && !showMove && (
@@ -333,8 +336,8 @@ function CategoryRow({
       {showInfo && (
         <div className="absolute right-4 top-10 z-10 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
           {capWasAdjusted
-            ? `Tu tope es ${formatCents(cap)}. No es solo tu ${pct}% actual: incluye ingresos recibidos con otro % o plata movida entre categorías este mes.`
-            : `Tu tope es ${formatCents(cap)}, según tu ${pct}% configurado.`}
+            ? `Tu tope actual es ${formatCents(cap)}. No es solo tu ${pct}% inicial: incluye ingresos recibidos con otro % o plata movida entre categorías este mes.`
+            : `Tu tope actual es ${formatCents(cap)}, según tu ${pct}% inicial de este mes.`}
         </div>
       )}
     </div>
@@ -530,19 +533,25 @@ function SavingsRow({
       </p>
 
       <div className="mt-3 flex items-center justify-between border-t border-stone-100 pt-3 text-xs text-stone-400">
-        <span>{percentage}% este mes</span>
-        <span>+{formatCents(contributedThisMonth)}</span>
+        <span>Reparto inicial: {percentage}%</span>
+        <span>Aportado este mes: +{formatCents(contributedThisMonth)}</span>
       </div>
 
-      {canMoveSurplus && !showMove && (
-        <button
-          type="button"
-          onClick={() => setShowMove(true)}
-          className="mt-2 text-xs font-medium text-teal-600"
-        >
-          Usar ahorro →
-        </button>
-      )}
+      <div className="mt-2 flex flex-col items-start gap-2">
+        {canMoveSurplus && !showMove && (
+          <button
+            type="button"
+            onClick={() => setShowMove(true)}
+            className="text-xs font-medium text-teal-600"
+          >
+            Usar ahorro →
+          </button>
+        )}
+
+        <Link to="/movements" className="text-xs font-medium text-teal-600">
+          Ver movimientos →
+        </Link>
+      </div>
 
       {showMove && (
         <MoveSurplusPanel
@@ -559,9 +568,10 @@ function SavingsRow({
 
       {showInfo && (
         <div className="absolute bottom-full left-4 mb-2 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
-          Tu Ahorro nunca se resetea - cada mes se suma más, y solo baja cuando
-          comprás una meta. El "+" de abajo es lo que entró este mes, no tu
-          crecimiento neto: si sacaste plata de Ahorro, no se resta de ahí.
+          El acumulado nunca se resetea - cada mes se suma más, y solo baja
+          cuando comprás una meta. "Aportado este mes" es lo que entró este
+          mes (reparto inicial + lo que hayas movido acá), no tu crecimiento
+          neto: si sacaste plata de Ahorro, no se resta de ahí.
         </div>
       )}
     </div>

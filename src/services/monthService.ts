@@ -1,4 +1,5 @@
 import {
+  collection,
   doc,
   increment,
   runTransaction,
@@ -6,11 +7,12 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { getMonthId } from "@/utils/date";
+import { getMonthId, toDateInputValue } from "@/utils/date";
 import { calculateDistribution } from "@/utils/distribution";
 import type { Month, MonthCaps } from "@/types/month";
 import type { Distribution } from "@/types/transaction";
 import type { User } from "@/types/user";
+import type { Movement } from "@/types/movement";
 
 function buildEmptyMonth(distribution: Distribution): WithFieldValue<Month> {
   return {
@@ -202,6 +204,7 @@ export async function moveSurplus(
   amountCents: number,
   origin: "necesidad" | "ocio" | "ahorro",
   destination: "necesidad" | "ocio" | "ahorro",
+  reason?: string,
 ): Promise<void> {
   if (amountCents <= 0) {
     throw new Error("El monto debe ser mayor a 0");
@@ -212,6 +215,9 @@ export async function moveSurplus(
 
   const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
+  const movementRef = doc(
+    collection(db, "users", userId, "months", monthId, "movements"),
+  );
 
   await runTransaction(db, async (transaction) => {
     const [userSnap, monthSnap] = await Promise.all([
@@ -265,5 +271,17 @@ export async function moveSurplus(
         savingsTotalCents: increment(savingsTotalDelta),
       });
     }
+
+    const movement: WithFieldValue<Movement> = {
+      userId,
+      monthId,
+      origin,
+      destination,
+      amountCents,
+      transactionDate: toDateInputValue(),
+      serverDate: serverTimestamp(),
+      ...(reason ? { reason } : {}),
+    };
+    transaction.set(movementRef, movement);
   });
 }

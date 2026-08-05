@@ -25,3 +25,7 @@ dist-ssr
 .env
 docs/
 .firebase/
+
+# Credenciales de Firebase Admin (scripts/ locales, nunca al repo)
+serviceAccountKey*.json
+*-firebase-adminsdk-*.json
