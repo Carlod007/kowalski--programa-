@@ -389,21 +389,19 @@ function CategoryRow({
               <p className="text-stone-400">de {formatCents(cap)}</p>
             </div>
 
-            {!initialSplitDeterminable ? (
+            {(capWasAdjusted || !initialSplitDeterminable) && (
               <div>
-                <p className="text-stone-400">Plan</p>
-                <p className="mt-0.5 text-stone-400">No determinable</p>
+                <p className="text-stone-400">Actual</p>
+                <p className="mt-0.5 font-medium text-stone-900">
+                  {actualPct}%
+                </p>
+                <p className="text-stone-400">
+                  Inicial:{" "}
+                  {initialSplitDeterminable
+                    ? `${formatCents(realInitialCap ?? 0)} (${pct}%)`
+                    : "No determinable"}
+                </p>
               </div>
-            ) : (
-              capWasAdjusted && (
-                <div>
-                  <p className="text-stone-400">Plan</p>
-                  <p className="mt-0.5 font-medium text-stone-900">
-                    {formatCents(realInitialCap ?? 0)} ({pct}%)
-                  </p>
-                  <p className="text-stone-400">Actual: {actualPct}%</p>
-                </div>
-              )
             )}
           </div>
 
