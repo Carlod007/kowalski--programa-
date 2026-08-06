@@ -5,6 +5,7 @@ import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth, moveSurplus } from "@/services/monthService";
 import { getMonthInitialSplit } from "@/services/movementService";
+import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
@@ -14,7 +15,9 @@ import {
 } from "@/utils/category";
 import type { Month, MonthCaps } from "@/types/month";
 import type { Distribution } from "@/types/transaction";
+import type { MovementWithId } from "@/services/movementService";
 import BottomNav from "@/components/BottomNav";
+import MovementRow from "@/components/MovementRow";
 
 const CURRENT_MONTH_ID = getMonthId();
 
@@ -124,6 +127,7 @@ function MonthSummary({
   const [initialSplit, setInitialSplit] = useState<Distribution | null>(null);
   const [initialSplitDeterminable, setInitialSplitDeterminable] =
     useState(true);
+  const [showMovementsModal, setShowMovementsModal] = useState(false);
 
   useEffect(() => {
     const monthRef = doc(db, "users", userId, "months", monthId);
@@ -148,6 +152,18 @@ function MonthSummary({
     });
     return () => unsubscribe();
   }, [userId, monthId]);
+
+  const {
+    movements,
+    netContributionCents,
+    ahorroActualPct,
+    isAhorroActualDeterminable,
+  } = useAhorroBreakdown(
+    userId,
+    monthId,
+    month?.ahorroContributedCents ?? 0,
+    month?.totalIncomeCents ?? 0,
+  );
 
   return (
     <>
@@ -219,10 +235,30 @@ function MonthSummary({
               savingsTotalCents={savingsTotalCents}
               contributedThisMonth={month.ahorroContributedCents}
               percentage={month.distribution.ahorro}
+              netContributionCents={netContributionCents}
+              ahorroActualPct={ahorroActualPct}
+              isAhorroActualDeterminable={isAhorroActualDeterminable}
             />
+            <button
+              type="button"
+              onClick={() => setShowMovementsModal(true)}
+              className="flex items-center justify-between rounded-2xl border border-stone-200 bg-white px-4 py-3 text-left"
+            >
+              <span className="text-sm font-medium text-stone-900">
+                Movimientos de excedentes
+              </span>
+              <span className="text-xs font-medium text-teal-600">Ver →</span>
+            </button>
           </>
         )}
       </main>
+
+      {showMovementsModal && (
+        <MovementsModal
+          movements={movements}
+          onClose={() => setShowMovementsModal(false)}
+        />
+      )}
     </>
   );
 }
@@ -319,17 +355,6 @@ function CategoryRow({
         </p>
       ) : (
         <>
-          <p
-            className={`mt-3 text-2xl font-semibold ${
-              status.isLow ? "text-red-600" : "text-emerald-600"
-            }`}
-          >
-            {formatCents(status.disponible)}{" "}
-            <span className="text-sm font-normal text-stone-400">
-              disponible
-            </span>
-          </p>
-
           <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-stone-200">
             <div
               className={`h-full rounded-full ${status.overCap ? "bg-red-500" : meta.bar}`}
@@ -337,23 +362,49 @@ function CategoryRow({
             />
           </div>
 
-          <p className="mt-2 text-xs text-stone-400">
-            Gastado {formatCents(spent)} de tu tope actual:{" "}
-            {formatCents(cap)}
+          <p
+            className={`mt-3 text-center text-2xl font-semibold ${
+              status.isLow ? "text-red-600" : "text-teal-700"
+            }`}
+          >
+            {formatCents(status.disponible)}
+          </p>
+          <p className="text-center text-sm font-normal text-stone-400">
+            disponible
           </p>
 
-          {!initialSplitDeterminable ? (
-            <p className="mt-1 text-xs text-stone-400">
-              Reparto inicial no determinable
-            </p>
-          ) : (
-            capWasAdjusted && (
-              <p className="mt-1 text-xs text-stone-400">
-                Plan inicial: {formatCents(realInitialCap ?? 0)} ({pct}%) ·
-                Actual: {actualPct}%
+          <div
+            className={`mt-3 grid gap-3 rounded-xl bg-stone-50 p-3 text-xs ${
+              capWasAdjusted || !initialSplitDeterminable
+                ? "grid-cols-2"
+                : "grid-cols-1"
+            }`}
+          >
+            <div>
+              <p className="text-stone-400">Gastado</p>
+              <p className="mt-0.5 font-medium text-stone-900">
+                {formatCents(spent)}
               </p>
-            )
-          )}
+              <p className="text-stone-400">de {formatCents(cap)}</p>
+            </div>
+
+            {!initialSplitDeterminable ? (
+              <div>
+                <p className="text-stone-400">Plan</p>
+                <p className="mt-0.5 text-stone-400">No determinable</p>
+              </div>
+            ) : (
+              capWasAdjusted && (
+                <div>
+                  <p className="text-stone-400">Plan</p>
+                  <p className="mt-0.5 font-medium text-stone-900">
+                    {formatCents(realInitialCap ?? 0)} ({pct}%)
+                  </p>
+                  <p className="text-stone-400">Actual: {actualPct}%</p>
+                </div>
+              )
+            )}
+          </div>
 
           {canMoveSurplus && !showMove && (
             <button
@@ -583,6 +634,9 @@ function SavingsRow({
   savingsTotalCents,
   contributedThisMonth,
   percentage,
+  netContributionCents,
+  ahorroActualPct,
+  isAhorroActualDeterminable,
 }: {
   userId: string;
   monthId: string;
@@ -591,6 +645,9 @@ function SavingsRow({
   savingsTotalCents: number;
   contributedThisMonth: number;
   percentage: number;
+  netContributionCents: number;
+  ahorroActualPct: string | null;
+  isAhorroActualDeterminable: boolean;
 }) {
   const meta = CATEGORY_META.ahorro;
   const [showInfo, setShowInfo] = useState(false);
@@ -635,28 +692,57 @@ function SavingsRow({
         </div>
       </div>
 
-      <p className="mt-3 text-2xl font-semibold text-teal-700">
+      <p className="mt-3 text-center text-2xl font-semibold text-teal-700">
         {formatCents(savingsTotalCents)}
       </p>
 
-      <div className="mt-3 flex items-center justify-between border-t border-stone-100 pt-3 text-xs text-stone-400">
-        <span>Reparto inicial: {percentage}%</span>
-        <span>Aportado este mes: +{formatCents(contributedThisMonth)}</span>
+      <div className="mt-3 grid grid-cols-3 gap-3 rounded-xl bg-stone-50 p-3 text-xs">
+        <div>
+          <p className="text-stone-400">Reparto inicial</p>
+          <p className="mt-0.5 font-medium text-stone-900">{percentage}%</p>
+        </div>
+        <div>
+          <p className="text-stone-400">Aportado este mes</p>
+          <p className="mt-0.5 font-medium text-stone-900">
+            +{formatCents(contributedThisMonth)}
+          </p>
+        </div>
+        <div>
+          <p className="text-stone-400">Actual</p>
+          <p className="mt-0.5 font-medium text-stone-900">
+            {!isAhorroActualDeterminable
+              ? "No determinable"
+              : netContributionCents < 0
+                ? "Aporte neto negativo"
+                : ahorroActualPct !== null
+                  ? `${ahorroActualPct}%`
+                  : "—"}
+          </p>
+        </div>
       </div>
 
-      <div className="mt-2 flex flex-col items-start gap-2">
+      <div
+        className={`mt-2 grid gap-2 text-xs font-medium text-teal-600 ${
+          canMoveSurplus && !showMove
+            ? "grid-cols-2 divide-x divide-stone-100"
+            : "grid-cols-1"
+        }`}
+      >
         {canMoveSurplus && !showMove && (
           <button
             type="button"
             onClick={() => setShowMove(true)}
-            className="text-xs font-medium text-teal-600"
+            className="pr-2"
           >
             Usar ahorro →
           </button>
         )}
 
-        <Link to="/movements" className="text-xs font-medium text-teal-600">
-          Ver movimientos →
+        <Link
+          to="/movements"
+          className={canMoveSurplus && !showMove ? "pl-2" : ""}
+        >
+          Ver detalle →
         </Link>
       </div>
 
@@ -682,6 +768,50 @@ function SavingsRow({
           neto: si sacaste plata de Ahorro, no se resta de ahí.
         </div>
       )}
+    </div>
+  );
+}
+
+function MovementsModal({
+  movements,
+  onClose,
+}: {
+  movements: MovementWithId[];
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-5 pb-5 sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-stone-900">
+            Movimientos de excedentes
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-100 text-stone-500"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="mt-3 flex flex-col gap-3">
+          {movements.length === 0 ? (
+            <p className="py-4 text-center text-sm text-stone-400">
+              No hay movimientos registrados este mes
+            </p>
+          ) : (
+            movements.map((m) => <MovementRow key={m._id} movement={m} />)
+          )}
+        </div>
+      </div>
     </div>
   );
 }

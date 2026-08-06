@@ -2,17 +2,11 @@ import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import {
-  getMonthMovements,
-  getMonthInitialSplit,
-  type MovementWithId,
-} from "@/services/movementService";
-import { getMonthId, shiftMonthId, formatMonthLabel, formatDateLabel } from "@/utils/date";
+import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
+import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
-import { CATEGORY_META } from "@/utils/category";
 import { calculateDistribution } from "@/utils/distribution";
 import type { Month } from "@/types/month";
-import type { Category } from "@/types/transaction";
 import BackButton from "@/components/BackButton";
 
 const CURRENT_MONTH_ID = getMonthId();
@@ -84,10 +78,6 @@ function MovementsContent({
   savingsTotalCents: number;
 }) {
   const [month, setMonth] = useState<Month | null>(null);
-  const [movements, setMovements] = useState<MovementWithId[]>([]);
-  const [initialSplitAhorroCents, setInitialSplitAhorroCents] = useState(0);
-  const [isInitialSplitDeterminable, setIsInitialSplitDeterminable] =
-    useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -103,57 +93,30 @@ function MovementsContent({
         setLoading(false);
       },
     );
-
-    const unsubMovements = getMonthMovements(userId, monthId, setMovements);
-    const unsubInitialSplit = getMonthInitialSplit(
-      userId,
-      monthId,
-      (split) => {
-        setInitialSplitAhorroCents(split?.ahorro ?? 0);
-        setIsInitialSplitDeterminable(split !== null);
-      },
-    );
-
-    return () => {
-      unsubMonth();
-      unsubMovements();
-      unsubInitialSplit();
-    };
+    return () => unsubMonth();
   }, [userId, monthId]);
 
-  const movedToAhorroCents = movements
-    .filter((m) => m.destination === "ahorro")
-    .reduce((sum, m) => sum + m.amountCents, 0);
-  const movedOutOfAhorroCents = movements
-    .filter((m) => m.origin === "ahorro")
-    .reduce((sum, m) => sum + m.amountCents, 0);
+  const {
+    initialSplitAhorroCents,
+    isInitialSplitDeterminable,
+    movedToAhorroCents,
+    movedOutOfAhorroCents,
+    untrackedCents,
+    isUntrackedDeterminable,
+    netContributionCents,
+    ahorroActualPct,
+    isAhorroActualDeterminable,
+  } = useAhorroBreakdown(
+    userId,
+    monthId,
+    month?.ahorroContributedCents ?? 0,
+    month?.totalIncomeCents ?? 0,
+  );
+
   const ahorroContributedCents = month?.ahorroContributedCents ?? 0;
-  // No se infiere por resta: el reparto inicial se lee directo de cada
-  // ingreso. Lo que sobra sin explicar (viejos ajustes anteriores a este
-  // historial, o correcciones de datos) se muestra aparte, nunca se le
-  // atribuye al reparto inicial.
-  const untrackedCents =
-    ahorroContributedCents - initialSplitAhorroCents - movedToAhorroCents;
-  const isUntrackedDeterminable =
-    isInitialSplitDeterminable && untrackedCents >= 0;
-  // "Aporte neto" sí resta las salidas (a diferencia de ahorroContributedCents,
-  // que el código nunca decrementa cuando se saca plata de Ahorro) - es un
-  // dato adicional más honesto, no reemplaza al de arriba.
-  const netContributionCents =
-    initialSplitAhorroCents + movedToAhorroCents - movedOutOfAhorroCents;
   const pureAhorroCap = month
     ? calculateDistribution(month.totalIncomeCents, month.distribution).ahorro
     : 0;
-  // % actual de Ahorro: siempre desde el aporte neto de ESTE mes, nunca
-  // desde savingsTotalCents (es acumulado de varios meses, no comparable
-  // contra el ingreso de un solo mes). Si hay un ajuste sin rastrear, no se
-  // inventa un %: se muestra "no determinable".
-  const ahorroActualPct =
-    month && month.totalIncomeCents > 0
-      ? ((netContributionCents / month.totalIncomeCents) * 100).toFixed(1)
-      : null;
-  const isAhorroActualDeterminable =
-    isInitialSplitDeterminable && untrackedCents === 0;
 
   return (
     <>
@@ -256,46 +219,8 @@ function MovementsContent({
               </span>
             </div>
           </div>
-
-          <div className="mt-6 flex flex-col gap-3">
-            {movements.length === 0 ? (
-              <p className="py-8 text-center text-stone-400">
-                No hay movimientos registrados este mes
-              </p>
-            ) : (
-              movements.map((m) => (
-                <MovementRow key={m._id} movement={m} />
-              ))
-            )}
-          </div>
         </>
       )}
     </>
-  );
-}
-
-function MovementRow({ movement }: { movement: MovementWithId }) {
-  const originMeta = CATEGORY_META[movement.origin as Category];
-  const destMeta = CATEGORY_META[movement.destination as Category];
-
-  return (
-    <div className="rounded-2xl border border-stone-200 bg-white p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium text-stone-900">
-          <span className={originMeta.text}>{originMeta.label}</span>
-          <span className="text-stone-400">→</span>
-          <span className={destMeta.text}>{destMeta.label}</span>
-        </div>
-        <span className="text-sm font-semibold text-teal-700">
-          {formatCents(movement.amountCents)}
-        </span>
-      </div>
-      <p className="mt-1 text-xs text-stone-400">
-        {formatDateLabel(movement.transactionDate)}
-      </p>
-      {movement.reason && (
-        <p className="mt-1 text-xs text-stone-500">{movement.reason}</p>
-      )}
-    </div>
   );
 }
