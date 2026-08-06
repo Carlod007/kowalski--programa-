@@ -18,6 +18,7 @@ import type { Distribution } from "@/types/transaction";
 import type { MovementWithId } from "@/services/movementService";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
+import CategoryIcon from "@/components/CategoryIcon";
 
 const CURRENT_MONTH_ID = getMonthId();
 
@@ -331,7 +332,7 @@ function CategoryRow({
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 rounded-full ${meta.bar}`} />
+          <CategoryIcon category={category} />
           <p className="text-sm font-medium text-stone-900">{meta.label}</p>
         </div>
         <div className="flex items-center gap-1">
@@ -676,7 +677,7 @@ function SavingsRow({
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 rounded-full ${meta.bar}`} />
+          <CategoryIcon category="ahorro" />
           <p className="text-sm font-medium text-stone-900">{meta.label}</p>
         </div>
         <div className="flex items-center gap-1">
