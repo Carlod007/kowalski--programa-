@@ -2,6 +2,7 @@
 import type { Category } from '@/types/transaction'
 import { CATEGORY_META, getCategoryStatus } from '@/utils/category'
 import { formatCents } from '@/utils/currency'
+import CategoryIcon from '@/components/CategoryIcon'
 
 type Props = {
   category: Category
@@ -20,24 +21,23 @@ export default function CategorySelectCard({ category, capCents, spentCents, sel
       type="button"
       onClick={() => onSelect(category)}
       aria-pressed={selected}
-      className={`w-full rounded-2xl border-2 p-4 text-left transition ${meta.bg} ${
-        selected ? meta.selectedBorder : 'border-stone-200'
-      }`}
+      className={`w-full rounded-2xl border-2 border-stone-200 p-4 text-left transition ${meta.bg}`}
     >
-      <div className="flex items-center justify-between">
-        <p className={`text-sm font-medium ${meta.text}`}>{meta.label}</p>
+      <div className="flex items-center gap-3">
+        <CategoryIcon category={category} />
+        <p className={`text-base font-semibold ${meta.text}`}>{meta.label}</p>
         {status.overCap && (
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+          <span className="ml-auto rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
             Excedido
           </span>
         )}
       </div>
 
       {status.isEmpty ? (
-        <p className="mt-1 text-sm text-stone-500">Aún sin ingresos registrados</p>
+        <p className="mt-3 text-sm text-stone-500">Aún sin ingresos registrados</p>
       ) : (
         <>
-          <p className={`mt-1 text-xl font-semibold ${status.isLow ? 'text-red-600' : 'text-stone-900'}`}>
+          <p className={`mt-3 text-xl font-semibold ${status.isLow ? 'text-red-600' : 'text-stone-900'}`}>
             {formatCents(status.disponible)}
             <span className="ml-1 text-sm font-normal text-stone-400">disponible</span>
           </p>
@@ -49,7 +49,7 @@ export default function CategorySelectCard({ category, capCents, spentCents, sel
             />
           </div>
 
-          <p className="mt-1 text-xs text-stone-400">
+          <p className="mt-2 text-xs text-stone-400">
             {formatCents(spentCents)} de {formatCents(capCents)}
           </p>
         </>

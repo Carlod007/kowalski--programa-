@@ -135,7 +135,6 @@ export default function RegisterExpense() {
         <SavingsSelectCard
           savingsTotalCents={userProfile?.savingsTotalCents ?? 0}
           contributedThisMonth={month?.ahorroContributedCents ?? 0}
-          percentage={month?.distribution.ahorro ?? 0}
           selected={false}
           onSelect={() => setStep("goal")}
         />
