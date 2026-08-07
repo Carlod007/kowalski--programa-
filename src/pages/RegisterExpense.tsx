@@ -26,6 +26,7 @@ import {
 import { formatCents } from "@/utils/currency";
 import CategorySelectCard from "@/components/CategorySelectCard";
 import SavingsSelectCard from "@/components/SavingsSelectCard";
+import CategoryIcon from "@/components/CategoryIcon";
 import type { Month, MonthCaps } from "@/types/month";
 import type { ExpenseTransaction } from "@/types/transaction";
 import { ArrowLeftIcon } from "@/components/BackButton";
@@ -185,13 +186,52 @@ function ExpenseDetailStep({
   const meta = CATEGORY_META[category];
   const status = getCategoryStatus(capCents, spentCents);
 
+  const essentialNeedNames = new Set(essentialNeeds.map((n) => n.name));
+  const fixedSubcategories = subcategories.filter((s) =>
+    essentialNeedNames.has(s),
+  );
+  const variableSubcategories = subcategories.filter(
+    (s) => !essentialNeedNames.has(s),
+  );
+
+  function renderSubcategoryChips(items: string[]) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {items.map((sub) => (
+          <button
+            key={sub}
+            type="button"
+            onClick={() => handleSelectSubcategory(sub)}
+            aria-pressed={subcategory === sub}
+            className={`rounded-full border-2 px-3 py-1.5 text-sm ${
+              subcategory === sub
+                ? `${meta.selectedBorder} ${meta.bg} ${meta.text}`
+                : "border-stone-300 text-stone-600"
+            }`}
+          >
+            {sub}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function handleSelectSubcategory(sub: string) {
+    if (subcategory === sub) {
+      setSubcategory(null);
+      if (category === "necesidad" && essentialNeeds.some((n) => n.name === sub)) {
+        setValue("amount", "");
+      }
+      return;
+    }
+
     setSubcategory(sub);
     if (category === "necesidad") {
       const matched = essentialNeeds.find((n) => n.name === sub);
-      if (matched) {
-        setValue("amount", (matched.monthlyAmountCents / 100).toString());
-      }
+      setValue(
+        "amount",
+        matched ? (matched.monthlyAmountCents / 100).toString() : "",
+      );
     }
   }
 
@@ -282,20 +322,27 @@ function ExpenseDetailStep({
         </button>
         {!status.isEmpty && (
           <span
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
               status.isLow
                 ? "border-red-200 bg-red-50 text-red-600"
                 : "border-emerald-200 bg-emerald-50 text-emerald-700"
             }`}
           >
+            <WalletIcon />
             {formatCents(status.disponible)} disponible
           </span>
         )}
       </div>
 
-      <h1 className={`mt-4 text-2xl font-semibold ${meta.text}`}>
-        {meta.label}
-      </h1>
+      <div className="mt-4 flex items-center gap-3">
+        <CategoryIcon category={category} />
+        <div>
+          <h1 className={`text-2xl font-semibold ${meta.text}`}>
+            {meta.label}
+          </h1>
+          <p className="text-sm text-stone-500">Registra tu egreso</p>
+        </div>
+      </div>
 
       <form
         onSubmit={handleSubmit(onSubmit)}
@@ -303,7 +350,8 @@ function ExpenseDetailStep({
       >
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-stone-700">Fecha</label>
-          <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
+          <div className="flex items-center gap-2 rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
+            <CalendarIcon />
             {formatDateLabel(today)}
           </div>
           <input type="hidden" value={today} {...register("date")} />
@@ -318,24 +366,33 @@ function ExpenseDetailStep({
             <p className="text-sm text-stone-500">
               No hay subcategorías configuradas para {meta.label}.
             </p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {subcategories.map((sub) => (
-                <button
-                  key={sub}
-                  type="button"
-                  onClick={() => handleSelectSubcategory(sub)}
-                  aria-pressed={subcategory === sub}
-                  className={`rounded-full border px-3 py-1.5 text-sm ${
-                    subcategory === sub
-                      ? `${meta.selectedBorder} ${meta.bg} ${meta.text} border-2`
-                      : "border-stone-300 text-stone-600"
-                  }`}
-                >
-                  {sub}
-                </button>
-              ))}
+          ) : category === "necesidad" ? (
+            <div className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-4">
+              {fixedSubcategories.length > 0 && (
+                <SubcategoryGroup
+                  title="Gastos fijos"
+                  items={fixedSubcategories}
+                  selected={subcategory}
+                  meta={meta}
+                  onSelect={handleSelectSubcategory}
+                />
+              )}
+              {fixedSubcategories.length > 0 &&
+                variableSubcategories.length > 0 && (
+                  <div className="border-t border-stone-100" />
+                )}
+              {variableSubcategories.length > 0 && (
+                <SubcategoryGroup
+                  title="Gastos variables"
+                  items={variableSubcategories}
+                  selected={subcategory}
+                  meta={meta}
+                  onSelect={handleSelectSubcategory}
+                />
+              )}
             </div>
+          ) : (
+            renderSubcategoryChips(subcategories)
           )}
         </div>
 
@@ -346,22 +403,23 @@ function ExpenseDetailStep({
               No hay métodos de pago configurados.
             </p>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {paymentMethods.map((pm) => (
-                <button
-                  key={pm.id}
-                  type="button"
-                  onClick={() => setPaymentMethod(pm.name)}
-                  aria-pressed={paymentMethod === pm.name}
-                  className={`rounded-full border px-3 py-1.5 text-sm ${
-                    paymentMethod === pm.name
-                      ? "border-2 border-stone-900 bg-stone-900 text-white"
-                      : "border-stone-300 text-stone-600"
-                  }`}
-                >
-                  {pm.name}
-                </button>
-              ))}
+            <div className="flex items-center gap-2 rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
+              <WalletIcon className="h-4 w-4 text-stone-400" />
+              <select
+                value={paymentMethod ?? ""}
+                onChange={(e) => setPaymentMethod(e.target.value || null)}
+                className="w-full flex-1 appearance-none bg-transparent text-sm outline-none"
+              >
+                <option value="" disabled>
+                  Selecciona un método
+                </option>
+                {paymentMethods.map((pm) => (
+                  <option key={pm.id} value={pm.name}>
+                    {pm.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon className="h-4 w-4 text-stone-400" />
             </div>
           )}
         </div>
@@ -439,6 +497,113 @@ function ExpenseDetailStep({
           {isSubmitting || saving ? "Guardando..." : "Guardar egreso"}
         </button>
       </form>
+    </div>
+  );
+}
+
+function WalletIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="3" y="6" width="18" height="13" rx="2" />
+      <path d="M3 10h18" />
+      <circle cx="17" cy="14.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4 text-stone-400"
+    >
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 9h18" />
+      <path d="M8 3v4M16 3v4" />
+    </svg>
+  );
+}
+
+const SUBCATEGORY_PREVIEW_COUNT = 3;
+
+function SubcategoryGroup({
+  title,
+  items,
+  selected,
+  meta,
+  onSelect,
+}: {
+  title: string;
+  items: string[];
+  selected: string | null;
+  meta: { selectedBorder: string; bg: string; text: string };
+  onSelect: (sub: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasMore = items.length > SUBCATEGORY_PREVIEW_COUNT;
+  const visible = expanded ? items : items.slice(0, SUBCATEGORY_PREVIEW_COUNT);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs font-medium text-stone-400">{title}</p>
+      <div className="grid grid-cols-3 gap-2">
+        {visible.map((sub) => (
+          <button
+            key={sub}
+            type="button"
+            onClick={() => onSelect(sub)}
+            aria-pressed={selected === sub}
+            className={`rounded-full border-2 px-2 py-1.5 text-center text-sm ${
+              selected === sub
+                ? `${meta.selectedBorder} ${meta.bg} ${meta.text}`
+                : "border-stone-300 text-stone-600"
+            }`}
+          >
+            {sub}
+          </button>
+        ))}
+      </div>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1 self-start text-xs font-medium text-stone-500"
+        >
+          {expanded ? "Ver menos" : "Ver más"}
+          <ChevronDownIcon
+            className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`}
+          />
+        </button>
+      )}
     </div>
   );
 }
