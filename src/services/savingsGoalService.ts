@@ -174,13 +174,21 @@ export async function saveGoalDefinitions(
   drafts: SavingsGoal[],
 ): Promise<void> {
   await updateGoals(userId, (currentGoals) => {
-    const allocatedById = new Map(
-      currentGoals.map((g) => [g.id, getGoalAllocated(g)]),
-    );
-    return drafts.map((draft) => ({
-      ...draft,
-      allocatedCents: allocatedById.get(draft.id) ?? 0,
-    }));
+    const currentById = new Map(currentGoals.map((g) => [g.id, g]));
+    return drafts.map((draft) => {
+      const current = currentById.get(draft.id);
+      // Del borrador solo se toma lo que Ajustes puede editar: nombre,
+      // objetivo y tipo. Todo lo que cambia por operaciones (asignaciones y
+      // compras) se relee del servidor, porque el borrador pudo quedar viejo.
+      return {
+        ...draft,
+        allocatedCents: current ? getGoalAllocated(current) : 0,
+        purchaseCount: current?.purchaseCount ?? 0,
+        ...(current?.lastPurchasedAt
+          ? { lastPurchasedAt: current.lastPurchasedAt }
+          : {}),
+      };
+    });
   });
 }
 

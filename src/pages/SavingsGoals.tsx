@@ -250,6 +250,19 @@ function GoalCard({
         </div>
       </div>
 
+      {/* El atajo solo aparece en metas de compra completas. Un fondo no se
+          "termina": llegar al objetivo significa estar cubierto, no que sea
+          hora de gastarlo. Empujar a usarlo ahí iría contra su propósito. */}
+      {progress.canPurchase && (
+        <Link
+          to="/expense/new"
+          state={{ goalId: goal.id }}
+          className="mt-3 block rounded-xl bg-teal-600 py-2 text-center text-xs font-medium text-white"
+        >
+          Comprar ahora →
+        </Link>
+      )}
+
       {mode === null ? (
         <div className="mt-2 flex gap-4">
           <button

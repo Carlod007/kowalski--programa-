@@ -577,6 +577,9 @@ function SavingsGoalsSection() {
   const [costInput, setCostInput] = useState("");
   const [kindInput, setKindInput] = useState<GoalKind>("compra");
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCost, setEditCost] = useState("");
   const [saving, setSaving] = useState(false);
   const [goalError, setGoalError] = useState<string | null>(null);
 
@@ -593,6 +596,7 @@ function SavingsGoalsSection() {
     setNameInput("");
     setCostInput("");
     setKindInput("compra");
+    setEditingId(null);
     setGoalError(null);
     setExpanded(false);
   }
@@ -625,6 +629,36 @@ function SavingsGoalsSection() {
     setNameInput("");
     setCostInput("");
     setKindInput("compra");
+  }
+  function startEditGoal(goal: SavingsGoal) {
+    setEditingId(goal.id);
+    setEditName(goal.name);
+    setEditCost((goal.targetCents / 100).toString());
+    setGoalError(null);
+  }
+  function saveEditGoal() {
+    if (!draft || !editingId) return;
+    const name = editName.trim();
+    const cost = parseFloat(editCost);
+    if (!name) {
+      setGoalError("Falta el nombre de la meta");
+      return;
+    }
+    if (!editCost || !Number.isFinite(cost) || cost <= 0) {
+      setGoalError("El costo debe ser mayor a 0");
+      return;
+    }
+    setGoalError(null);
+    // Solo se cambian nombre y objetivo. Lo asignado no se toca acá: el
+    // servidor lo conserva al guardar (ver saveGoalDefinitions).
+    setDraft(
+      draft.map((g) =>
+        g.id === editingId
+          ? { ...g, name, targetCents: Math.round(cost * 100) }
+          : g,
+      ),
+    );
+    setEditingId(null);
   }
   function handleRemoveGoal(id: string) {
     if (!draft) return;
@@ -686,42 +720,85 @@ function SavingsGoalsSection() {
                   key={goal.id}
                   className="rounded-lg border border-stone-200 px-3 py-2"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm text-stone-900">{goal.name}</p>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                            kind === "fondo"
-                              ? "bg-teal-50 text-teal-700"
-                              : "bg-stone-100 text-stone-500"
-                          }`}
-                        >
-                          {kind === "fondo" ? "Fondo" : "Compra"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-stone-400">
-                        {formatCents(goal.targetCents)}
-                        {allocated > 0 &&
-                          ` · ${formatCents(allocated)} asignado`}
-                      </p>
-                      {wasPurchased(goal) && (
-                        <p className="text-xs text-emerald-700">
-                          Ya adquirida
-                          {goal.lastPurchasedAt
-                            ? ` el ${formatDateLabel(goal.lastPurchasedAt)}`
-                            : ""}
-                        </p>
-                      )}
+                  {editingId === goal.id ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        autoFocus
+                        className="min-w-0 flex-1 rounded-lg border border-stone-300 px-2 py-1 text-sm outline-none"
+                      />
+                      <input
+                        value={editCost}
+                        onChange={(e) => setEditCost(e.target.value)}
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        placeholder="Costo S/"
+                        className="w-24 rounded-lg border border-stone-300 px-2 py-1 text-sm outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={saveEditGoal}
+                        className="text-xs font-medium text-teal-600"
+                      >
+                        Guardar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="text-xs text-stone-400"
+                      >
+                        Cancelar
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveGoal(goal.id)}
-                      className="text-xs font-medium text-red-600"
-                    >
-                      {confirmRemoveId === goal.id ? "Confirmar" : "Quitar"}
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-stone-900">{goal.name}</p>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                              kind === "fondo"
+                                ? "bg-teal-50 text-teal-700"
+                                : "bg-stone-100 text-stone-500"
+                            }`}
+                          >
+                            {kind === "fondo" ? "Fondo" : "Compra"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-stone-400">
+                          {formatCents(goal.targetCents)}
+                          {allocated > 0 &&
+                            ` · ${formatCents(allocated)} asignado`}
+                        </p>
+                        {wasPurchased(goal) && (
+                          <p className="text-xs text-emerald-700">
+                            Ya adquirida
+                            {goal.lastPurchasedAt
+                              ? ` el ${formatDateLabel(goal.lastPurchasedAt)}`
+                              : ""}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => startEditGoal(goal)}
+                          className="text-xs font-medium text-teal-600"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveGoal(goal.id)}
+                          className="text-xs font-medium text-red-600"
+                        >
+                          {confirmRemoveId === goal.id ? "Confirmar" : "Quitar"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {confirmRemoveId === goal.id && (
                     <p className="mt-1 text-xs text-amber-700">
                       Los {formatCents(allocated)} asignados vuelven a quedar

@@ -12,7 +12,7 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth } from "@/services/monthService";
@@ -59,9 +59,14 @@ type DetailFormValues = z.infer<typeof detailSchema>;
 export default function RegisterExpense() {
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
+  const location = useLocation();
+  // Atajo desde Metas: se entra con la meta ya elegida, saltando el paso de
+  // categoría. Si no viene nada, el flujo arranca como siempre.
+  const initialGoalId =
+    (location.state as { goalId?: string } | null)?.goalId ?? null;
   const [month, setMonth] = useState<Month | null>(null);
   const [loading, setLoading] = useState(true);
-  const [step, setStep] = useState<Step>("category");
+  const [step, setStep] = useState<Step>(initialGoalId ? "goal" : "category");
   const [category, setCategory] = useState<keyof MonthCaps | null>(null);
 
   useEffect(() => {
@@ -107,7 +112,12 @@ export default function RegisterExpense() {
   }
 
   if (step === "goal") {
-    return <GoalPurchaseStep onBack={() => setStep("category")} />;
+    return (
+      <GoalPurchaseStep
+        initialGoalId={initialGoalId}
+        onBack={() => setStep("category")}
+      />
+    );
   }
 
   return (
@@ -681,11 +691,19 @@ function SubcategoryGroup({
   );
 }
 
-function GoalPurchaseStep({ onBack }: { onBack: () => void }) {
+function GoalPurchaseStep({
+  initialGoalId,
+  onBack,
+}: {
+  initialGoalId: string | null;
+  onBack: () => void;
+}) {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
-  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(
+    initialGoalId,
+  );
   const [amountInput, setAmountInput] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [description, setDescription] = useState("");
