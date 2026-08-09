@@ -16,6 +16,7 @@ import EditTransaction from "@/pages/EditTransaction";
 import { lazy, Suspense } from "react";
 import Settings from "@/pages/Settings";
 import Movements from "@/pages/Movements";
+import SavingsGoals from "@/pages/SavingsGoals";
 import AdminOnboarding from "@/pages/AdminOnboarding";
 
 const ChartsScreen = lazy(() => import("@/pages/ChartsScreen"));
@@ -154,6 +155,10 @@ const router = createBrowserRouter([
       {
         path: "/movements",
         element: <Movements />,
+      },
+      {
+        path: "/goals",
+        element: <SavingsGoals />,
       },
       {
         element: <AdminGuard />,

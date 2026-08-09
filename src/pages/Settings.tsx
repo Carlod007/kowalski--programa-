@@ -13,11 +13,15 @@ import type {
   Source,
   PaymentMethod,
   SavingsGoal,
+  GoalKind,
   FixedIncome,
   EssentialNeed,
 } from "@/types/user";
 import type { Distribution } from "@/types/transaction";
 import { formatCents } from "@/utils/currency";
+import { getGoalAllocated, getGoalKind, wasPurchased } from "@/utils/savings";
+import { formatDateLabel } from "@/utils/date";
+import { saveGoalDefinitions } from "@/services/savingsGoalService";
 import BackButton from "@/components/BackButton";
 import { Link } from "react-router-dom";
 
@@ -566,11 +570,13 @@ function PaymentMethodsSection() {
 }
 
 function SavingsGoalsSection() {
-  const { user, userProfile, setUserProfile } = useAuthStore();
+  const { user, userProfile } = useAuthStore();
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState<SavingsGoal[] | null>(null);
   const [nameInput, setNameInput] = useState("");
   const [costInput, setCostInput] = useState("");
+  const [kindInput, setKindInput] = useState<GoalKind>("compra");
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [goalError, setGoalError] = useState<string | null>(null);
 
@@ -586,6 +592,7 @@ function SavingsGoalsSection() {
     setDraft(null);
     setNameInput("");
     setCostInput("");
+    setKindInput("compra");
     setGoalError(null);
     setExpanded(false);
   }
@@ -611,25 +618,40 @@ function SavingsGoalsSection() {
       name,
       targetCents: Math.round(cost * 100),
       createdAt: null,
+      kind: kindInput,
+      allocatedCents: 0,
     };
     setDraft([...draft, goal]);
     setNameInput("");
     setCostInput("");
+    setKindInput("compra");
   }
   function handleRemoveGoal(id: string) {
     if (!draft) return;
+    // Quitar una meta con plata asignada no borra plata: al dejar de estar
+    // reservada, vuelve sola a "sin asignar" (que se calcula por resta).
+    // Igual se pide confirmar, porque el usuario pierde ese apartado.
+    const goal = draft.find((g) => g.id === id);
+    if (goal && getGoalAllocated(goal) > 0 && confirmRemoveId !== id) {
+      setConfirmRemoveId(id);
+      return;
+    }
+    setConfirmRemoveId(null);
     setDraft(draft.filter((g) => g.id !== id));
   }
   async function handleSave() {
     if (!draft) return;
     setSaving(true);
     try {
-      await updateUserProfile(currentUser.uid, { savingsGoals: draft });
-      setUserProfile({ ...currentProfile, savingsGoals: draft });
+      // No se usa updateUserProfile: guardar el borrador tal cual pisaría lo
+      // que cada meta tenga asignado. saveGoalDefinitions conserva ese dato
+      // releyéndolo del servidor. El perfil se refresca solo por onSnapshot.
+      await saveGoalDefinitions(currentUser.uid, draft);
       setDraft(null);
       setExpanded(false);
     } catch (err) {
       console.error("Error al actualizar metas:", err);
+      setGoalError("No se pudieron guardar las metas. Intenta de nuevo.");
     } finally {
       setSaving(false);
     }
@@ -656,26 +678,59 @@ function SavingsGoalsSection() {
           </p>
 
           <div className="mt-3 flex flex-col gap-2">
-            {draft!.map((goal) => (
-              <div
-                key={goal.id}
-                className="flex items-center justify-between rounded-lg border border-stone-200 px-3 py-2"
-              >
-                <div>
-                  <p className="text-sm text-stone-900">{goal.name}</p>
-                  <p className="text-xs text-stone-400">
-                    {formatCents(goal.targetCents)}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveGoal(goal.id)}
-                  className="text-xs font-medium text-red-600"
+            {draft!.map((goal) => {
+              const allocated = getGoalAllocated(goal);
+              const kind = getGoalKind(goal);
+              return (
+                <div
+                  key={goal.id}
+                  className="rounded-lg border border-stone-200 px-3 py-2"
                 >
-                  Quitar
-                </button>
-              </div>
-            ))}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-stone-900">{goal.name}</p>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            kind === "fondo"
+                              ? "bg-teal-50 text-teal-700"
+                              : "bg-stone-100 text-stone-500"
+                          }`}
+                        >
+                          {kind === "fondo" ? "Fondo" : "Compra"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-stone-400">
+                        {formatCents(goal.targetCents)}
+                        {allocated > 0 &&
+                          ` · ${formatCents(allocated)} asignado`}
+                      </p>
+                      {wasPurchased(goal) && (
+                        <p className="text-xs text-emerald-700">
+                          Ya adquirida
+                          {goal.lastPurchasedAt
+                            ? ` el ${formatDateLabel(goal.lastPurchasedAt)}`
+                            : ""}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveGoal(goal.id)}
+                      className="text-xs font-medium text-red-600"
+                    >
+                      {confirmRemoveId === goal.id ? "Confirmar" : "Quitar"}
+                    </button>
+                  </div>
+                  {confirmRemoveId === goal.id && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      Los {formatCents(allocated)} asignados vuelven a quedar
+                      sin asignar. No se pierde nada.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {goalError && (
@@ -705,6 +760,29 @@ function SavingsGoalsSection() {
               +
             </button>
           </div>
+
+          <div className="mt-2 flex gap-2">
+            {(["compra", "fondo"] as GoalKind[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKindInput(k)}
+                aria-pressed={kindInput === k}
+                className={`flex-1 rounded-lg border-2 px-2 py-1.5 text-xs ${
+                  kindInput === k
+                    ? "border-teal-500 bg-teal-50 text-teal-700"
+                    : "border-stone-300 text-stone-600"
+                }`}
+              >
+                {k === "compra" ? "Compra" : "Fondo"}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-stone-400 italic">
+            {kindInput === "fondo"
+              ? "Fondo: de libre disposición. Puedes retirar de a partes, incluso antes de llegar al objetivo (ej. colchón de emergencia)."
+              : "Compra: se usa completa y solo cuando junta su objetivo (ej. una compu, un juego)."}
+          </p>
 
           <div className="mt-4 flex gap-2">
             <button

@@ -9,6 +9,7 @@ import {
 import { db } from "@/lib/firebase";
 import { getMonthId, toDateInputValue } from "@/utils/date";
 import { calculateDistribution } from "@/utils/distribution";
+import { getUnassignedCents } from "@/utils/savings";
 import type { Month, MonthCaps } from "@/types/month";
 import type { Distribution } from "@/types/transaction";
 import type { User } from "@/types/user";
@@ -245,8 +246,19 @@ export async function moveSurplus(
         const label = origin === "necesidad" ? "Necesidad" : "Ocio";
         throw new Error(`El monto supera el excedente disponible de ${label}`);
       }
-    } else if (amountCents > user.savingsTotalCents) {
-      throw new Error("El monto supera el acumulado disponible en Ahorro");
+    } else {
+      // Sacar plata de Ahorro solo puede tocar lo que no está reservado para
+      // una meta. Si se permitiera vaciar por debajo de lo asignado, las metas
+      // quedarían prometiendo plata que ya no existe.
+      const unassigned = getUnassignedCents(
+        user.savingsTotalCents ?? 0,
+        user.savingsGoals ?? [],
+      );
+      if (amountCents > unassigned) {
+        throw new Error(
+          "El monto supera tu ahorro sin asignar. Libera plata de tus metas primero.",
+        );
+      }
     }
 
     const monthUpdate: Record<string, unknown> = {};

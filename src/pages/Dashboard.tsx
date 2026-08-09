@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth, moveSurplus } from "@/services/monthService";
 import { getMonthInitialSplit } from "@/services/movementService";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
+import { getAssignableCents } from "@/utils/savings";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
@@ -47,6 +48,11 @@ export default function Dashboard() {
     (sum, n) => sum + n.monthlyAmountCents,
     0,
   );
+  // Del ahorro solo se puede sacar lo que no está reservado para una meta.
+  const assignableCents = getAssignableCents(
+    userProfile?.savingsTotalCents ?? 0,
+    userProfile?.savingsGoals ?? [],
+  );
 
   return (
     <div className="min-h-dvh bg-stone-50 pb-24">
@@ -77,6 +83,7 @@ export default function Dashboard() {
         canGoForward={canGoForward}
         isCurrentMonth={isViewingCurrentMonth}
         savingsTotalCents={userProfile?.savingsTotalCents ?? 0}
+        assignableCents={assignableCents}
         essentialNeedsTotalCents={essentialNeedsTotalCents}
         onPrev={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
         onNext={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
@@ -110,6 +117,7 @@ function MonthSummary({
   canGoForward,
   isCurrentMonth,
   savingsTotalCents,
+  assignableCents,
   essentialNeedsTotalCents,
   onPrev,
   onNext,
@@ -119,6 +127,7 @@ function MonthSummary({
   canGoForward: boolean;
   isCurrentMonth: boolean;
   savingsTotalCents: number;
+  assignableCents: number;
   essentialNeedsTotalCents: number;
   onPrev: () => void;
   onNext: () => void;
@@ -234,6 +243,7 @@ function MonthSummary({
               isCurrentMonth={isCurrentMonth}
               capsCents={month.capsCents}
               savingsTotalCents={savingsTotalCents}
+              assignableCents={assignableCents}
               contributedThisMonth={month.ahorroContributedCents}
               percentage={month.distribution.ahorro}
               netContributionCents={netContributionCents}
@@ -307,8 +317,9 @@ function CategoryRow({
     }
   }, [showInfo]);
 
-  const canMoveSurplus =
-    isCurrentMonth && !status.isEmpty && status.disponible > 0;
+  // El botón se muestra siempre en el mes actual: si no queda excedente, se
+  // explica al pulsarlo en vez de desaparecer sin motivo aparente.
+  const hasSurplus = status.disponible > 0;
 
   const destinations: CategoryKey[] =
     category === "necesidad" ? ["ocio", "ahorro"] : ["necesidad", "ahorro"];
@@ -405,7 +416,9 @@ function CategoryRow({
             )}
           </div>
 
-          {canMoveSurplus && !showMove && (
+          {/* El botón solo se oculta cuando el panel real está abierto: si
+              apareció el aviso de "sin excedente", sigue a la vista. */}
+          {isCurrentMonth && !(showMove && hasSurplus) && (
             <button
               type="button"
               onClick={() => setShowMove(true)}
@@ -415,19 +428,34 @@ function CategoryRow({
             </button>
           )}
 
-          {showMove && (
-            <MoveSurplusPanel
-              userId={userId}
-              monthId={monthId}
-              origin={category}
-              disponibleCents={status.disponible}
-              destinations={destinations}
-              capsCents={month.capsCents}
-              savingsTotalCents={savingsTotalCents}
-              essentialNeedsTotalCents={essentialNeedsTotalCents}
-              onClose={() => setShowMove(false)}
-            />
-          )}
+          {showMove &&
+            (hasSurplus ? (
+              <MoveSurplusPanel
+                userId={userId}
+                monthId={monthId}
+                origin={category}
+                disponibleCents={status.disponible}
+                destinations={destinations}
+                capsCents={month.capsCents}
+                savingsTotalCents={savingsTotalCents}
+                essentialNeedsTotalCents={essentialNeedsTotalCents}
+                onClose={() => setShowMove(false)}
+              />
+            ) : (
+              <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+                <p className="text-xs text-amber-800">
+                  No te queda excedente en {meta.label} este mes: ya gastaste
+                  todo tu tope.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowMove(false)}
+                  className="mt-2 w-full rounded-lg border border-amber-400 bg-white py-1.5 text-xs font-medium text-amber-800"
+                >
+                  Entendido
+                </button>
+              </div>
+            ))}
         </>
       )}
 
@@ -631,6 +659,7 @@ function SavingsRow({
   isCurrentMonth,
   capsCents,
   savingsTotalCents,
+  assignableCents,
   contributedThisMonth,
   percentage,
   netContributionCents,
@@ -642,6 +671,7 @@ function SavingsRow({
   isCurrentMonth: boolean;
   capsCents: MonthCaps;
   savingsTotalCents: number;
+  assignableCents: number;
   contributedThisMonth: number;
   percentage: number;
   netContributionCents: number;
@@ -666,7 +696,9 @@ function SavingsRow({
     }
   }, [showInfo]);
 
-  const canMoveSurplus = isCurrentMonth && savingsTotalCents > 0;
+  // La opción se muestra siempre en el mes actual: si no hay plata libre, se
+  // explica al pulsarla en vez de desaparecer sin motivo aparente.
+  const hasAssignable = assignableCents > 0;
 
   return (
     <div
@@ -720,44 +752,54 @@ function SavingsRow({
         </div>
       </div>
 
-      <div
-        className={`mt-2 grid gap-2 text-xs font-medium text-teal-600 ${
-          canMoveSurplus && !showMove
-            ? "grid-cols-2 divide-x divide-stone-100"
-            : "grid-cols-1"
-        }`}
-      >
-        {canMoveSurplus && !showMove && (
-          <button
-            type="button"
-            onClick={() => setShowMove(true)}
-            className="pr-2"
-          >
+      {/* El botón solo se oculta cuando el panel real está abierto: si
+          apareció el aviso de "sin plata libre", sigue a la vista. */}
+      <div className="mt-2 flex flex-col items-start gap-2 text-xs font-medium text-teal-600">
+        {isCurrentMonth && !(showMove && hasAssignable) && (
+          <button type="button" onClick={() => setShowMove(true)}>
             Usar ahorro →
           </button>
         )}
-
-        <Link
-          to="/movements"
-          className={canMoveSurplus && !showMove ? "pl-2" : ""}
-        >
-          Ver detalle →
-        </Link>
+        <Link to="/goals">Metas →</Link>
+        <Link to="/movements">Ver detalle →</Link>
       </div>
 
-      {showMove && (
-        <MoveSurplusPanel
-          userId={userId}
-          monthId={monthId}
-          origin="ahorro"
-          disponibleCents={savingsTotalCents}
-          destinations={["necesidad", "ocio"]}
-          capsCents={capsCents}
-          savingsTotalCents={savingsTotalCents}
-          essentialNeedsTotalCents={0}
-          onClose={() => setShowMove(false)}
-        />
-      )}
+      {showMove &&
+        (hasAssignable ? (
+          <MoveSurplusPanel
+            userId={userId}
+            monthId={monthId}
+            origin="ahorro"
+            disponibleCents={assignableCents}
+            destinations={["necesidad", "ocio"]}
+            capsCents={capsCents}
+            savingsTotalCents={savingsTotalCents}
+            essentialNeedsTotalCents={0}
+            onClose={() => setShowMove(false)}
+          />
+        ) : (
+          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+            <p className="text-xs text-amber-800">
+              Todo tu ahorro está asignado a metas. Para mover plata, primero
+              libera una parte desde Metas.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowMove(false)}
+                className="flex-1 rounded-lg border border-amber-400 bg-white py-1.5 text-xs font-medium text-amber-800"
+              >
+                Entendido
+              </button>
+              <Link
+                to="/goals"
+                className="flex-1 rounded-lg bg-amber-600 py-1.5 text-center text-xs font-medium text-white"
+              >
+                Ir a Metas
+              </Link>
+            </div>
+          </div>
+        ))}
 
       {showInfo && (
         <div className="absolute bottom-full left-4 mb-2 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">

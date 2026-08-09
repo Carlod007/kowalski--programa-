@@ -66,19 +66,6 @@ export function getCategoryStatus(
   return { disponible, isEmpty: false, isLow, overCap, barWidth };
 }
 
-export type GoalStatus = {
-  progressCents: number;
-  isReached: boolean;
-  barWidth: number;
-};
-
-export function getGoalStatus(
-  targetCents: number,
-  savingsTotalCents: number,
-): GoalStatus {
-  const progressCents = Math.min(savingsTotalCents, targetCents);
-  const isReached = savingsTotalCents >= targetCents;
-  const barWidth =
-    targetCents === 0 ? 0 : Math.min(100, (progressCents / targetCents) * 100);
-  return { progressCents, isReached, barWidth };
-}
+// El progreso de una meta ya no se mide contra el ahorro total (eso hacía que
+// la misma plata contara para todas las metas a la vez). Ahora se mide contra
+// lo asignado a esa meta: ver getGoalProgress en @/utils/savings.

@@ -29,6 +29,12 @@ export type ExpenseTransaction = TransactionBase & {
   category: Category;
   subcategory: string;
   paymentMethod: string;
+  /**
+   * Solo en compras de una meta de ahorro. Permite deshacer el contador de
+   * compras si el egreso se borra desde el historial, sin tener que adivinar
+   * por el nombre de la meta (que el usuario puede renombrar).
+   */
+  goalId?: string;
 };
 
 export type Transaction = IncomeTransaction | ExpenseTransaction;

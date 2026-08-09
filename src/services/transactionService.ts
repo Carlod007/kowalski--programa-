@@ -9,7 +9,13 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { calculateProportionalSplit } from "@/utils/distribution";
-import type { SavingsGoal, User } from "@/types/user";
+import {
+  getGoalAllocated,
+  getGoalKind,
+  getPurchaseCount,
+  getUnassignedCents,
+} from "@/utils/savings";
+import type { User } from "@/types/user";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
@@ -51,12 +57,40 @@ export async function deleteTransaction(
 
     const tx = txSnap.data() as Transaction;
 
+    // Si el egreso era la compra de una meta, hay que deshacer el contador de
+    // compras además de devolver la plata. Se lee el perfil ANTES de escribir
+    // nada, porque una transacción de Firestore no admite lecturas después de
+    // la primera escritura.
+    const purchasedGoalId =
+      tx.type === "expense" &&
+      (tx as ExpenseTransaction).category === "ahorro" &&
+      (tx as ExpenseTransaction).goalId
+        ? (tx as ExpenseTransaction).goalId
+        : null;
+    const userSnap = purchasedGoalId
+      ? await transaction.get(userRef)
+      : null;
+
     if (tx.type === "expense") {
       const expense = tx as ExpenseTransaction;
       if (expense.category === "ahorro") {
-        transaction.update(userRef, {
+        const userUpdate: Record<string, unknown> = {
           savingsTotalCents: increment(expense.amountCents),
-        });
+        };
+
+        if (purchasedGoalId && userSnap?.exists()) {
+          const goals = (userSnap.data() as User).savingsGoals ?? [];
+          userUpdate.savingsGoals = goals.map((g) => {
+            if (g.id !== purchasedGoalId) return g;
+            const nextCount = Math.max(0, getPurchaseCount(g) - 1);
+            const next = { ...g, purchaseCount: nextCount };
+            // Al quedar sin compras vivas, deja de figurar como comprada.
+            if (nextCount === 0) delete next.lastPurchasedAt;
+            return next;
+          });
+        }
+
+        transaction.update(userRef, userUpdate);
       } else {
         transaction.update(monthRef, {
           [`spentCents.${expense.category}`]: increment(-expense.amountCents),
@@ -225,14 +259,113 @@ export async function updateIncome(
   });
 }
 
+/**
+ * Retira de una meta de tipo "fondo" (colchón de emergencia). A diferencia de
+ * una compra: el monto lo elige el usuario y no hace falta haber llegado al
+ * objetivo - una emergencia no avisa ni cuesta siempre lo mismo.
+ *
+ * El tope es lo asignado a ese fondo. Si el usuario necesita más, primero
+ * asigna más desde su ahorro sin asignar: así el retiro nunca se come plata
+ * reservada para otra meta.
+ */
+export async function withdrawFromFund(
+  userId: string,
+  monthId: string,
+  input: {
+    goalId: string;
+    amountCents: number;
+    paymentMethod: string;
+    description?: string;
+    date: string;
+  },
+): Promise<void> {
+  if (input.amountCents <= 0) {
+    throw new Error("El monto debe ser mayor a 0");
+  }
+
+  const userRef = doc(db, "users", userId);
+  const monthRef = doc(db, "users", userId, "months", monthId);
+  const txRef = doc(
+    collection(db, "users", userId, "months", monthId, "transactions"),
+  );
+
+  await runTransaction(db, async (transaction) => {
+    const [userSnap, monthSnap] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(monthRef),
+    ]);
+
+    if (!userSnap.exists()) {
+      throw new Error(`withdrawFromFund: perfil ${userId} no existe`);
+    }
+    if (!monthSnap.exists()) {
+      throw new Error(`withdrawFromFund: mes ${monthId} no existe`);
+    }
+    if (monthSnap.data().closed) {
+      throw new Error("No se puede modificar un mes cerrado");
+    }
+
+    const userProfile = userSnap.data() as User;
+    const goals = userProfile.savingsGoals ?? [];
+    const goal = goals.find((g) => g.id === input.goalId);
+    if (!goal) {
+      throw new Error("Ese fondo ya no existe");
+    }
+    if (getGoalKind(goal) !== "fondo") {
+      throw new Error("Solo los fondos permiten retiros parciales");
+    }
+
+    const allocated = getGoalAllocated(goal);
+    if (input.amountCents > allocated) {
+      throw new Error("El monto supera lo asignado a este fondo");
+    }
+
+    const tx: WithFieldValue<ExpenseTransaction> = {
+      type: "expense",
+      category: "ahorro",
+      subcategory: goal.name,
+      paymentMethod: input.paymentMethod,
+      amountCents: input.amountCents,
+      transactionDate: input.date,
+      serverDate: serverTimestamp(),
+      localDate: new Date().toISOString(),
+      ...(input.description ? { description: input.description } : {}),
+    };
+    transaction.set(txRef, tx);
+
+    transaction.update(userRef, {
+      savingsTotalCents: increment(-input.amountCents),
+      savingsGoals: goals.map((g) =>
+        g.id === goal.id
+          ? { ...g, allocatedCents: allocated - input.amountCents }
+          : g,
+      ),
+    });
+  });
+}
+
+/**
+ * Compra una meta de tipo "compra": se gasta completa y solo si esa meta ya
+ * tiene asignado su objetivo. Se valida contra lo asignado a ESA meta, no
+ * contra el ahorro total - si no, la misma plata habilitaría todas las metas
+ * a la vez.
+ *
+ * Se recibe goalId (no el objeto) y se relee dentro de la transacción, para
+ * no comprar con un nombre o monto que quedó viejo en la pantalla.
+ *
+ * allowAutoAssign es el atajo: si la meta no llega pero hay ahorro sin
+ * asignar que cubre la diferencia, se asigna y se compra en una sola
+ * operación. Nunca ocurre solo - la pantalla tiene que pedirlo explícitamente.
+ */
 export async function purchaseGoalExpense(
   userId: string,
   monthId: string,
   input: {
-    goal: SavingsGoal;
+    goalId: string;
     paymentMethod: string;
     description?: string;
     date: string;
+    allowAutoAssign?: boolean;
   },
 ): Promise<void> {
   const userRef = doc(db, "users", userId);
@@ -258,25 +391,62 @@ export async function purchaseGoalExpense(
     }
 
     const userProfile = userSnap.data() as User;
-    if ((userProfile.savingsTotalCents ?? 0) < input.goal.targetCents) {
-      throw new Error("Fondos insuficientes para esta meta");
+    const goals = userProfile.savingsGoals ?? [];
+    const goal = goals.find((g) => g.id === input.goalId);
+    if (!goal) {
+      throw new Error("Esa meta ya no existe");
+    }
+    if (getGoalKind(goal) === "fondo") {
+      throw new Error(
+        "Un fondo no se compra: se retira el monto que necesites",
+      );
+    }
+
+    const allocated = getGoalAllocated(goal);
+    const missing = goal.targetCents - allocated;
+
+    if (missing > 0) {
+      if (!input.allowAutoAssign) {
+        throw new Error("Esta meta todavía no tiene asignado su objetivo");
+      }
+      const unassigned = getUnassignedCents(
+        userProfile.savingsTotalCents ?? 0,
+        goals,
+      );
+      if (missing > unassigned) {
+        throw new Error("No tienes suficiente ahorro sin asignar");
+      }
     }
 
     const tx: WithFieldValue<ExpenseTransaction> = {
       type: "expense",
       category: "ahorro",
-      subcategory: input.goal.name,
+      subcategory: goal.name,
       paymentMethod: input.paymentMethod,
-      amountCents: input.goal.targetCents,
+      amountCents: goal.targetCents,
       transactionDate: input.date,
       serverDate: serverTimestamp(),
       localDate: new Date().toISOString(),
+      goalId: goal.id,
       ...(input.description ? { description: input.description } : {}),
     };
     transaction.set(txRef, tx);
 
+    // Si sobraba asignado de más, ese resto queda en la meta: liberarlo solo
+    // sería mover plata sin que nadie lo pidiera.
+    const remainingAllocated = Math.max(0, allocated - goal.targetCents);
     transaction.update(userRef, {
-      savingsTotalCents: increment(-input.goal.targetCents),
+      savingsTotalCents: increment(-goal.targetCents),
+      savingsGoals: goals.map((g) =>
+        g.id === goal.id
+          ? {
+              ...g,
+              allocatedCents: remainingAllocated,
+              purchaseCount: getPurchaseCount(g) + 1,
+              lastPurchasedAt: input.date,
+            }
+          : g,
+      ),
     });
   });
 }
