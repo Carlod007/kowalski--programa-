@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
@@ -36,6 +37,10 @@ import BackButton from "@/components/BackButton";
 
 const CURRENT_MONTH_ID = getMonthId();
 const TOP_LIMIT = 4;
+/** Debe coincidir con las clases h-36 w-36 del contenedor de la torta (9rem). */
+const PIE_SIZE = 144;
+/** Debe coincidir con la clase h-48 del contenedor de las barras (12rem). */
+const BARS_HEIGHT = 192;
 
 export default function ChartsScreen() {
   const user = useAuthStore((s) => s.user);
@@ -90,12 +95,13 @@ export default function ChartsScreen() {
   );
 }
 
-type CategoryFilter = "all" | "necesidad" | "ocio";
+type CategoryFilter = "all" | "necesidad" | "ocio" | "ahorro";
 
 const FILTER_TABS: { value: CategoryFilter; label: string }[] = [
   { value: "all", label: "Todo" },
   { value: "necesidad", label: "Necesidad" },
   { value: "ocio", label: "Ocio" },
+  { value: "ahorro", label: "Ahorro" },
 ];
 
 function CategoryTabs({
@@ -171,8 +177,12 @@ function MonthAnalytics({
 
   const breakdown = formatCategoryBreakdown(month.spentCents);
   const totalSpent = month.spentCents.necesidad + month.spentCents.ocio;
+  // "Todo" es la vista de gasto contra topes, así que deja fuera el ahorro:
+  // usarlo no consume tope de ningún mes. Con la pestaña Ahorro sí se mira.
   const filteredExpenses =
-    filter === "all" ? expenses : expenses.filter((e) => e.category === filter);
+    filter === "all"
+      ? expenses.filter((e) => e.category !== "ahorro")
+      : expenses.filter((e) => e.category === filter);
   const topSubcategories = computeTopSubcategories(filteredExpenses, TOP_LIMIT);
   const topPaymentMethods = computeTopPaymentMethods(
     filteredExpenses,
@@ -186,6 +196,12 @@ function MonthAnalytics({
     0,
     ...topPaymentMethods.map((i) => i.totalCents),
   );
+  // Las compras de metas y los retiros del fondo ya se guardan como egresos
+  // con categoría "ahorro": no hay que calcular nada nuevo, solo mirarlos.
+  const isAhorro = filter === "ahorro";
+  const ahorroOutCents = expenses
+    .filter((e) => e.category === "ahorro")
+    .reduce((sum, e) => sum + e.amountCents, 0);
 
   return (
     <>
@@ -194,22 +210,23 @@ function MonthAnalytics({
           Distribución {formatMonthLabel(monthId)}
         </h2>
         <div className="mt-3 flex items-center gap-6">
+          {/* Tamaño fijo: no hace falta medir el contenedor. Medirlo hacía que
+              recharts avisara por consola cuando React monta dos veces en
+              desarrollo (StrictMode) y todavía no hay layout. */}
           <div className="relative h-36 w-36 shrink-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={breakdown}
-                  dataKey="value"
-                  innerRadius={45}
-                  outerRadius={65}
-                  paddingAngle={2}
-                >
-                  {breakdown.map((entry) => (
-                    <Cell key={entry.category} fill={entry.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
+            <PieChart width={PIE_SIZE} height={PIE_SIZE}>
+              <Pie
+                data={breakdown}
+                dataKey="value"
+                innerRadius={45}
+                outerRadius={65}
+                paddingAngle={2}
+              >
+                {breakdown.map((entry) => (
+                  <Cell key={entry.category} fill={entry.color} />
+                ))}
+              </Pie>
+            </PieChart>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-base font-semibold text-stone-900">
                 {formatCents(totalSpent)}
@@ -244,12 +261,39 @@ function MonthAnalytics({
         <CategoryTabs value={filter} onChange={setFilter} />
       </div>
 
+      {/* Acá solo va lo que esta pantalla explica mejor que ninguna otra: en
+          qué se usó el ahorro. Cuánto entró se muestra en Ver detalle, que
+          además lo desglosa - repetirlo acá no agregaba nada. */}
+      {isAhorro && (
+        <section className="mx-5 mt-6">
+          <div className="rounded-2xl border border-stone-200 bg-white p-4">
+            <p className="text-xs text-stone-400">Ahorro usado este mes</p>
+            <p className="mt-0.5 text-xl font-semibold text-red-600">
+              -{formatCents(ahorroOutCents)}
+            </p>
+            <p className="mt-1 text-xs text-stone-400">
+              Compras de metas y retiros de fondos.
+            </p>
+            <Link
+              to="/movements"
+              className="mt-3 inline-block text-xs font-medium text-teal-600"
+            >
+              Ver cuánto entró al ahorro →
+            </Link>
+          </div>
+        </section>
+      )}
+
       <section className="mx-5 mt-8">
         <h2 className="text-sm font-medium text-stone-500">
-          Top subcategorías
+          {isAhorro ? "Metas y fondos usados" : "Top subcategorías"}
         </h2>
         {topSubcategories.length === 0 ? (
-          <p className="mt-3 text-sm text-stone-400">Sin gastos este mes</p>
+          <p className="mt-3 text-sm text-stone-400">
+            {isAhorro
+              ? "No usaste ahorro este mes"
+              : "Sin gastos este mes"}
+          </p>
         ) : (
           <div className="mt-3 flex flex-col gap-4">
             {topSubcategories.map((item) => (
@@ -267,10 +311,14 @@ function MonthAnalytics({
 
       <section className="mx-5 mt-8">
         <h2 className="text-sm font-medium text-stone-500">
-          Gasto por método de pago
+          {isAhorro ? "Por dónde salió" : "Gasto por método de pago"}
         </h2>
         {topPaymentMethods.length === 0 ? (
-          <p className="mt-3 text-sm text-stone-400">Sin gastos este mes</p>
+          <p className="mt-3 text-sm text-stone-400">
+            {isAhorro
+              ? "No usaste ahorro este mes"
+              : "Sin gastos este mes"}
+          </p>
         ) : (
           <div className="mt-3 flex flex-col gap-4">
             {topPaymentMethods.map((item) => (
@@ -327,8 +375,12 @@ function TrailingBars({
       <h2 className="text-sm font-medium text-stone-500">
         Ingresos vs egresos
       </h2>
-      <div className="mt-3 h-48 w-full">
-        <ResponsiveContainer width="100%" height="100%">
+      {/* El ancho sigue siendo responsivo; la altura va en píxeles porque ya
+          era fija. Con una medida positiva desde el primer render, recharts
+          deja de avisar por consola mientras React monta dos veces en
+          desarrollo (StrictMode). */}
+      <div className="mt-3 w-full">
+        <ResponsiveContainer width="100%" height={BARS_HEIGHT}>
           <BarChart data={chartData}>
             <XAxis
               dataKey="label"

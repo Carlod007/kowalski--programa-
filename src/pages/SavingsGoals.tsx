@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
-import { assignToGoal, unassignFromGoal } from "@/services/savingsGoalService";
+import {
+  assignToGoal,
+  getGoalAllocations,
+  unassignFromGoal,
+  type GoalAllocationWithId,
+} from "@/services/savingsGoalService";
 import { formatCents } from "@/utils/currency";
 import {
   getAssignableCents,
@@ -48,6 +53,16 @@ export default function SavingsGoals() {
         <p className="mt-3 border-t border-stone-100 pt-3 text-xs text-stone-400">
           Ahorro total: {formatCents(savingsTotalCents)}
         </p>
+        {/* Aclara la diferencia con "aportado este mes", que es la otra forma
+            de mirar el ahorro y vive en Ver detalle. Sin esto, los dos números
+            parecen contradecirse. */}
+        <p className="mt-2 text-xs text-stone-400">
+          Asignar reparte tu acumulado de todos los meses, no lo que entró
+          este mes.{" "}
+          <Link to="/movements" className="font-medium text-teal-600">
+            Ver el movimiento del mes →
+          </Link>
+        </p>
       </div>
 
       {overAllocated && (
@@ -84,7 +99,76 @@ export default function SavingsGoals() {
           ))
         )}
       </div>
+
+      <AllocationHistory userId={user.uid} />
     </div>
+  );
+}
+
+const HISTORY_LIMIT = 15;
+
+function AllocationHistory({ userId }: { userId: string }) {
+  // null = no se pudo leer. Distinto de [] = se leyó y no hay nada.
+  const [allocations, setAllocations] = useState<GoalAllocationWithId[] | null>(
+    [],
+  );
+
+  useEffect(() => {
+    const unsubscribe = getGoalAllocations(userId, HISTORY_LIMIT, setAllocations);
+    return () => unsubscribe();
+  }, [userId]);
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-sm font-medium text-stone-500">
+        Historial de asignaciones
+      </h2>
+
+      {allocations === null ? (
+        <p className="mt-3 text-sm text-amber-700">
+          No se pudo cargar el historial. Tus metas y montos no se ven
+          afectados.
+        </p>
+      ) : allocations.length === 0 ? (
+        <p className="mt-3 text-sm text-stone-400">
+          Todavía no asignaste ni liberaste plata. Cuando lo hagas, cada
+          movimiento queda registrado acá.
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-col gap-2">
+          {allocations.map((a) => {
+            const isAssign = a.direction === "assign";
+            return (
+              <div
+                key={a._id}
+                className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-3 py-2"
+              >
+                <div>
+                  <p className="text-sm text-stone-900">{a.goalName}</p>
+                  <p className="text-xs text-stone-400">
+                    {isAssign ? "Asignado" : "Liberado"} ·{" "}
+                    {formatDateLabel(a.transactionDate)}
+                  </p>
+                </div>
+                <span
+                  className={`text-sm font-medium ${
+                    isAssign ? "text-teal-700" : "text-stone-500"
+                  }`}
+                >
+                  {isAssign ? "+" : "-"}
+                  {formatCents(a.amountCents)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="mt-2 text-xs text-stone-400">
+        Solo asignaciones y liberaciones. Las compras de metas y los retiros de
+        fondos quedan en el historial de egresos.
+      </p>
+    </section>
   );
 }
 

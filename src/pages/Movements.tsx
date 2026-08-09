@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
@@ -173,7 +174,7 @@ function MovementsContent({
             </p>
             <div className="mt-3 flex flex-col gap-1 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-stone-600">Plan inicial</span>
+                <span className="text-stone-600">Reparto inicial</span>
                 <span className="font-medium text-stone-900">
                   {month.distribution.ahorro}% ·{" "}
                   {formatCents(pureAhorroCap)}
@@ -218,6 +219,15 @@ function MovementsContent({
                 {formatCents(savingsTotalCents)}
               </span>
             </div>
+            {/* Contraparte de la aclaración en Metas: esta pantalla mide el
+                flujo del mes, no cómo está repartido el acumulado. */}
+            <p className="mt-2 text-xs text-stone-400">
+              Esto es lo que se movió este mes. Cómo está repartido tu
+              acumulado entre metas se ve en{" "}
+              <Link to="/goals" className="font-medium text-teal-600">
+                Metas de ahorro →
+              </Link>
+            </p>
           </div>
         </>
       )}

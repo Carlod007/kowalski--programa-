@@ -1,1 +1,25 @@
 @import "tailwindcss";
+
+@layer base {
+  /*
+   * Comportamiento de app, no de página web: mantener pulsado no debe
+   * seleccionar texto ni abrir el menú de copiar/buscar del sistema.
+   * -webkit-touch-callout apaga ese menú en iOS; user-select evita la
+   * selección en Android; tap-highlight quita el destello gris al tocar.
+   */
+  body {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Los campos editables sí deben permitir seleccionar y copiar. */
+  input,
+  textarea,
+  select,
+  [contenteditable] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}

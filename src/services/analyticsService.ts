@@ -39,14 +39,17 @@ export function getMonthExpenses(
   });
 }
 
+/**
+ * Agrega lo que reciba, sin excluir categorías: quién llama decide qué mirar.
+ * Antes descartaba ahorro acá adentro, y eso dejaba vacía la pestaña de Ahorro
+ * aunque los datos existieran.
+ */
 export function computeTopSubcategories(
   txs: ExpenseTransaction[],
   limit: number,
 ): { category: Category; subcategory: string; totalCents: number }[] {
-  const filtered = txs.filter((tx) => tx.category !== "ahorro");
-
   const map = new Map<string, { category: Category; subcategory: string; totalCents: number }>();
-  for (const tx of filtered) {
+  for (const tx of txs) {
     const key = `${tx.category}::${tx.subcategory}`;
     const existing = map.get(key);
     if (existing) {
@@ -61,14 +64,13 @@ export function computeTopSubcategories(
     .slice(0, limit);
 }
 
+/** Igual que computeTopSubcategories: no excluye nada por su cuenta. */
 export function computeTopPaymentMethods(
   txs: ExpenseTransaction[],
   limit: number,
 ): { paymentMethod: string; totalCents: number }[] {
-  const filtered = txs.filter((tx) => tx.category !== "ahorro");
-
   const map = new Map<string, number>();
-  for (const tx of filtered) {
+  for (const tx of txs) {
     map.set(tx.paymentMethod, (map.get(tx.paymentMethod) ?? 0) + tx.amountCents);
   }
 
