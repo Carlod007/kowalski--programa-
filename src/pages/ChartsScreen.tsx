@@ -18,7 +18,7 @@ import {
   getMonthExpenses,
   computeTopSubcategories,
   computeTopPaymentMethods,
-  getTrailingMonths,
+  watchTrailingMonths,
   type TrailingMonth,
 } from "@/services/analyticsService";
 import {
@@ -272,7 +272,8 @@ function MonthAnalytics({
               -{formatCents(ahorroOutCents)}
             </p>
             <p className="mt-1 text-xs text-stone-400">
-              Compras de metas y retiros de fondos.
+              Compras de metas y retiros de fondos hechos este mes. No refleja
+              cuánto tiene asignado cada meta hoy.
             </p>
             <Link
               to="/movements"
@@ -286,7 +287,7 @@ function MonthAnalytics({
 
       <section className="mx-5 mt-8">
         <h2 className="text-sm font-medium text-stone-500">
-          {isAhorro ? "Metas y fondos usados" : "Top subcategorías"}
+          {isAhorro ? "En qué usaste el ahorro este mes" : "Top subcategorías"}
         </h2>
         {topSubcategories.length === 0 ? (
           <p className="mt-3 text-sm text-stone-400">
@@ -344,24 +345,14 @@ function TrailingBars({
   userId: string;
   endMonthId: string;
 }) {
-  const [months, setMonths] = useState<TrailingMonth[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [months, setMonths] = useState<TrailingMonth[] | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    getTrailingMonths(userId, endMonthId, 4).then((result) => {
-      if (!cancelled) {
-        setMonths(result);
-        setLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    const unsubscribe = watchTrailingMonths(userId, endMonthId, 4, setMonths);
+    return () => unsubscribe();
   }, [userId, endMonthId]);
 
-  if (loading) return null;
-  if (months.length === 0) return null;
+  if (months === null || months.length === 0) return null;
 
   const chartData = months.map((m) => ({
     monthId: m.monthId,

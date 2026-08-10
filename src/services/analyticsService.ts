@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, query, where, onSnapshot, type Unsubscribe } from "firebase/firestore";
+import { collection, doc, query, where, onSnapshot, type Unsubscribe } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { shiftMonthId } from "@/utils/date";
 import { CAP_CATEGORY_ORDER, CATEGORY_META } from "@/utils/category";
@@ -86,34 +86,50 @@ export type TrailingMonth = {
   expenseCents: number;
 };
 
-export async function getTrailingMonths(
+/**
+ * Ambas barras miran el mismo universo: el presupuesto que se repartió y el
+ * gasto contra sus topes. Los movimientos de ahorro quedan fuera de las dos,
+ * porque sumarlos solo de un lado daría una comparación falsa.
+ */
+export function watchTrailingMonths(
   userId: string,
   endMonthId: string,
   maxCount: number,
-): Promise<TrailingMonth[]> {
+  onData: (months: TrailingMonth[]) => void,
+): Unsubscribe {
   const candidateIds: string[] = [];
   for (let i = maxCount - 1; i >= 0; i--) {
     candidateIds.push(shiftMonthId(endMonthId, -i));
   }
 
-  const snaps = await Promise.all(
-    candidateIds.map((id) => getDoc(doc(db, "users", userId, "months", id))),
+  const byId = new Map<string, TrailingMonth>();
+  const reported = new Set<string>();
+
+  const unsubs = candidateIds.map((id) =>
+    onSnapshot(doc(db, "users", userId, "months", id), (snap) => {
+      if (snap.exists()) {
+        const month = snap.data() as Month;
+        byId.set(id, {
+          monthId: id,
+          totalIncomeCents: month.totalIncomeCents,
+          expenseCents: month.spentCents.necesidad + month.spentCents.ocio,
+        });
+      } else {
+        byId.delete(id);
+      }
+
+      // Se espera a que todos los meses respondan una vez para no dibujar el
+      // gráfico a medias en el primer render.
+      reported.add(id);
+      if (reported.size < candidateIds.length) return;
+
+      onData(
+        candidateIds
+          .map((candidate) => byId.get(candidate))
+          .filter((m): m is TrailingMonth => m !== undefined),
+      );
+    }),
   );
 
-  const result: TrailingMonth[] = [];
-  for (let i = 0; i < snaps.length; i++) {
-    const snap = snaps[i];
-    if (!snap.exists()) continue;
-    const month = snap.data() as Month;
-    result.push({
-      monthId: candidateIds[i],
-      // Acá sí se suman los aportes directos: este gráfico compara plata que
-      // entró contra plata que salió, no porcentajes. Dejarlos fuera
-      // mostraría menos ingreso del que realmente hubo.
-      totalIncomeCents:
-        month.totalIncomeCents + (month.directSavingsCents ?? 0),
-      expenseCents: month.spentCents.necesidad + month.spentCents.ocio,
-    });
-  }
-  return result;
+  return () => unsubs.forEach((unsub) => unsub());
 }
