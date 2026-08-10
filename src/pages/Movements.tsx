@@ -55,7 +55,7 @@ export default function Movements() {
         <p className="text-xs text-amber-800">
           Solo se registran los movimientos hechos desde que existe esta
           pantalla. Ajustes de excedente anteriores no quedaron guardados
-          acá.
+          aquí.
         </p>
       </div>
 
@@ -112,7 +112,10 @@ function MovementsContent({
     monthId,
     month?.ahorroContributedCents ?? 0,
     month?.totalIncomeCents ?? 0,
+    month?.directSavingsCents ?? 0,
   );
+
+  const directSavingsCents = month?.directSavingsCents ?? 0;
 
   const ahorroContributedCents = month?.ahorroContributedCents ?? 0;
   const pureAhorroCap = month
@@ -151,6 +154,14 @@ function MovementsContent({
                   {formatCents(movedToAhorroCents)}
                 </span>
               </div>
+              {directSavingsCents > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-600">De aportes directos</span>
+                  <span className="font-medium text-stone-900">
+                    {formatCents(directSavingsCents)}
+                  </span>
+                </div>
+              )}
               {(untrackedCents !== 0 || !isInitialSplitDeterminable) && (
                 <div className="flex items-center justify-between">
                   <span className="text-stone-600">

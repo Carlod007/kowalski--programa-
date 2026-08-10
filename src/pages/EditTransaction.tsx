@@ -126,7 +126,13 @@ export default function EditTransaction() {
     );
   }
 
-  const isSavingsTx = tx.type === "expense" && (tx as ExpenseTransaction).category === "ahorro";
+  // Los aportes directos se tratan como los egresos de ahorro: el monto no se
+  // edita. Cambiarlo obligaría a recalcular directSavingsCents con una rama
+  // aparte; borrar y volver a registrar es más simple y no puede descuadrar.
+  const isSavingsTx =
+    (tx.type === "expense" &&
+      (tx as ExpenseTransaction).category === "ahorro") ||
+    (tx.type === "income" && !!(tx as IncomeTransaction).isDirectSavings);
   const parsedAmount = parseFloat(amountStr);
   const newAmountCents = isSavingsTx
     ? tx.amountCents
@@ -141,16 +147,23 @@ export default function EditTransaction() {
   const amountDiffersFromFixed =
     !!matchedFixedIncome && newAmountCents !== matchedFixedIncome.monthlyAmountCents;
   const isSavingsExpense = !isIncome && (tx as ExpenseTransaction).category === "ahorro";
+  // Un aporte directo no tiene fuente, así que exigirla lo dejaría imposible
+  // de guardar.
+  const isDirectSavingsIncome =
+    isIncome && !!(tx as IncomeTransaction).isDirectSavings;
   const isDisabled =
     saving ||
     (isIncome
-    ? !sourceId
+    ? !isDirectSavingsIncome && !sourceId
     : isSavingsExpense
     ? !paymentMethod
     : !subcategory || !paymentMethod);
 
   function buildPreview() {
     if (!month || !tx || newAmountCents === 0) return null;
+    // Un aporte directo no altera topes: mostrar filas de Necesidad y Ocio
+    // sugeriría un impacto que no existe.
+    if (isDirectSavingsIncome) return null;
 
     if (isIncome) {
       const incomeTx = tx as IncomeTransaction;
@@ -225,10 +238,14 @@ export default function EditTransaction() {
         const selectedSource = (userProfile?.sources ?? []).find(
           (s) => s.id === sourceId,
         );
+        // Un aporte directo conserva su etiqueta: no tiene fuente que
+        // seleccionar, y tomar la del formulario la dejaría vacía.
         await updateIncome(user.uid, monthId, txId, {
           amountCents: newAmountCents,
-          source: selectedSource?.name ?? "",
-          sourceId,
+          source: isDirectSavingsIncome
+            ? (tx as IncomeTransaction).source
+            : (selectedSource?.name ?? ""),
+          sourceId: isDirectSavingsIncome ? undefined : sourceId,
           description: description.trim() || undefined,
         });
       } else {
@@ -267,11 +284,18 @@ export default function EditTransaction() {
 
       <div className="mt-6 flex flex-col gap-5">
         {isIncome ? (
-          <IncomeFields
-            sourceId={sourceId}
-            onSourceIdChange={setSourceId}
-            sources={userProfile?.sources ?? []}
-          />
+          isDirectSavingsIncome ? (
+            <p className="rounded-xl bg-teal-50 p-3 text-sm text-teal-700">
+              Aporte directo a Ahorro. El monto no se edita: si te equivocaste,
+              borralo desde el historial y regístralo de nuevo.
+            </p>
+          ) : (
+            <IncomeFields
+              sourceId={sourceId}
+              onSourceIdChange={setSourceId}
+              sources={userProfile?.sources ?? []}
+            />
+          )
         ) : (
           <>
             <ExpenseCategoryLabel

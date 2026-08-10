@@ -23,8 +23,13 @@ import type { IncomeTransaction, Distribution } from "@/types/transaction";
 import type { Month } from "@/types/month";
 import { ArrowLeftIcon } from "@/components/BackButton";
 
+/** Etiqueta fija de los aportes directos: no ensucia las fuentes del usuario. */
+const DIRECT_SAVINGS_LABEL = "Aporte directo";
+
 const incomeSchema = z.object({
-  source: z.string().min(1, "Selecciona una fuente"),
+  // La fuente no se valida acá porque un aporte directo no lleva ninguna.
+  // La exigencia real está en onSubmit, según el modo.
+  source: z.string(),
   date: z.string().min(1, "Selecciona una fecha"),
   amount: z
     .string()
@@ -42,6 +47,7 @@ export default function RegisterIncome() {
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isDirectSavings, setIsDirectSavings] = useState(false);
   const [monthDistribution, setMonthDistribution] =
     useState<Distribution | null>(null);
 
@@ -82,14 +88,14 @@ export default function RegisterIncome() {
     fixedIncomes.find((f) => f.id === watchedSource) ?? null;
   const isLocked = !!matchedFixedIncome && overriddenFor !== watchedSource;
 
-  useEffect(() => {
-    if (matchedFixedIncome && overriddenFor !== watchedSource) {
-      setValue(
-        "amount",
-        (matchedFixedIncome.monthlyAmountCents / 100).toString(),
-      );
-    }
-  }, [matchedFixedIncome, watchedSource, overriddenFor, setValue]);
+  function handleSourceChange(newSourceId: string) {
+    const fixed = fixedIncomes.find((f) => f.id === newSourceId);
+    setOverriddenFor(null);
+    setValue(
+      "amount",
+      fixed ? (fixed.monthlyAmountCents / 100).toString() : "",
+    );
+  }
 
   const parsedAmount = parseFloat(watchedAmount);
   const previewCents =
@@ -97,7 +103,7 @@ export default function RegisterIncome() {
       ? Math.round(parsedAmount * 100)
       : 0;
   const preview =
-    previewCents > 0 && monthDistribution
+    !isDirectSavings && previewCents > 0 && monthDistribution
       ? calculateDistribution(previewCents, monthDistribution)
       : null;
 
@@ -109,9 +115,13 @@ export default function RegisterIncome() {
       setSubmitError("No se pudo cargar el mes. Intenta de nuevo.");
       return;
     }
+    if (!isDirectSavings && !values.source) {
+      setSubmitError("Selecciona una fuente");
+      return;
+    }
+
     const amountCents = Math.round(parseFloat(values.amount) * 100);
     const monthId = getMonthId();
-    const distribution = calculateDistribution(amountCents, monthDistribution);
     const description = values.description?.trim();
     const selectedSource = sources.find((s) => s.id === values.source);
 
@@ -120,33 +130,62 @@ export default function RegisterIncome() {
     const txRef = doc(
       collection(db, "users", user.uid, "months", monthId, "transactions"),
     );
-    const tx: WithFieldValue<IncomeTransaction> = {
-      type: "income",
-      source: selectedSource?.name ?? "",
-      sourceId: values.source,
-      transactionDate: values.date,
-      amountCents,
-      distribution,
-      serverDate: serverTimestamp(),
-      localDate: new Date().toISOString(),
-      ...(description ? { description } : {}),
-    };
-    batch.set(txRef, tx);
-
     const monthRef = doc(db, "users", user.uid, "months", monthId);
-    const monthUpdate: UpdateData<Month> = {
-      totalIncomeCents: increment(amountCents),
-      incomeCount: increment(1),
-      "capsCents.necesidad": increment(distribution.necesidad),
-      "capsCents.ocio": increment(distribution.ocio),
-      ahorroContributedCents: increment(distribution.ahorro),
-    };
-    batch.update(monthRef, monthUpdate);
-
     const userRef = doc(db, "users", user.uid);
-    batch.update(userRef, {
-      savingsTotalCents: increment(distribution.ahorro),
-    });
+
+    if (isDirectSavings) {
+      // Va entero al ahorro: no toca los topes ni totalIncomeCents, para no
+      // alterar los porcentajes del mes con plata que nunca se repartió.
+      const tx: WithFieldValue<IncomeTransaction> = {
+        type: "income",
+        source: DIRECT_SAVINGS_LABEL,
+        transactionDate: values.date,
+        amountCents,
+        distribution: { necesidad: 0, ocio: 0, ahorro: amountCents },
+        isDirectSavings: true,
+        serverDate: serverTimestamp(),
+        localDate: new Date().toISOString(),
+        ...(description ? { description } : {}),
+      };
+      batch.set(txRef, tx);
+
+      const monthUpdate: UpdateData<Month> = {
+        directSavingsCents: increment(amountCents),
+        incomeCount: increment(1),
+        ahorroContributedCents: increment(amountCents),
+      };
+      batch.update(monthRef, monthUpdate);
+      batch.update(userRef, { savingsTotalCents: increment(amountCents) });
+    } else {
+      const distribution = calculateDistribution(
+        amountCents,
+        monthDistribution,
+      );
+      const tx: WithFieldValue<IncomeTransaction> = {
+        type: "income",
+        source: selectedSource?.name ?? "",
+        sourceId: values.source,
+        transactionDate: values.date,
+        amountCents,
+        distribution,
+        serverDate: serverTimestamp(),
+        localDate: new Date().toISOString(),
+        ...(description ? { description } : {}),
+      };
+      batch.set(txRef, tx);
+
+      const monthUpdate: UpdateData<Month> = {
+        totalIncomeCents: increment(amountCents),
+        incomeCount: increment(1),
+        "capsCents.necesidad": increment(distribution.necesidad),
+        "capsCents.ocio": increment(distribution.ocio),
+        ahorroContributedCents: increment(distribution.ahorro),
+      };
+      batch.update(monthRef, monthUpdate);
+      batch.update(userRef, {
+        savingsTotalCents: increment(distribution.ahorro),
+      });
+    }
 
     try {
       await batch.commit();
@@ -159,13 +198,22 @@ export default function RegisterIncome() {
     }
   }
 
-  if (sources.length === 0) {
+  // Sin fuentes configuradas solo se bloquea el ingreso repartido: un aporte
+  // directo no necesita ninguna, y ese es justamente su caso de uso.
+  if (sources.length === 0 && !isDirectSavings) {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-3 px-6 text-center">
         <p className="text-stone-600">
           Todavía no tienes fuentes de ingreso configuradas.
         </p>
-        <Link to="/dashboard" className="text-sm font-medium text-teal-700">
+        <button
+          type="button"
+          onClick={() => setIsDirectSavings(true)}
+          className="text-sm font-medium text-teal-700"
+        >
+          Registrar un aporte directo a Ahorro
+        </button>
+        <Link to="/dashboard" className="text-sm text-stone-500">
           Volver al inicio
         </Link>
       </div>
@@ -210,6 +258,33 @@ export default function RegisterIncome() {
         </div>
 
         <div className="rounded-2xl border border-stone-200 bg-white p-4">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={isDirectSavings}
+              onChange={(e) => {
+                setIsDirectSavings(e.target.checked);
+                setSubmitError(null);
+                setOverriddenFor(null);
+                setValue("source", "");
+                setValue("amount", "");
+              }}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-stone-900">
+                Va todo a Ahorro
+              </span>
+              <span className="block text-xs text-stone-500">
+                Para dinero que no se reparte: una venta, un regalo, un extra
+                que quieras guardar entero.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        {!isDirectSavings && (
+        <div className="rounded-2xl border border-stone-200 bg-white p-4">
           <label
             htmlFor="source"
             className="text-sm font-semibold text-stone-900"
@@ -222,7 +297,9 @@ export default function RegisterIncome() {
             </span>
             <select
               id="source"
-              {...register("source")}
+              {...register("source", {
+                onChange: (e) => handleSourceChange(e.target.value),
+              })}
               className="flex-1 appearance-none bg-transparent text-sm text-stone-900 outline-none"
             >
               <option value="">Selecciona una fuente</option>
@@ -241,6 +318,7 @@ export default function RegisterIncome() {
             <p className="mt-1 text-xs text-red-600">{errors.source.message}</p>
           )}
         </div>
+        )}
 
         <div className="rounded-2xl border border-stone-200 bg-white p-4">
           <label
@@ -288,7 +366,15 @@ export default function RegisterIncome() {
                   transacción.{" "}
                   <button
                     type="button"
-                    onClick={() => setOverriddenFor(null)}
+                    onClick={() => {
+                      setOverriddenFor(null);
+                      setValue(
+                        "amount",
+                        (
+                          matchedFixedIncome.monthlyAmountCents / 100
+                        ).toString(),
+                      );
+                    }}
                     className="font-medium text-emerald-700 underline"
                   >
                     Usar monto fijo
@@ -309,6 +395,17 @@ export default function RegisterIncome() {
               <span>Ocio +{formatCents(preview.ocio)}</span>
               <span>Ahorro +{formatCents(preview.ahorro)}</span>
             </div>
+          </div>
+        )}
+
+        {isDirectSavings && previewCents > 0 && (
+          <div className="rounded-xl bg-teal-50 p-3">
+            <p className="text-sm font-medium text-teal-700">
+              Ahorro +{formatCents(previewCents)}
+            </p>
+            <p className="mt-1 text-xs text-teal-700">
+              No se reparte, así que tus topes de Necesidad y Ocio no cambian.
+            </p>
           </div>
         )}
 

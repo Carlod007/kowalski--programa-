@@ -256,7 +256,7 @@ export async function moveSurplus(
       );
       if (amountCents > unassigned) {
         throw new Error(
-          "El monto supera tu ahorro sin asignar. Libera plata de tus metas primero.",
+          "El monto supera tu ahorro sin asignar. Libera dinero de tus metas primero.",
         );
       }
     }

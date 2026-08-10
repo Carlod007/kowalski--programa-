@@ -107,7 +107,11 @@ export async function getTrailingMonths(
     const month = snap.data() as Month;
     result.push({
       monthId: candidateIds[i],
-      totalIncomeCents: month.totalIncomeCents,
+      // Acá sí se suman los aportes directos: este gráfico compara plata que
+      // entró contra plata que salió, no porcentajes. Dejarlos fuera
+      // mostraría menos ingreso del que realmente hubo.
+      totalIncomeCents:
+        month.totalIncomeCents + (month.directSavingsCents ?? 0),
       expenseCents: month.spentCents.necesidad + month.spentCents.ocio,
     });
   }

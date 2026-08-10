@@ -22,6 +22,12 @@ export type IncomeTransaction = TransactionBase & {
   source: string;
   sourceId?: string;
   distribution: Distribution;
+  /**
+   * Aporte que fue entero al ahorro sin repartirse. Marca explícita en vez de
+   * deducirlo de un reparto 0/0/100: un reparto normal podría dar eso mismo
+   * si el usuario tuviera Ahorro al 100%, y son cosas distintas.
+   */
+  isDirectSavings?: boolean;
 };
 
 export type ExpenseTransaction = TransactionBase & {

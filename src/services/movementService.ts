@@ -77,6 +77,10 @@ export function getMonthInitialSplit(
       const total = { necesidad: 0, ocio: 0, ahorro: 0 };
       for (const d of snap.docs) {
         const tx = d.data() as IncomeTransaction;
+        // Un aporte directo no formó parte de ningún reparto: contarlo acá
+        // inflaría el "reparto inicial" de Ahorro con plata que nunca pasó
+        // por los porcentajes.
+        if (tx.isDirectSavings) continue;
         if (!isValidIncomeSplit(tx.distribution, tx.amountCents)) {
           onData(null);
           return;

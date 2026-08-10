@@ -173,6 +173,7 @@ function MonthSummary({
     monthId,
     month?.ahorroContributedCents ?? 0,
     month?.totalIncomeCents ?? 0,
+    month?.directSavingsCents ?? 0,
   );
 
   return (
@@ -182,6 +183,13 @@ function MonthSummary({
         <p className="mt-1 text-3xl font-semibold">
           {loading ? "···" : formatCents(month?.totalIncomeCents ?? 0)}
         </p>
+        {/* Se muestra aparte, no sumado arriba: el total de arriba es la base
+            de los porcentajes, y un aporte directo nunca se repartió. */}
+        {(month?.directSavingsCents ?? 0) > 0 && (
+          <p className="mt-1 text-sm text-emerald-50">
+            + {formatCents(month?.directSavingsCents ?? 0)} directo a Ahorro
+          </p>
+        )}
         <div className="mt-3 flex items-center justify-between">
           <p className="text-sm text-emerald-50">
             {month?.incomeCount ?? 0}{" "}
@@ -464,7 +472,7 @@ function CategoryRow({
           {!initialSplitDeterminable
             ? `Tu tope actual es ${formatCents(cap)}. No pudimos determinar si corresponde exactamente a tu ${pct}% inicial de este mes (datos incompletos).`
             : capWasAdjusted
-            ? `Tu tope actual es ${formatCents(cap)}. No es solo tu ${pct}% inicial: incluye ingresos recibidos con otro % o plata movida entre categorías este mes.`
+            ? `Tu tope actual es ${formatCents(cap)}. No es solo tu ${pct}% inicial: incluye ingresos recibidos con otro % o dinero movido entre categorías este mes.`
             : `Tu tope actual es ${formatCents(cap)}, según tu ${pct}% inicial de este mes.`}
         </div>
       )}
@@ -563,7 +571,9 @@ function MoveSurplusPanel({
 
   return (
     <div className="mt-3 rounded-xl bg-sky-50 p-3">
-      <p className="text-sm font-medium text-teal-700">Mover excedente</p>
+      <p className="text-sm font-medium text-teal-700">
+        {origin === "ahorro" ? "Usar ahorro" : "Mover excedente"}
+      </p>
 
       <div className="mt-2 flex gap-2">
         <input
@@ -780,7 +790,7 @@ function SavingsRow({
         ) : (
           <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
             <p className="text-xs text-amber-800">
-              Todo tu ahorro está asignado a metas. Para mover plata, primero
+              Todo tu ahorro está asignado a metas. Para mover dinero, primero
               libera una parte desde Metas.
             </p>
             <div className="mt-2 flex gap-2">
@@ -804,9 +814,9 @@ function SavingsRow({
       {showInfo && (
         <div className="absolute bottom-full left-4 mb-2 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
           El acumulado nunca se resetea - cada mes se suma más, y solo baja
-          cuando comprás una meta. "Aportado este mes" es lo que entró este
-          mes (reparto inicial + lo que hayas movido acá), no tu crecimiento
-          neto: si sacaste plata de Ahorro, no se resta de ahí.
+          cuando compras una meta. "Aportado este mes" es lo que entró este
+          mes (reparto inicial + lo que hayas movido aquí), no tu crecimiento
+          neto: si sacaste dinero de Ahorro, no se resta de ahí.
         </div>
       )}
     </div>

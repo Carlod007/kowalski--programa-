@@ -29,6 +29,7 @@ export function useAhorroBreakdown(
   monthId: string,
   ahorroContributedCents: number,
   totalIncomeCents: number,
+  directSavingsCents: number,
 ): AhorroBreakdown {
   const [movements, setMovements] = useState<MovementWithId[]>([]);
   const [initialSplitAhorroCents, setInitialSplitAhorroCents] = useState(0);
@@ -61,8 +62,14 @@ export function useAhorroBreakdown(
   // ingreso. Lo que sobra sin explicar (viejos ajustes anteriores a este
   // historial, o correcciones de datos) se muestra aparte, nunca se le
   // atribuye al reparto inicial.
+  // Los aportes directos también entraron a ahorroContributedCents, así que
+  // se descuentan acá: si no, aparecerían como "ajuste no registrado" cuando
+  // en realidad están perfectamente identificados.
   const untrackedCents =
-    ahorroContributedCents - initialSplitAhorroCents - movedToAhorroCents;
+    ahorroContributedCents -
+    initialSplitAhorroCents -
+    movedToAhorroCents -
+    directSavingsCents;
   const isUntrackedDeterminable =
     isInitialSplitDeterminable && untrackedCents >= 0;
   // "Aporte neto" sí resta las salidas (a diferencia de ahorroContributedCents,
@@ -72,8 +79,9 @@ export function useAhorroBreakdown(
     initialSplitAhorroCents + movedToAhorroCents - movedOutOfAhorroCents;
   // % actual de Ahorro: siempre desde el aporte neto de ESTE mes, nunca
   // desde savingsTotalCents (es acumulado de varios meses, no comparable
-  // contra el ingreso de un solo mes). Si hay un ajuste sin rastrear, no se
-  // inventa un %: se muestra "no determinable".
+  // contra el ingreso de un solo mes). Los aportes directos quedan fuera del
+  // numerador porque tampoco están en el denominador: no se repartieron.
+  // Si hay un ajuste sin rastrear, no se inventa un %: "no determinable".
   const ahorroActualPct =
     totalIncomeCents > 0
       ? ((netContributionCents / totalIncomeCents) * 100).toFixed(1)

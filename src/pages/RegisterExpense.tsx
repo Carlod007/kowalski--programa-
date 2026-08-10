@@ -741,6 +741,12 @@ function GoalPurchaseStep({
   const maxWithdrawCents = selectedProgress?.allocatedCents ?? 0;
   const exceedsFund = isFund && withdrawCents > maxWithdrawCents;
 
+  function handleSelectGoal(id: string) {
+    setSelectedGoalId((current) => (current === id ? null : id));
+    setAmountInput("");
+    setPickError(null);
+  }
+
   async function handleSubmit() {
     if (!user || !selectedGoal || !selectedProgress || !paymentMethod) {
       setPickError("Selecciona una meta y un método de pago");
@@ -756,7 +762,7 @@ function GoalPurchaseStep({
         return;
       }
     } else if (needsAutoAssign && !canAutoAssign) {
-      setPickError("Todavía no juntaste lo suficiente para esta meta");
+      setPickError("Todavía no has juntado lo suficiente para esta meta");
       return;
     }
     setPickError(null);
@@ -836,10 +842,7 @@ function GoalPurchaseStep({
                   selectedGoalId={selectedGoalId}
                   assignableCents={assignableCents}
                   meta={meta}
-                  onSelect={(id) => {
-                    setSelectedGoalId(id);
-                    setAmountInput("");
-                  }}
+                  onSelect={handleSelectGoal}
                 />
               )}
               {fundGoals.length > 0 && purchaseGoals.length > 0 && (
@@ -857,10 +860,7 @@ function GoalPurchaseStep({
                   selectedGoalId={selectedGoalId}
                   assignableCents={assignableCents}
                   meta={meta}
-                  onSelect={(id) => {
-                    setSelectedGoalId(id);
-                    setAmountInput("");
-                  }}
+                  onSelect={handleSelectGoal}
                 />
               )}
             </div>

@@ -98,16 +98,30 @@ export async function deleteTransaction(
       }
     } else {
       const income = tx as IncomeTransaction;
-      transaction.update(monthRef, {
-        totalIncomeCents: increment(-income.amountCents),
-        incomeCount: increment(-1),
-        "capsCents.necesidad": increment(-income.distribution.necesidad),
-        "capsCents.ocio": increment(-income.distribution.ocio),
-        ahorroContributedCents: increment(-income.distribution.ahorro),
-      });
-      transaction.update(userRef, {
-        savingsTotalCents: increment(-income.distribution.ahorro),
-      });
+      if (income.isDirectSavings) {
+        // Un aporte directo nunca tocó totalIncomeCents ni los topes: se
+        // revierte solo lo que sí movió, o se estaría descontando de un
+        // lugar donde nunca se sumó.
+        transaction.update(monthRef, {
+          directSavingsCents: increment(-income.amountCents),
+          incomeCount: increment(-1),
+          ahorroContributedCents: increment(-income.amountCents),
+        });
+        transaction.update(userRef, {
+          savingsTotalCents: increment(-income.amountCents),
+        });
+      } else {
+        transaction.update(monthRef, {
+          totalIncomeCents: increment(-income.amountCents),
+          incomeCount: increment(-1),
+          "capsCents.necesidad": increment(-income.distribution.necesidad),
+          "capsCents.ocio": increment(-income.distribution.ocio),
+          ahorroContributedCents: increment(-income.distribution.ahorro),
+        });
+        transaction.update(userRef, {
+          savingsTotalCents: increment(-income.distribution.ahorro),
+        });
+      }
     }
 
     transaction.delete(txRef);

@@ -112,6 +112,7 @@ function AllocationHistory({ userId }: { userId: string }) {
   const [allocations, setAllocations] = useState<GoalAllocationWithId[] | null>(
     [],
   );
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = getGoalAllocations(userId, HISTORY_LIMIT, setAllocations);
@@ -119,56 +120,89 @@ function AllocationHistory({ userId }: { userId: string }) {
   }, [userId]);
 
   return (
-    <section className="mt-8">
-      <h2 className="text-sm font-medium text-stone-500">
-        Historial de asignaciones
-      </h2>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-4 flex w-full items-center justify-between rounded-2xl border border-stone-200 bg-white px-4 py-3 text-left"
+      >
+        <span className="text-sm font-medium text-stone-900">
+          Historial de asignaciones
+        </span>
+        <span className="text-xs font-medium text-teal-600">Ver →</span>
+      </button>
 
-      {allocations === null ? (
-        <p className="mt-3 text-sm text-amber-700">
-          No se pudo cargar el historial. Tus metas y montos no se ven
-          afectados.
-        </p>
-      ) : allocations.length === 0 ? (
-        <p className="mt-3 text-sm text-stone-400">
-          Todavía no asignaste ni liberaste plata. Cuando lo hagas, cada
-          movimiento queda registrado acá.
-        </p>
-      ) : (
-        <div className="mt-3 flex flex-col gap-2">
-          {allocations.map((a) => {
-            const isAssign = a.direction === "assign";
-            return (
-              <div
-                key={a._id}
-                className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-3 py-2"
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-5 pb-5 sm:items-center"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-stone-900">
+                Historial de asignaciones
+              </p>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Cerrar"
+                className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-100 text-stone-500"
               >
-                <div>
-                  <p className="text-sm text-stone-900">{a.goalName}</p>
-                  <p className="text-xs text-stone-400">
-                    {isAssign ? "Asignado" : "Liberado"} ·{" "}
-                    {formatDateLabel(a.transactionDate)}
-                  </p>
-                </div>
-                <span
-                  className={`text-sm font-medium ${
-                    isAssign ? "text-teal-700" : "text-stone-500"
-                  }`}
-                >
-                  {isAssign ? "+" : "-"}
-                  {formatCents(a.amountCents)}
-                </span>
+                ✕
+              </button>
+            </div>
+
+            {allocations === null ? (
+              <p className="mt-3 text-sm text-amber-700">
+                No se pudo cargar el historial. Tus metas y montos no se ven
+                afectados.
+              </p>
+            ) : allocations.length === 0 ? (
+              <p className="mt-3 text-sm text-stone-400">
+                Todavía no has asignado ni liberado dinero. Cuando lo hagas,
+                cada movimiento queda registrado aquí.
+              </p>
+            ) : (
+              <div className="mt-3 flex flex-col gap-2">
+                {allocations.map((a) => {
+                  const isAssign = a.direction === "assign";
+                  return (
+                    <div
+                      key={a._id}
+                      className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-3 py-2"
+                    >
+                      <div>
+                        <p className="text-sm text-stone-900">{a.goalName}</p>
+                        <p className="text-xs text-stone-400">
+                          {isAssign ? "Asignado" : "Liberado"} ·{" "}
+                          {formatDateLabel(a.transactionDate)}
+                        </p>
+                      </div>
+                      <span
+                        className={`text-sm font-medium ${
+                          isAssign ? "text-teal-700" : "text-stone-500"
+                        }`}
+                      >
+                        {isAssign ? "+" : "-"}
+                        {formatCents(a.amountCents)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            )}
+
+            <p className="mt-3 text-xs text-stone-400">
+              Solo asignaciones y liberaciones. Las compras de metas y los
+              retiros de fondos quedan en el historial de egresos.
+            </p>
+          </div>
         </div>
       )}
-
-      <p className="mt-2 text-xs text-stone-400">
-        Solo asignaciones y liberaciones. Las compras de metas y los retiros de
-        fondos quedan en el historial de egresos.
-      </p>
-    </section>
+    </>
   );
 }
 
