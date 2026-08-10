@@ -16,11 +16,47 @@ import {
   getUnassignedCents,
 } from "@/utils/savings";
 import type { User } from "@/types/user";
+import type { Month } from "@/types/month";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
   Transaction,
 } from "@/types/transaction";
+
+/**
+ * Revertir un ingreso descuenta de ahorro y de los topes. Si ese dinero ya se
+ * gastó, la resta dejaría saldos negativos: dinero que la app afirma tener en
+ * contra, lo cual es imposible. En vez de permitirlo y mostrar un estado roto,
+ * se frena y se explica qué deshacer primero.
+ */
+function assertRevertible(
+  income: IncomeTransaction,
+  month: Month,
+  profile: User | null,
+): void {
+  const ahorroToRevert = income.isDirectSavings
+    ? income.amountCents
+    : income.distribution.ahorro;
+
+  if (ahorroToRevert > (profile?.savingsTotalCents ?? 0)) {
+    throw new Error(
+      "No se puede borrar: parte de este ingreso ya se usó desde Ahorro. Deshaz primero esa compra o retiro.",
+    );
+  }
+
+  if (income.isDirectSavings) return;
+
+  if (income.distribution.necesidad > month.capsCents.necesidad) {
+    throw new Error(
+      "No se puede borrar: el tope de Necesidad de este mes ya no cubre este ingreso. Revisa los movimientos de excedente antes de borrarlo.",
+    );
+  }
+  if (income.distribution.ocio > month.capsCents.ocio) {
+    throw new Error(
+      "No se puede borrar: el tope de Ocio de este mes ya no cubre este ingreso. Revisa los movimientos de excedente antes de borrarlo.",
+    );
+  }
+}
 
 export async function deleteTransaction(
   userId: string,
@@ -67,9 +103,15 @@ export async function deleteTransaction(
       (tx as ExpenseTransaction).goalId
         ? (tx as ExpenseTransaction).goalId
         : null;
-    const userSnap = purchasedGoalId
-      ? await transaction.get(userRef)
-      : null;
+    const userSnap = await transaction.get(userRef);
+
+    if (tx.type === "income") {
+      assertRevertible(
+        tx as IncomeTransaction,
+        monthSnap.data() as Month,
+        userSnap.exists() ? (userSnap.data() as User) : null,
+      );
+    }
 
     if (tx.type === "expense") {
       const expense = tx as ExpenseTransaction;
@@ -215,9 +257,10 @@ export async function updateIncome(
   );
 
   await runTransaction(db, async (transaction) => {
-    const [monthSnap, txSnap] = await Promise.all([
+    const [monthSnap, txSnap, userSnap] = await Promise.all([
       transaction.get(monthRef),
       transaction.get(txRef),
+      transaction.get(userRef),
     ]);
 
     if (!monthSnap.exists()) {
@@ -246,6 +289,29 @@ export async function updateIncome(
       tx.amountCents,
       tx.distribution,
     );
+
+    // Bajar el monto descuenta de ahorro y de los topes, igual que borrarlo.
+    // Si ese dinero ya se gastó, la resta dejaría saldos negativos.
+    const month = monthSnap.data() as Month;
+    const profile = userSnap.exists() ? (userSnap.data() as User) : null;
+    const ahorroDelta = newSplit.ahorro - tx.distribution.ahorro;
+    if (ahorroDelta < 0 && -ahorroDelta > (profile?.savingsTotalCents ?? 0)) {
+      throw new Error(
+        "No se puede bajar tanto: parte de este ingreso ya se usó desde Ahorro. Deshaz primero esa compra o retiro.",
+      );
+    }
+    const necesidadDelta = newSplit.necesidad - tx.distribution.necesidad;
+    if (necesidadDelta < 0 && -necesidadDelta > month.capsCents.necesidad) {
+      throw new Error(
+        "No se puede bajar tanto: el tope de Necesidad de este mes ya no lo cubre.",
+      );
+    }
+    const ocioDelta = newSplit.ocio - tx.distribution.ocio;
+    if (ocioDelta < 0 && -ocioDelta > month.capsCents.ocio) {
+      throw new Error(
+        "No se puede bajar tanto: el tope de Ocio de este mes ya no lo cubre.",
+      );
+    }
 
     transaction.update(monthRef, {
       totalIncomeCents: increment(newValues.amountCents - tx.amountCents),

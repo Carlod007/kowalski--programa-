@@ -75,6 +75,7 @@ export default function History() {
   const [filter, setFilter] = useState<Filter>("all");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
@@ -155,13 +156,20 @@ export default function History() {
 
   async function handleDelete(txId: string) {
     if (!user) return;
+    setDeleteError(null);
     try {
       await deleteTransaction(user.uid, viewedMonthId, txId);
       setDeletingId(null);
       setOpenMenuId(null);
     } catch (err) {
       console.error("deleteTransaction falló:", err);
+      setDeleteError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo borrar. Intenta de nuevo.",
+      );
       setDeletingId(null);
+      setOpenMenuId(null);
     }
   }
 
@@ -188,6 +196,19 @@ export default function History() {
           currentMonthId={viewedMonthId}
           onClose={() => setShowExport(false)}
         />
+      )}
+
+      {deleteError && (
+        <div className="mx-5 mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3">
+          <p className="text-xs text-amber-800">{deleteError}</p>
+          <button
+            type="button"
+            onClick={() => setDeleteError(null)}
+            className="mt-2 text-xs font-medium text-amber-800 underline"
+          >
+            Entendido
+          </button>
+        </div>
       )}
 
       <div className="flex items-center justify-center px-5 pt-5">
