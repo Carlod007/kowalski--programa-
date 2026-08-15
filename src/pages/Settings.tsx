@@ -271,8 +271,9 @@ function DistributionSection() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5">
             <p className="text-sm text-stone-900">
-              El nuevo reparto se aplicará desde el próximo mes. Este mes sigue
-              con la distribución actual.
+              Si todavía no has registrado ingresos este mes, el nuevo reparto
+              se aplica de inmediato. Si ya los registraste, este mes conserva
+              su reparto y el nuevo empieza el mes siguiente.
             </p>
             <div className="mt-4 flex gap-2">
               <button

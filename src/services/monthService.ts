@@ -4,6 +4,8 @@ import {
   increment,
   runTransaction,
   serverTimestamp,
+  type DocumentReference,
+  type Transaction,
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -26,6 +28,31 @@ function buildEmptyMonth(distribution: Distribution): WithFieldValue<Month> {
     closed: false,
     createdAt: serverTimestamp(),
   };
+}
+
+/**
+ * El mes congela su distribución para que los topes ya repartidos no cambien
+ * a mitad de camino. Pero mientras no haya ningún ingreso no hay nada
+ * repartido que proteger, y un mes congelado con un valor que el usuario ya
+ * cambió muestra un porcentaje distinto al de Ajustes. En ese caso se
+ * sincroniza.
+ */
+function syncDistributionIfUnused(
+  transaction: Transaction,
+  monthRef: DocumentReference,
+  month: Month,
+  profileDistribution: Distribution,
+): void {
+  if (month.incomeCount !== 0) return;
+  const current = month.distribution;
+  if (
+    current.necesidad === profileDistribution.necesidad &&
+    current.ocio === profileDistribution.ocio &&
+    current.ahorro === profileDistribution.ahorro
+  ) {
+    return;
+  }
+  transaction.update(monthRef, { distribution: profileDistribution });
 }
 
 export async function getOrCreateMonth(
@@ -63,8 +90,21 @@ export async function checkAndCloseMonth(
       throw new Error(`checkAndCloseMonth: perfil ${userId} no existe`);
     }
     const userProfile = userSnap.data() as User;
+    const newMonthRef = doc(db, "users", userId, "months", currentMonthId);
 
+    // La sincronización va antes de la salida temprana: los meses ya creados
+    // con un reparto desactualizado no vuelven a pasar por la creación, y sin
+    // esto nunca se corregirían.
     if (userProfile.lastClosedMonth === currentMonthId) {
+      const currentSnap = await transaction.get(newMonthRef);
+      if (currentSnap.exists()) {
+        syncDistributionIfUnused(
+          transaction,
+          newMonthRef,
+          currentSnap.data() as Month,
+          userProfile.distribution,
+        );
+      }
       return { prevMonthId: userProfile.lastClosedMonth };
     }
 
@@ -76,7 +116,6 @@ export async function checkAndCloseMonth(
       ? await transaction.get(prevMonthRef)
       : null;
 
-    const newMonthRef = doc(db, "users", userId, "months", currentMonthId);
     const newMonthSnap = await transaction.get(newMonthRef);
 
     let inheritedNecesidadCents = 0;
@@ -116,6 +155,13 @@ export async function checkAndCloseMonth(
       const newMonth = buildEmptyMonth(userProfile.distribution);
       (newMonth.capsCents as MonthCaps).necesidad = inheritedNecesidadCents;
       transaction.set(newMonthRef, newMonth);
+    } else {
+      syncDistributionIfUnused(
+        transaction,
+        newMonthRef,
+        newMonthSnap.data() as Month,
+        userProfile.distribution,
+      );
     }
 
     transaction.update(userRef, { lastClosedMonth: currentMonthId });
@@ -196,6 +242,12 @@ export async function updateDistributionNow(
     }
 
     transaction.update(userRef, { distribution: newDistribution });
+    syncDistributionIfUnused(
+      transaction,
+      monthRef,
+      monthSnap.data() as Month,
+      newDistribution,
+    );
   });
 }
 

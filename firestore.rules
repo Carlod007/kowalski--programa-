@@ -10,9 +10,12 @@ service cloud.firestore {
     match /users/{userId}/months/{monthId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null 
-                    && request.auth.uid == userId 
-                    && request.resource.data.distribution == resource.data.distribution
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && (
+                      request.resource.data.distribution == resource.data.distribution
+                      || resource.data.incomeCount == 0
+                    )
                     && (
                       !resource.data.closed
                       ||
