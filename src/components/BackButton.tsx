@@ -45,12 +45,23 @@ export function ArrowLeftIcon({ className = "" }: { className?: string }) {
  * (se abrió la URL directo, o la PWA reabrió en esta pantalla). Sin ese
  * respaldo, el botón no haría nada o sacaría al usuario de la app.
  */
-export default function BackButton({ to }: { to: string }) {
+export default function BackButton({
+  to,
+  fixed = false,
+}: {
+  to: string;
+  /**
+   * Ignora el historial y va siempre a `to`. Para pantallas alcanzables desde
+   * la barra inferior, donde volver a la anterior deja al usuario en un lugar
+   * que no esperaba.
+   */
+  fixed?: boolean;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
 
   function handleBack() {
-    if (location.key === "default") {
+    if (fixed || location.key === "default") {
       navigate(to, { replace: true });
     } else {
       navigate(-1);

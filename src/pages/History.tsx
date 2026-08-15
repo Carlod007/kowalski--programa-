@@ -177,7 +177,7 @@ export default function History() {
     <div className="min-h-dvh bg-stone-50 pb-24">
       <header className="flex items-center justify-between gap-3 px-5 pt-8">
         <div className="flex items-center gap-3">
-          <BackButton to="/dashboard" />
+          <BackButton to="/dashboard" fixed />
           <h1 className="text-3xl font-bold text-stone-900">Historial</h1>
         </div>
         <button
