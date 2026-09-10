@@ -12,6 +12,7 @@ import { CATEGORY_META } from "@/utils/category";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
+  LoanReceiptTransaction,
   Transaction,
 } from "@/types/transaction";
 
@@ -48,6 +49,7 @@ export async function buildHistoryCsv(
   const monthDocs = await getDocs(q);
 
   const incomeRows: string[] = [];
+  const loanRows: string[] = [];
   const expenseRows: string[] = [];
 
   for (const monthDoc of monthDocs.docs) {
@@ -76,8 +78,24 @@ export async function buildHistoryCsv(
             centsToPlain(income.amountCents),
           ].join(","),
         );
+      } else if (tx.type === "loan") {
+        const loan = tx as LoanReceiptTransaction;
+        loanRows.push(
+          [
+            monthLabel,
+            loan.transactionDate,
+            csvEscape(loan.lender ?? ""),
+            CATEGORY_META[loan.destinationCategory].label,
+            centsToPlain(loan.amountCents),
+          ].join(","),
+        );
       } else {
         const expense = tx as ExpenseTransaction;
+        const loanRelation = expense.fundedByLoanId
+          ? `Financiado con ${expense.fundedByLoanName ?? "préstamo"}`
+          : expense.loanPaymentId
+            ? "Pago de préstamo"
+            : "";
         expenseRows.push(
           [
             monthLabel,
@@ -86,6 +104,7 @@ export async function buildHistoryCsv(
             csvEscape(expense.subcategory),
             csvEscape(expense.description ?? ""),
             csvEscape(expense.paymentMethod),
+            csvEscape(loanRelation),
             centsToPlain(expense.amountCents),
           ].join(","),
         );
@@ -98,8 +117,12 @@ export async function buildHistoryCsv(
     "Mes,Fecha,Fuente,Descripción,Monto",
     ...incomeRows,
     "",
+    "PRÉSTAMOS RECIBIDOS",
+    "Mes,Fecha,Banco o entidad,Categoría destino,Monto recibido",
+    ...loanRows,
+    "",
     "EGRESOS",
-    "Mes,Fecha,Categoría,Subcategoría,Descripción,Método de pago,Monto",
+    "Mes,Fecha,Categoría,Subcategoría,Descripción,Método de pago,Relación con préstamo,Monto",
     ...expenseRows,
   ];
 

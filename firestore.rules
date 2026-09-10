@@ -52,6 +52,106 @@ service cloud.firestore {
                     && request.resource.data.serverDate == request.time;
       allow update, delete: if false;
     }
+    match /users/{userId}/loans/{loanId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.userId == userId
+                    && request.resource.data.amountReceivedCents is int
+                    && request.resource.data.amountReceivedCents > 0
+                    && request.resource.data.totalToRepayCents is int
+                    && request.resource.data.totalToRepayCents >= request.resource.data.amountReceivedCents
+                    && request.resource.data.borrowedAvailableCents == request.resource.data.amountReceivedCents
+                    && request.resource.data.borrowedAvailableByCategory is map
+                    && request.resource.data.borrowedAvailableByCategory.necesidad is int
+                    && request.resource.data.borrowedAvailableByCategory.ocio is int
+                    && request.resource.data.borrowedAvailableByCategory.necesidad >= 0
+                    && request.resource.data.borrowedAvailableByCategory.ocio >= 0
+                    && request.resource.data.borrowedAvailableByCategory.necesidad
+                       + request.resource.data.borrowedAvailableByCategory.ocio
+                       == request.resource.data.borrowedAvailableCents
+                    && request.resource.data.paidCents == 0
+                    && request.resource.data.fundMovementCount == 0
+                    && request.resource.data.destinationCategory in ['necesidad', 'ocio']
+                    && request.resource.data.receivedDate is string
+                    && request.resource.data.receivedDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                    && request.resource.data.receivedMonthId is string
+                    && request.resource.data.installments is list
+                    && request.resource.data.installments.size() > 0
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.updatedAt == request.time;
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.userId == resource.data.userId
+                    && request.resource.data.amountReceivedCents == resource.data.amountReceivedCents
+                    && request.resource.data.totalToRepayCents == resource.data.totalToRepayCents
+                    && request.resource.data.receivedDate == resource.data.receivedDate
+                    && request.resource.data.receivedMonthId == resource.data.receivedMonthId
+                    && request.resource.data.destinationCategory == resource.data.destinationCategory
+                    && request.resource.data.receiptTransactionId == resource.data.receiptTransactionId
+                    && request.resource.data.borrowedAvailableCents is int
+                    && request.resource.data.borrowedAvailableCents >= 0
+                    && request.resource.data.borrowedAvailableCents <= resource.data.amountReceivedCents
+                    && request.resource.data.borrowedAvailableByCategory is map
+                    && request.resource.data.borrowedAvailableByCategory.necesidad is int
+                    && request.resource.data.borrowedAvailableByCategory.ocio is int
+                    && request.resource.data.borrowedAvailableByCategory.necesidad >= 0
+                    && request.resource.data.borrowedAvailableByCategory.ocio >= 0
+                    && request.resource.data.borrowedAvailableByCategory.necesidad
+                       + request.resource.data.borrowedAvailableByCategory.ocio
+                       == request.resource.data.borrowedAvailableCents
+                    && request.resource.data.paidCents is int
+                    && request.resource.data.paidCents >= 0
+                    && request.resource.data.paidCents <= resource.data.totalToRepayCents
+                    && request.resource.data.fundMovementCount is int
+                    && request.resource.data.fundMovementCount >= 0
+                    && request.resource.data.installments is list
+                    && request.resource.data.installments.size() == resource.data.installments.size()
+                    && request.resource.data.updatedAt == request.time;
+      allow delete: if request.auth != null
+                    && request.auth.uid == userId
+                    && resource.data.userId == userId
+                    && resource.data.paidCents == 0
+                    && resource.data.fundMovementCount == 0
+                    && resource.data.borrowedAvailableCents == resource.data.amountReceivedCents
+                    && !get(/databases/$(database)/documents/users/$(userId)/months/$(resource.data.receivedMonthId)).data.closed;
+
+      match /payments/{paymentId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null
+                      && request.auth.uid == userId
+                      && request.resource.data.userId == userId
+                      && request.resource.data.loanId == loanId
+                      && request.resource.data.amountCents is int
+                      && request.resource.data.amountCents > 0
+                      && request.resource.data.sourceCategory in ['necesidad', 'ocio', 'ahorro']
+                      && request.resource.data.paymentDate is string
+                      && request.resource.data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                      && request.resource.data.monthId is string
+                      && !get(/databases/$(database)/documents/users/$(userId)/months/$(request.resource.data.monthId)).data.closed
+                      && request.resource.data.serverDate == request.time;
+        allow update: if false;
+        allow delete: if request.auth != null
+                      && request.auth.uid == userId
+                      && !get(/databases/$(database)/documents/users/$(userId)/months/$(resource.data.monthId)).data.closed;
+      }
+      match /fundMovements/{movementId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null
+                      && request.auth.uid == userId
+                      && request.resource.data.userId == userId
+                      && request.resource.data.loanId == loanId
+                      && request.resource.data.origin in ['necesidad', 'ocio']
+                      && request.resource.data.destination in ['necesidad', 'ocio']
+                      && request.resource.data.origin != request.resource.data.destination
+                      && request.resource.data.amountCents is int
+                      && request.resource.data.amountCents > 0
+                      && request.resource.data.transactionDate is string
+                      && request.resource.data.transactionDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                      && request.resource.data.serverDate == request.time;
+        allow update, delete: if false;
+      }
+    }
     match /users/{userId}/months/{monthId}/movements/{movementId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null

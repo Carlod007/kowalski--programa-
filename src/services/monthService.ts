@@ -12,6 +12,7 @@ import { db } from "@/lib/firebase";
 import { getMonthId, toDateInputValue } from "@/utils/date";
 import { calculateDistribution } from "@/utils/distribution";
 import { getUnassignedCents } from "@/utils/savings";
+import { getMonthRemainders } from "@/utils/monthRemainders";
 import type { Month, MonthCaps } from "@/types/month";
 import type { Distribution } from "@/types/transaction";
 import type { User } from "@/types/user";
@@ -23,6 +24,8 @@ function buildEmptyMonth(distribution: Distribution): WithFieldValue<Month> {
     distribution,
     capsCents: { necesidad: 0, ocio: 0 },
     spentCents: { necesidad: 0, ocio: 0 },
+    borrowedCapsCents: { necesidad: 0, ocio: 0 },
+    loanFundedSpentCents: { necesidad: 0, ocio: 0 },
     ahorroContributedCents: 0,
     incomeCount: 0,
     closed: false,
@@ -119,6 +122,7 @@ export async function checkAndCloseMonth(
     const newMonthSnap = await transaction.get(newMonthRef);
 
     let inheritedNecesidadCents = 0;
+    let inheritedBorrowedCents: MonthCaps = { necesidad: 0, ocio: 0 };
 
     if (
       prevMonthRef &&
@@ -128,25 +132,23 @@ export async function checkAndCloseMonth(
     ) {
       const prevMonth = prevMonthSnap.data() as Month;
 
-      const excedenteNecesidad = Math.max(
-        0,
-        prevMonth.capsCents.necesidad - prevMonth.spentCents.necesidad,
-      );
-      const excedenteOcio = Math.max(
-        0,
-        prevMonth.capsCents.ocio - prevMonth.spentCents.ocio,
-      );
+      const {
+        owned: ownedRemainder,
+        borrowed: borrowedRemainder,
+      } = getMonthRemainders(prevMonth);
 
-      inheritedNecesidadCents = excedenteNecesidad;
+      inheritedNecesidadCents =
+        ownedRemainder.necesidad + borrowedRemainder.necesidad;
+      inheritedBorrowedCents = borrowedRemainder;
 
       transaction.update(prevMonthRef, {
         closed: true,
-        remainder: { ocioToAhorroCents: excedenteOcio },
+        remainder: { ocioToAhorroCents: ownedRemainder.ocio },
       });
 
-      if (excedenteOcio > 0) {
+      if (ownedRemainder.ocio > 0) {
         transaction.update(userRef, {
-          savingsTotalCents: increment(excedenteOcio),
+          savingsTotalCents: increment(ownedRemainder.ocio),
         });
       }
     }
@@ -154,8 +156,20 @@ export async function checkAndCloseMonth(
     if (!newMonthSnap.exists()) {
       const newMonth = buildEmptyMonth(userProfile.distribution);
       (newMonth.capsCents as MonthCaps).necesidad = inheritedNecesidadCents;
+      (newMonth.capsCents as MonthCaps).ocio = inheritedBorrowedCents.ocio;
+      newMonth.borrowedCapsCents = inheritedBorrowedCents;
       transaction.set(newMonthRef, newMonth);
     } else {
+      if (inheritedNecesidadCents > 0 || inheritedBorrowedCents.ocio > 0) {
+        transaction.update(newMonthRef, {
+          "capsCents.necesidad": increment(inheritedNecesidadCents),
+          "capsCents.ocio": increment(inheritedBorrowedCents.ocio),
+          "borrowedCapsCents.necesidad": increment(
+            inheritedBorrowedCents.necesidad,
+          ),
+          "borrowedCapsCents.ocio": increment(inheritedBorrowedCents.ocio),
+        });
+      }
       syncDistributionIfUnused(
         transaction,
         newMonthRef,
@@ -293,7 +307,12 @@ export async function moveSurplus(
     }
 
     if (origin === "necesidad" || origin === "ocio") {
-      const disponible = month.capsCents[origin] - month.spentCents[origin];
+      const borrowedCap = month.borrowedCapsCents?.[origin] ?? 0;
+      const loanFundedSpent = month.loanFundedSpentCents?.[origin] ?? 0;
+      const disponible =
+        month.capsCents[origin] -
+        borrowedCap -
+        (month.spentCents[origin] - loanFundedSpent);
       if (amountCents > disponible) {
         const label = origin === "necesidad" ? "Necesidad" : "Ocio";
         throw new Error(`El monto supera el excedente disponible de ${label}`);

@@ -10,6 +10,10 @@ import {
 import { db } from "@/lib/firebase";
 import { calculateProportionalSplit } from "@/utils/distribution";
 import {
+  getBorrowedAvailableByCategory,
+  reverseLoanPayment,
+} from "@/utils/loans";
+import {
   getGoalAllocated,
   getGoalKind,
   getPurchaseCount,
@@ -17,6 +21,7 @@ import {
 } from "@/utils/savings";
 import type { User } from "@/types/user";
 import type { Month } from "@/types/month";
+import type { Loan, LoanPayment } from "@/types/loan";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
@@ -46,12 +51,18 @@ function assertRevertible(
 
   if (income.isDirectSavings) return;
 
-  if (income.distribution.necesidad > month.capsCents.necesidad) {
+  const ownedNecesidad =
+    month.capsCents.necesidad -
+    (month.borrowedCapsCents?.necesidad ?? 0);
+  const ownedOcio =
+    month.capsCents.ocio - (month.borrowedCapsCents?.ocio ?? 0);
+
+  if (income.distribution.necesidad > ownedNecesidad) {
     throw new Error(
       "No se puede borrar: el tope de Necesidad de este mes ya no cubre este ingreso. Revisa los movimientos de excedente antes de borrarlo.",
     );
   }
-  if (income.distribution.ocio > month.capsCents.ocio) {
+  if (income.distribution.ocio > ownedOcio) {
     throw new Error(
       "No se puede borrar: el tope de Ocio de este mes ya no cubre este ingreso. Revisa los movimientos de excedente antes de borrarlo.",
     );
@@ -93,6 +104,12 @@ export async function deleteTransaction(
 
     const tx = txSnap.data() as Transaction;
 
+    if (tx.type === "loan") {
+      throw new Error(
+        "El préstamo recibido se administra desde la pantalla de Préstamos.",
+      );
+    }
+
     // Si el egreso era la compra de una meta, hay que deshacer el contador de
     // compras además de devolver la plata. Se lee el perfil ANTES de escribir
     // nada, porque una transacción de Firestore no admite lecturas después de
@@ -104,6 +121,30 @@ export async function deleteTransaction(
         ? (tx as ExpenseTransaction).goalId
         : null;
     const userSnap = await transaction.get(userRef);
+
+    const expenseTx = tx.type === "expense" ? tx : null;
+    const linkedLoanId =
+      expenseTx?.fundedByLoanId ??
+      (expenseTx?.loanPaymentId ? expenseTx.loanId : undefined);
+    const linkedLoanRef = linkedLoanId
+      ? doc(db, "users", userId, "loans", linkedLoanId)
+      : null;
+    const linkedLoanSnap = linkedLoanRef
+      ? await transaction.get(linkedLoanRef)
+      : null;
+    const paymentRef =
+      expenseTx?.loanPaymentId && expenseTx.loanId
+        ? doc(
+            db,
+            "users",
+            userId,
+            "loans",
+            expenseTx.loanId,
+            "payments",
+            expenseTx.loanPaymentId,
+          )
+        : null;
+    const paymentSnap = paymentRef ? await transaction.get(paymentRef) : null;
 
     if (tx.type === "income") {
       assertRevertible(
@@ -134,11 +175,60 @@ export async function deleteTransaction(
 
         transaction.update(userRef, userUpdate);
       } else {
-        transaction.update(monthRef, {
+        const monthUpdate: Record<string, unknown> = {
           [`spentCents.${expense.category}`]: increment(-expense.amountCents),
+        };
+        if (expense.fundedByLoanId) {
+          monthUpdate[`loanFundedSpentCents.${expense.category}`] = increment(
+            -expense.amountCents,
+          );
+        }
+        transaction.update(monthRef, monthUpdate);
+      }
+
+      if (expense.fundedByLoanId) {
+        if (!linkedLoanRef || !linkedLoanSnap?.exists()) {
+          throw new Error("No se encontró el préstamo vinculado");
+        }
+        const linkedLoan = linkedLoanSnap.data() as Loan;
+        const availableByCategory =
+          getBorrowedAvailableByCategory(linkedLoan);
+        if (expense.category === "ahorro") {
+          throw new Error("Un gasto financiado no puede pertenecer a Ahorro");
+        }
+        transaction.update(linkedLoanRef, {
+          borrowedAvailableCents: increment(expense.amountCents),
+          borrowedAvailableByCategory: {
+            ...availableByCategory,
+            [expense.category]:
+              availableByCategory[expense.category] + expense.amountCents,
+          },
+          updatedAt: serverTimestamp(),
         });
       }
-    } else {
+
+      if (expense.loanPaymentId) {
+        if (
+          !linkedLoanRef ||
+          !linkedLoanSnap?.exists() ||
+          !paymentRef ||
+          !paymentSnap?.exists()
+        ) {
+          throw new Error("No se encontró el pago de préstamo vinculado");
+        }
+        const loan = linkedLoanSnap.data() as Loan;
+        const payment = paymentSnap.data() as LoanPayment;
+        transaction.update(linkedLoanRef, {
+          installments: reverseLoanPayment(
+            loan.installments,
+            payment.allocations,
+          ),
+          paidCents: increment(-payment.amountCents),
+          updatedAt: serverTimestamp(),
+        });
+        transaction.delete(paymentRef);
+      }
+    } else if (tx.type === "income") {
       const income = tx as IncomeTransaction;
       if (income.isDirectSavings) {
         // Un aporte directo nunca tocó totalIncomeCents ni los topes: se
@@ -211,6 +301,12 @@ export async function updateExpense(
 
     const tx = txSnap.data() as ExpenseTransaction;
     const delta = newValues.amountCents - tx.amountCents;
+
+    if ((tx.fundedByLoanId || tx.loanPaymentId) && delta !== 0) {
+      throw new Error(
+        "El monto de una operación vinculada a un préstamo no se edita. Bórrala y regístrala de nuevo.",
+      );
+    }
 
     if (tx.category === "ahorro") {
       transaction.update(userRef, {
@@ -301,13 +397,18 @@ export async function updateIncome(
       );
     }
     const necesidadDelta = newSplit.necesidad - tx.distribution.necesidad;
-    if (necesidadDelta < 0 && -necesidadDelta > month.capsCents.necesidad) {
+    const ownedNecesidad =
+      month.capsCents.necesidad -
+      (month.borrowedCapsCents?.necesidad ?? 0);
+    if (necesidadDelta < 0 && -necesidadDelta > ownedNecesidad) {
       throw new Error(
         "No se puede bajar tanto: el tope de Necesidad de este mes ya no lo cubre.",
       );
     }
     const ocioDelta = newSplit.ocio - tx.distribution.ocio;
-    if (ocioDelta < 0 && -ocioDelta > month.capsCents.ocio) {
+    const ownedOcio =
+      month.capsCents.ocio - (month.borrowedCapsCents?.ocio ?? 0);
+    if (ocioDelta < 0 && -ocioDelta > ownedOcio) {
       throw new Error(
         "No se puede bajar tanto: el tope de Ocio de este mes ya no lo cubre.",
       );

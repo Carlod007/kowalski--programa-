@@ -32,16 +32,21 @@ import {
 } from "@/services/exportService";
 import BottomNav from "@/components/BottomNav";
 import type { Month } from "@/types/month";
-import type { Category, Transaction } from "@/types/transaction";
+import type {
+  Category,
+  LoanReceiptTransaction,
+  Transaction,
+} from "@/types/transaction";
 import BackButton from "@/components/BackButton";
 
-type Filter = "all" | "income" | Category;
+type Filter = "all" | "income" | "loan" | Category;
 
 type TxWithId = Transaction & { _id: string };
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "Todos" },
   { key: "income", label: "Ingresos" },
+  { key: "loan", label: "Préstamos" },
   { key: "necesidad", label: "Necesidad" },
   { key: "ocio", label: "Ocio" },
   { key: "ahorro", label: "Ahorro" },
@@ -141,6 +146,12 @@ export default function History() {
   const filtered = transactions.filter((tx) => {
     if (filter === "all") return true;
     if (filter === "income") return tx.type === "income";
+    if (filter === "loan") {
+      return (
+        tx.type === "loan" ||
+        (tx.type === "expense" && !!(tx.loanId || tx.fundedByLoanId))
+      );
+    }
     return tx.type === "expense" && tx.category === filter;
   });
 
@@ -354,24 +365,39 @@ function TransactionRow({
   menuRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const isIncome = tx.type === "income";
-  const name = isIncome ? tx.source : tx.subcategory;
+  const isLoanReceipt = tx.type === "loan";
+  const isLoanExpense =
+    tx.type === "expense" && !!(tx.loanId || tx.fundedByLoanId);
+  const canEdit = !isLoanReceipt && !isLoanExpense;
+  const name = isIncome
+    ? tx.source
+    : isLoanReceipt
+      ? tx.lender?.trim() || "Préstamo recibido"
+      : tx.subcategory;
   const detail = isIncome
     ? tx.description
-    : tx.description
-      ? `${CATEGORY_META[tx.category].label} - ${tx.description}`
-      : CATEGORY_META[tx.category].label;
+    : isLoanReceipt
+      ? `Préstamo recibido · ${CATEGORY_META[(tx as LoanReceiptTransaction).destinationCategory].label}`
+      : tx.fundedByLoanId
+        ? `${CATEGORY_META[tx.category].label} · financiado con ${tx.fundedByLoanName ?? "préstamo"}`
+        : tx.loanPaymentId
+          ? `${CATEGORY_META[tx.category].label} · pago de préstamo`
+          : tx.description
+            ? `${CATEGORY_META[tx.category].label} - ${tx.description}`
+            : CATEGORY_META[tx.category].label;
+  const isPositive = isIncome || isLoanReceipt;
 
   return (
     <div className="relative rounded-2xl border border-stone-200 bg-white p-4">
       <div className="flex items-start gap-3">
         <span
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
-            isIncome
+            isPositive
               ? "bg-emerald-50 text-emerald-600"
               : "bg-red-50 text-red-600"
           }`}
         >
-          {isIncome ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
+          {isPositive ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
         </span>
 
         <div className="flex-1 min-w-0">
@@ -379,7 +405,7 @@ function TransactionRow({
             {name}
           </p>
           {detail && <p className="mt-0.5 text-xs text-stone-400">{detail}</p>}
-          {!isIncome && (
+          {tx.type === "expense" && (
             <p className="mt-0.5 text-xs text-stone-400">{tx.paymentMethod}</p>
           )}
         </div>
@@ -387,13 +413,13 @@ function TransactionRow({
         <div className="flex items-center gap-2">
           <span
             className={`text-sm font-medium ${
-              isIncome ? "text-emerald-600" : "text-red-600"
+              isPositive ? "text-emerald-600" : "text-red-600"
             }`}
           >
-            {isIncome ? "+ " : "- "}
+            {isPositive ? "+ " : "- "}
             {formatCents(tx.amountCents)}
           </span>
-          {isOpen && (
+          {isOpen && !isLoanReceipt && (
             <div className="relative" ref={isMenuOpen ? menuRef : undefined}>
               <button
                 type="button"
@@ -404,13 +430,15 @@ function TransactionRow({
               </button>
               {isMenuOpen && (
                 <div className="absolute right-0 top-8 z-10 w-36 rounded-xl border border-stone-200 bg-white py-1 shadow-lg">
-                  <button
-                    type="button"
-                    onClick={onEdit}
-                    className="w-full px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50"
-                  >
-                    Editar
-                  </button>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={onEdit}
+                      className="w-full px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50"
+                    >
+                      Editar
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={onDelete}

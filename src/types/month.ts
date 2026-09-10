@@ -30,5 +30,12 @@ export type Month = {
    * meses anteriores a esta función no lo tienen y valen 0.
    */
   directSavingsCents?: number;
+  /**
+   * Parte de los topes que proviene de préstamos y gasto cubierto
+   * explícitamente con esos fondos. Se guardan separados para que el cierre
+   * nunca convierta dinero prestado en Ahorro.
+   */
+  borrowedCapsCents?: MonthCaps;
+  loanFundedSpentCents?: MonthCaps;
   createdAt: Timestamp | null;
 };

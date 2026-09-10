@@ -5,6 +5,7 @@ import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth, moveSurplus } from "@/services/monthService";
 import { getMonthInitialSplit } from "@/services/movementService";
+import { watchLoans } from "@/services/loanService";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
 import { getAssignableCents } from "@/utils/savings";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
@@ -17,6 +18,13 @@ import {
 import type { Month, MonthCaps } from "@/types/month";
 import type { Distribution } from "@/types/transaction";
 import type { MovementWithId } from "@/services/movementService";
+import type { LoanWithId } from "@/types/loan";
+import {
+  getLoanInstallmentStatus,
+  getLoanOutstandingCents,
+  getNextPendingInstallment,
+} from "@/utils/loans";
+import { toDateInputValue, formatDateLabel } from "@/utils/date";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
 import CategoryIcon from "@/components/CategoryIcon";
@@ -88,6 +96,8 @@ export default function Dashboard() {
         onPrev={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
         onNext={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
       />
+
+      {isViewingCurrentMonth && <LoanSummaryCard userId={user.uid} />}
 
       {isViewingCurrentMonth && (
         <div className="mt-6 flex gap-3 px-5">
@@ -306,6 +316,12 @@ function CategoryRow({
   const meta = CATEGORY_META[category];
   const cap = month.capsCents[category];
   const spent = month.spentCents[category];
+  const borrowedCap = month.borrowedCapsCents?.[category] ?? 0;
+  const loanFundedSpent = month.loanFundedSpentCents?.[category] ?? 0;
+  const borrowedAvailable = Math.max(0, borrowedCap - loanFundedSpent);
+  const ownedCap = cap - borrowedCap;
+  const ownedSpent = spent - loanFundedSpent;
+  const movableSurplus = ownedCap - ownedSpent;
   const pct = month.distribution[category];
   const status = getCategoryStatus(cap, spent);
   const [showMove, setShowMove] = useState(false);
@@ -327,7 +343,7 @@ function CategoryRow({
 
   // El botón se muestra siempre en el mes actual: si no queda excedente, se
   // explica al pulsarlo en vez de desaparecer sin motivo aparente.
-  const hasSurplus = status.disponible > 0;
+  const hasSurplus = movableSurplus > 0;
 
   const destinations: CategoryKey[] =
     category === "necesidad" ? ["ocio", "ahorro"] : ["necesidad", "ahorro"];
@@ -338,10 +354,10 @@ function CategoryRow({
   // excedente heredado del mes anterior o un movimiento entre categorías),
   // nunca una suposición por redondeo.
   const realInitialCap = initialSplit ? initialSplit[category] : null;
-  const capWasAdjusted = realInitialCap !== null && cap !== realInitialCap;
+  const capWasAdjusted = realInitialCap !== null && ownedCap !== realInitialCap;
   const actualPct =
     month.totalIncomeCents > 0
-      ? ((cap / month.totalIncomeCents) * 100).toFixed(1)
+      ? ((ownedCap / month.totalIncomeCents) * 100).toFixed(1)
       : "0.0";
 
   return (
@@ -406,6 +422,16 @@ function CategoryRow({
                 {formatCents(spent)}
               </p>
               <p className="text-stone-400">de {formatCents(cap)}</p>
+              {borrowedAvailable > 0 && (
+                <>
+                  <p className="mt-1 text-stone-500">
+                    Propio disponible: {formatCents(movableSurplus)}
+                  </p>
+                  <p className="text-violet-600">
+                    Prestado disponible: {formatCents(borrowedAvailable)}
+                  </p>
+                </>
+              )}
             </div>
 
             {(capWasAdjusted || !initialSplitDeterminable) && (
@@ -442,7 +468,7 @@ function CategoryRow({
                 userId={userId}
                 monthId={monthId}
                 origin={category}
-                disponibleCents={status.disponible}
+                disponibleCents={movableSurplus}
                 destinations={destinations}
                 capsCents={month.capsCents}
                 savingsTotalCents={savingsTotalCents}
@@ -452,8 +478,8 @@ function CategoryRow({
             ) : (
               <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
                 <p className="text-xs text-amber-800">
-                  No te queda excedente en {meta.label} este mes: ya gastaste
-                  todo tu tope.
+                  No te queda excedente propio en {meta.label} este mes. Los
+                  fondos prestados no se pueden mover entre categorías.
                 </p>
                 <button
                   type="button"
@@ -472,11 +498,77 @@ function CategoryRow({
           {!initialSplitDeterminable
             ? `Tu tope actual es ${formatCents(cap)}. No pudimos determinar si corresponde exactamente a tu ${pct}% inicial de este mes (datos incompletos).`
             : capWasAdjusted
-            ? `Tu tope actual es ${formatCents(cap)}. No es solo tu ${pct}% inicial: incluye ingresos recibidos con otro % o dinero movido entre categorías este mes.`
-            : `Tu tope actual es ${formatCents(cap)}, según tu ${pct}% inicial de este mes.`}
+            ? `Tu disponible propio parte de un tope de ${formatCents(ownedCap)}. No es solo tu ${pct}% inicial: incluye ingresos recibidos con otro % o movimientos entre categorías.`
+            : `Tu tope propio es ${formatCents(ownedCap)}, según tu ${pct}% inicial.${borrowedCap > 0 ? ` Además, este mes entraron ${formatCents(borrowedCap)} de préstamos.` : ""}`}
         </div>
       )}
     </div>
+  );
+}
+
+function LoanSummaryCard({ userId }: { userId: string }) {
+  const [loans, setLoans] = useState<LoanWithId[]>([]);
+
+  useEffect(
+    () =>
+      watchLoans(userId, setLoans, (error) => {
+        console.error("watchLoans falló:", error);
+      }),
+    [userId],
+  );
+
+  const today = toDateInputValue();
+  const active = loans.filter((loan) => getLoanOutstandingCents(loan) > 0);
+  const outstanding = active.reduce(
+    (sum, loan) => sum + getLoanOutstandingCents(loan),
+    0,
+  );
+  const pending = active
+    .map((loan) => ({ loan, installment: getNextPendingInstallment(loan) }))
+    .filter(
+      (item): item is { loan: LoanWithId; installment: NonNullable<typeof item.installment> } =>
+        item.installment !== null,
+    )
+    .sort((a, b) => a.installment.dueDate.localeCompare(b.installment.dueDate));
+  const next = pending[0] ?? null;
+  const overdue = active.reduce(
+    (sum, loan) =>
+      sum +
+      loan.installments.filter(
+        (item) => getLoanInstallmentStatus(item, today) === "overdue",
+      ).length,
+    0,
+  );
+
+  return (
+    <Link
+      to="/loans"
+      className="mx-5 mt-4 block rounded-2xl border border-violet-200 bg-white p-4"
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-stone-900">Préstamos</p>
+        <span className="text-xs font-medium text-violet-600">Ver →</span>
+      </div>
+      {active.length === 0 ? (
+        <p className="mt-2 text-sm text-stone-400">Sin deuda pendiente</p>
+      ) : (
+        <div className="mt-2 flex items-end justify-between gap-3">
+          <div>
+            <p className="text-xl font-semibold text-violet-700">
+              {formatCents(outstanding)}
+            </p>
+            <p className="text-xs text-stone-400">deuda pendiente</p>
+          </div>
+          <p className={overdue > 0 ? "text-xs text-red-600" : "text-xs text-stone-500"}>
+            {overdue > 0
+              ? `${overdue} ${overdue === 1 ? "cuota vencida" : "cuotas vencidas"}`
+              : next
+                ? `Próxima: ${formatDateLabel(next.installment.dueDate)}`
+                : "Sin cuotas pendientes"}
+          </p>
+        </div>
+      )}
+    </Link>
   );
 }
 

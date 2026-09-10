@@ -20,6 +20,10 @@ import {
   purchaseGoalExpense,
   withdrawFromFund,
 } from "@/services/transactionService";
+import {
+  registerLoanFundedExpense,
+  watchLoans,
+} from "@/services/loanService";
 import { getMonthId, toDateInputValue, formatDateLabel } from "@/utils/date";
 import {
   CAP_CATEGORY_ORDER,
@@ -36,9 +40,11 @@ import {
   getGoalProgress,
   wasPurchased,
 } from "@/utils/savings";
+import { getBorrowedAvailableByCategory } from "@/utils/loans";
 import type { Month, MonthCaps } from "@/types/month";
 import type { SavingsGoal } from "@/types/user";
 import type { ExpenseTransaction } from "@/types/transaction";
+import type { LoanWithId } from "@/types/loan";
 import { ArrowLeftIcon } from "@/components/BackButton";
 
 type Step = "category" | "detail" | "goal";
@@ -183,6 +189,8 @@ function ExpenseDetailStep({
   const [pickError, setPickError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loans, setLoans] = useState<LoanWithId[]>([]);
+  const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [showEmptyCapWarning, setShowEmptyCapWarning] = useState(false);
   const [pendingValues, setPendingValues] = useState<DetailFormValues | null>(
     null,
@@ -205,6 +213,19 @@ function ExpenseDetailStep({
   const essentialNeeds = userProfile?.essentialNeeds ?? [];
   const meta = CATEGORY_META[category];
   const status = getCategoryStatus(capCents, spentCents);
+  const availableLoans = loans.filter(
+    (loan) =>
+      getBorrowedAvailableByCategory(loan)[category] > 0,
+  );
+  const selectedLoan =
+    availableLoans.find((loan) => loan.id === selectedLoanId) ?? null;
+
+  useEffect(() => {
+    if (!user) return;
+    return watchLoans(user.uid, setLoans, (error) => {
+      console.error("watchLoans falló:", error);
+    });
+  }, [user]);
 
   const essentialNeedNames = new Set(essentialNeeds.map((n) => n.name));
   const fixedSubcategories = subcategories.filter((s) =>
@@ -265,6 +286,30 @@ function ExpenseDetailStep({
     const monthId = getMonthId();
     const description = values.description?.trim();
 
+    if (selectedLoan) {
+      try {
+        await registerLoanFundedExpense(user.uid, monthId, {
+          loanId: selectedLoan.id,
+          category,
+          subcategory,
+          paymentMethod,
+          amountCents,
+          date: values.date,
+          description,
+        });
+        navigate("/dashboard");
+      } catch (err) {
+        console.error("Error al registrar egreso con préstamo:", err);
+        setSubmitError(
+          err instanceof Error
+            ? err.message
+            : "No se pudo guardar. Revisa tu conexión e intenta de nuevo.",
+        );
+        setSaving(false);
+      }
+      return;
+    }
+
     const batch = writeBatch(db);
 
     const txRef = doc(
@@ -304,6 +349,14 @@ function ExpenseDetailStep({
   async function onSubmit(values: DetailFormValues) {
     if (!subcategory || !paymentMethod) {
       setPickError("Selecciona subcategoría y método de pago");
+      return;
+    }
+    const amountCents = Math.round(parseFloat(values.amount) * 100);
+    if (
+      selectedLoan &&
+      amountCents > getBorrowedAvailableByCategory(selectedLoan)[category]
+    ) {
+      setPickError("El monto supera los fondos disponibles del préstamo");
       return;
     }
     setPickError(null);
@@ -418,6 +471,33 @@ function ExpenseDetailStep({
           )}
         </div>
 
+        {availableLoans.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+            <p className="text-sm font-medium text-violet-900">
+              ¿Usar fondos de un préstamo?
+            </p>
+            <p className="text-xs text-violet-700">
+              Solo se descontarán si eliges uno explícitamente.
+            </p>
+            <select
+              value={selectedLoanId ?? ""}
+              onChange={(event) =>
+                setSelectedLoanId(event.target.value || null)
+              }
+              className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-stone-900"
+            >
+              <option value="">No, usar presupuesto propio</option>
+              {availableLoans.map((loan) => (
+                <option key={loan.id} value={loan.id}>
+                  {loan.lender?.trim() || "Préstamo"} ·{" "}
+                  {formatCents(getBorrowedAvailableByCategory(loan)[category])}{" "}
+                  disponible
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-stone-700">Método de pago</p>
           {paymentMethods.length === 0 ? (
@@ -488,7 +568,7 @@ function ExpenseDetailStep({
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
             <p className="text-sm text-amber-800">
               Todavía no registraste ingresos este mes - este gasto va a
-              aparecer como deuda desde el inicio.
+              aparecer como saldo excedido desde el inicio.
             </p>
             <div className="mt-2 flex gap-2">
               <button

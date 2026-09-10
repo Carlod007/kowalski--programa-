@@ -7,6 +7,7 @@ import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import type { Month } from "@/types/month";
 import BackButton from "@/components/BackButton";
+import { getMonthRemainders } from "@/utils/monthRemainders";
 
 const CURRENT_MONTH_ID = getMonthId();
 
@@ -55,6 +56,9 @@ export default function CloseMonth() {
 
   const isProjection = viewedMonthId === CURRENT_MONTH_ID && !month?.closed;
   const canGoForward = !!viewedMonthId && viewedMonthId < CURRENT_MONTH_ID;
+  const remainders = month ? getMonthRemainders(month) : null;
+  const borrowedOcioRemainder = remainders?.borrowed.ocio ?? 0;
+  const ownedOcioRemainder = remainders?.owned.ocio ?? 0;
 
   function goTo(delta: number) {
     if (!viewedMonthId) return;
@@ -151,11 +155,18 @@ export default function CloseMonth() {
                 label="Ocio sobrante → se sumaría a tu Ahorro"
                 value={
                   isProjection
-                    ? Math.max(0, month.capsCents.ocio - month.spentCents.ocio)
+                    ? ownedOcioRemainder
                     : (month.remainder?.ocioToAhorroCents ?? 0)
                 }
                 valueClassName="text-teal-700"
               />
+              {borrowedOcioRemainder > 0 && (
+                <Row
+                  label="Ocio prestado no usado → continúa al mes nuevo"
+                  value={borrowedOcioRemainder}
+                  valueClassName="text-violet-700"
+                />
+              )}
             </div>
           </div>
 

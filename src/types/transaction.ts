@@ -9,7 +9,7 @@ export type Distribution = {
 };
 
 export type TransactionBase = {
-  type: "income" | "expense";
+  type: "income" | "expense" | "loan";
   serverDate: Timestamp | null;
   localDate: string;
   transactionDate: string;
@@ -41,6 +41,22 @@ export type ExpenseTransaction = TransactionBase & {
    * por el nombre de la meta (que el usuario puede renombrar).
    */
   goalId?: string;
+  /** Gasto cubierto explícitamente con el saldo disponible de un préstamo. */
+  fundedByLoanId?: string;
+  fundedByLoanName?: string;
+  /** Pago de deuda vinculado a un registro de pago del préstamo. */
+  loanPaymentId?: string;
+  loanId?: string;
 };
 
-export type Transaction = IncomeTransaction | ExpenseTransaction;
+export type LoanReceiptTransaction = TransactionBase & {
+  type: "loan";
+  loanId: string;
+  lender?: string;
+  destinationCategory: "necesidad" | "ocio";
+};
+
+export type Transaction =
+  | IncomeTransaction
+  | ExpenseTransaction
+  | LoanReceiptTransaction;

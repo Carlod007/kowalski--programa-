@@ -20,6 +20,7 @@ import SavingsGoals from "@/pages/SavingsGoals";
 import AdminOnboarding from "@/pages/AdminOnboarding";
 
 const ChartsScreen = lazy(() => import("@/pages/ChartsScreen"));
+const Loans = lazy(() => import("@/pages/Loans"));
 const ADMIN_UID = import.meta.env.VITE_ADMIN_UID;
 
 function LoadingScreen() {
@@ -159,6 +160,14 @@ const router = createBrowserRouter([
       {
         path: "/goals",
         element: <SavingsGoals />,
+      },
+      {
+        path: "/loans",
+        element: (
+          <Suspense fallback={<LoadingScreen />}>
+            <Loans />
+          </Suspense>
+        ),
       },
       {
         element: <AdminGuard />,

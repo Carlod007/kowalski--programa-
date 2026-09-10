@@ -12,6 +12,7 @@ import type { Month, MonthCaps } from "@/types/month";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
+  Transaction,
 } from "@/types/transaction";
 import { ArrowLeftIcon } from "@/components/BackButton";
 
@@ -58,7 +59,19 @@ export default function EditTransaction() {
           return;
         }
 
-        const transaction = txSnap.data() as Tx;
+        const rawTransaction = txSnap.data() as Transaction;
+        if (
+          rawTransaction.type === "loan" ||
+          (rawTransaction.type === "expense" &&
+            !!(rawTransaction.fundedByLoanId || rawTransaction.loanPaymentId))
+        ) {
+          setError(
+            "Las operaciones vinculadas a préstamos se corrigen borrándolas y registrándolas de nuevo.",
+          );
+          setLoading(false);
+          return;
+        }
+        const transaction = rawTransaction as Tx;
         const monthData = monthSnap.data() as Month;
 
         setTx(transaction);
