@@ -310,7 +310,7 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
         onChange={setReceived}
       />
       <label className="text-sm text-stone-600">
-        Cómo se definen las cuotas
+        Tipo de cronograma de pago
         <select
           value={scheduleType}
           onChange={(event) =>
@@ -318,9 +318,15 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
           }
           className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
         >
-          <option value="fixed-known">Cuota fija conocida</option>
-          <option value="total-known">Total conocido</option>
-          <option value="custom">Cuotas variables (manual)</option>
+          <option value="fixed-known">
+            Cuotas fijas — monto de cuota conocido
+          </option>
+          <option value="total-known">
+            Cuotas fijas — total a pagar conocido
+          </option>
+          <option value="custom">
+            Cuotas variables — cronograma personalizado
+          </option>
         </select>
       </label>
       <label className="text-sm text-stone-600">
