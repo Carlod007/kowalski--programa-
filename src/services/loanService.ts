@@ -15,6 +15,8 @@ import { getUnassignedCents } from "@/utils/savings";
 import { toDateInputValue } from "@/utils/date";
 import {
   allocateLoanPayment,
+  buildCustomLoanInstallments,
+  generateFixedAmountInstallments,
   generateLoanInstallments,
   getBorrowedAvailableByCategory,
   reassignBorrowedBalance,
@@ -34,6 +36,33 @@ import type {
   ExpenseTransaction,
   LoanReceiptTransaction,
 } from "@/types/transaction";
+
+type CreateLoanCommon = {
+  lender?: string;
+  amountReceivedCents: number;
+  receivedDate: string;
+  destinationCategory: LoanDestinationCategory;
+};
+
+type CreateLoanInput = CreateLoanCommon &
+  (
+    | {
+        scheduleType: "fixed-known";
+        installmentAmountCents: number;
+        installmentCount: number;
+        firstDueDate: string;
+      }
+    | {
+        scheduleType: "total-known";
+        totalToRepayCents: number;
+        installmentCount: number;
+        firstDueDate: string;
+      }
+    | {
+        scheduleType: "custom";
+        installments: { dueDate: string; amountCents: number }[];
+      }
+  );
 
 export function watchLoans(
   userId: string,
@@ -83,26 +112,11 @@ export function watchLoanFundMovements(
 
 export async function createLoan(
   userId: string,
-  input: {
-    lender?: string;
-    amountReceivedCents: number;
-    totalToRepayCents: number;
-    receivedDate: string;
-    destinationCategory: LoanDestinationCategory;
-    installmentCount: number;
-    firstDueDate: string;
-  },
+  input: CreateLoanInput,
 ): Promise<string> {
   if (input.amountReceivedCents <= 0) {
     throw new Error("El monto recibido debe ser mayor a 0");
   }
-  if (input.totalToRepayCents < input.amountReceivedCents) {
-    throw new Error("El total a devolver no puede ser menor al recibido");
-  }
-  if (input.firstDueDate < input.receivedDate) {
-    throw new Error("El primer vencimiento no puede ser anterior a la recepción");
-  }
-
   const receivedMonthId = input.receivedDate.slice(0, 7);
   const monthRef = doc(db, "users", userId, "months", receivedMonthId);
   const loanRef = doc(collection(db, "users", userId, "loans"));
@@ -116,11 +130,32 @@ export async function createLoan(
       "transactions",
     ),
   );
-  const installments = generateLoanInstallments(
-    input.totalToRepayCents,
-    input.installmentCount,
-    input.firstDueDate,
+  let installments;
+  if (input.scheduleType === "fixed-known") {
+    installments = generateFixedAmountInstallments(
+      input.installmentAmountCents,
+      input.installmentCount,
+      input.firstDueDate,
+    );
+  } else if (input.scheduleType === "total-known") {
+    installments = generateLoanInstallments(
+      input.totalToRepayCents,
+      input.installmentCount,
+      input.firstDueDate,
+    );
+  } else {
+    installments = buildCustomLoanInstallments(input.installments);
+  }
+  if (installments.some((item) => item.dueDate < input.receivedDate)) {
+    throw new Error("Los vencimientos no pueden ser anteriores a la recepción");
+  }
+  const totalToRepayCents = installments.reduce(
+    (sum, item) => sum + item.amountCents,
+    0,
   );
+  if (totalToRepayCents < input.amountReceivedCents) {
+    throw new Error("El total a devolver no puede ser menor al recibido");
+  }
 
   await runTransaction(db, async (transaction) => {
     const monthSnapshot = await transaction.get(monthRef);
@@ -135,7 +170,8 @@ export async function createLoan(
       userId,
       ...(input.lender ? { lender: input.lender } : {}),
       amountReceivedCents: input.amountReceivedCents,
-      totalToRepayCents: input.totalToRepayCents,
+      totalToRepayCents,
+      scheduleType: input.scheduleType,
       receivedDate: input.receivedDate,
       receivedMonthId,
       destinationCategory: input.destinationCategory,

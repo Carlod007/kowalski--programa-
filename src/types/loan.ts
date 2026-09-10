@@ -4,6 +4,7 @@ import type { MonthCaps } from "./month";
 
 export type LoanDestinationCategory = Exclude<Category, "ahorro">;
 export type LoanPaymentSource = Category;
+export type LoanScheduleType = "fixed-known" | "total-known" | "custom";
 
 export type LoanInstallment = {
   id: string;
@@ -18,6 +19,8 @@ export type Loan = {
   lender?: string;
   amountReceivedCents: number;
   totalToRepayCents: number;
+  /** Método usado para construir el calendario. Ausente en préstamos antiguos. */
+  scheduleType?: LoanScheduleType;
   receivedDate: string;
   receivedMonthId: string;
   destinationCategory: LoanDestinationCategory;

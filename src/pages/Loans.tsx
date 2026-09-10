@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarDays, ChevronDown } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  ChevronDown,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth } from "@/services/monthService";
 import {
@@ -11,6 +17,7 @@ import {
   watchLoans,
 } from "@/services/loanService";
 import {
+  addMonthsToDate,
   allocateLoanPayment,
   getBorrowedAvailableByCategory,
   getLoanInstallmentStatus,
@@ -29,6 +36,7 @@ import type {
   LoanDestinationCategory,
   LoanFundMovementWithId,
   LoanPaymentSource,
+  LoanScheduleType,
   LoanWithId,
 } from "@/types/loan";
 import BackButton from "@/components/BackButton";
@@ -174,39 +182,104 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
   const [lender, setLender] = useState("");
   const [received, setReceived] = useState("");
   const [total, setTotal] = useState("");
+  const [installmentAmount, setInstallmentAmount] = useState("");
+  const [scheduleType, setScheduleType] =
+    useState<LoanScheduleType>("fixed-known");
   const [category, setCategory] =
     useState<LoanDestinationCategory>("necesidad");
   const [count, setCount] = useState("1");
   const [firstDueDate, setFirstDueDate] = useState(today);
+  const [manualInstallments, setManualInstallments] = useState(() => [
+    { id: crypto.randomUUID(), dueDate: today, amount: "" },
+  ]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const amountReceivedCents = Math.round(Number(received) * 100);
+  const installmentCount = Number(count);
+  const installmentAmountCents = Math.round(Number(installmentAmount) * 100);
+  const enteredTotalCents = Math.round(Number(total) * 100);
+  const manualValues = manualInstallments.map((item) => ({
+    dueDate: item.dueDate,
+    amountCents: Math.round(Number(item.amount) * 100),
+  }));
+  const totalToRepayCents =
+    scheduleType === "fixed-known"
+      ? installmentAmountCents * installmentCount
+      : scheduleType === "total-known"
+        ? enteredTotalCents
+        : manualValues.reduce(
+            (sum, item) =>
+              sum + (Number.isFinite(item.amountCents) ? item.amountCents : 0),
+            0,
+          );
+  const loanCostCents = totalToRepayCents - amountReceivedCents;
+
+  function updateManualInstallment(
+    id: string,
+    field: "dueDate" | "amount",
+    value: string,
+  ) {
+    setManualInstallments((items) =>
+      items.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
+    );
+  }
+
+  function addManualInstallment() {
+    const lastDate = manualInstallments.at(-1)?.dueDate || today;
+    setManualInstallments((items) => [
+      ...items,
+      {
+        id: crypto.randomUUID(),
+        dueDate: addMonthsToDate(lastDate, 1),
+        amount: "",
+      },
+    ]);
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const amountReceivedCents = Math.round(Number(received) * 100);
-    const totalToRepayCents = Math.round(Number(total) * 100);
-    const installmentCount = Number(count);
-    if (
-      !Number.isFinite(amountReceivedCents) ||
-      !Number.isFinite(totalToRepayCents) ||
-      !Number.isInteger(installmentCount)
-    ) {
-      setError("Completa los montos y la cantidad de cuotas.");
+    if (!Number.isInteger(amountReceivedCents) || amountReceivedCents <= 0) {
+      setError("Ingresa un monto recibido o financiado válido.");
+      return;
+    }
+    if (scheduleType !== "custom" && !Number.isInteger(installmentCount)) {
+      setError("Ingresa una cantidad de cuotas válida.");
       return;
     }
     setSaving(true);
     setError(null);
     try {
       await checkAndCloseMonth(userId);
-      await createLoan(userId, {
+      const common = {
         lender: lender.trim() || undefined,
         amountReceivedCents,
-        totalToRepayCents,
         receivedDate: today,
         destinationCategory: category,
-        installmentCount,
-        firstDueDate,
-      });
+      };
+      if (scheduleType === "fixed-known") {
+        await createLoan(userId, {
+          ...common,
+          scheduleType,
+          installmentAmountCents,
+          installmentCount,
+          firstDueDate,
+        });
+      } else if (scheduleType === "total-known") {
+        await createLoan(userId, {
+          ...common,
+          scheduleType,
+          totalToRepayCents: enteredTotalCents,
+          installmentCount,
+          firstDueDate,
+        });
+      } else {
+        await createLoan(userId, {
+          ...common,
+          scheduleType,
+          installments: manualValues,
+        });
+      }
       onDone();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo guardar");
@@ -221,19 +294,35 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
     >
       <p className="font-medium text-stone-900">Nuevo préstamo</p>
       <label className="text-sm text-stone-600">
-        Banco / entidad <span className="text-stone-400">(opcional)</span>
+        Entidad / comercio / persona{" "}
+        <span className="text-stone-400">(opcional)</span>
         <input
           value={lender}
           onChange={(event) => setLender(event.target.value)}
-          placeholder="BCP, Interbank, amigo..."
+          placeholder="Yape, BCP, tienda, amigo..."
           maxLength={100}
           className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900"
         />
       </label>
-      <div className="grid grid-cols-2 gap-2">
-        <MoneyInput label="Monto recibido" value={received} onChange={setReceived} />
-        <MoneyInput label="Total a devolver" value={total} onChange={setTotal} />
-      </div>
+      <MoneyInput
+        label="Monto recibido / financiado"
+        value={received}
+        onChange={setReceived}
+      />
+      <label className="text-sm text-stone-600">
+        Cómo se definen las cuotas
+        <select
+          value={scheduleType}
+          onChange={(event) =>
+            setScheduleType(event.target.value as LoanScheduleType)
+          }
+          className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
+        >
+          <option value="fixed-known">Cuota fija conocida</option>
+          <option value="total-known">Total conocido</option>
+          <option value="custom">Cuotas variables (manual)</option>
+        </select>
+      </label>
       <label className="text-sm text-stone-600">
         Categoría donde entra
         <select
@@ -247,19 +336,23 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
           <option value="ocio">Ocio</option>
         </select>
       </label>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="text-sm text-stone-600">
-          Número de cuotas
-          <input
-            value={count}
-            onChange={(event) => setCount(event.target.value)}
-            type="number"
-            min="1"
-            max="360"
-            step="1"
-            className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900"
+      {scheduleType === "fixed-known" && (
+        <div className="grid grid-cols-2 gap-2">
+          <MoneyInput
+            label="Cuota mensual"
+            value={installmentAmount}
+            onChange={setInstallmentAmount}
           />
-        </label>
+          <InstallmentCountInput value={count} onChange={setCount} />
+        </div>
+      )}
+      {scheduleType === "total-known" && (
+        <div className="grid grid-cols-2 gap-2">
+          <MoneyInput label="Total a devolver" value={total} onChange={setTotal} />
+          <InstallmentCountInput value={count} onChange={setCount} />
+        </div>
+      )}
+      {scheduleType !== "custom" && (
         <label className="text-sm text-stone-600">
           Primer vencimiento
           <input
@@ -270,7 +363,81 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
             className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900"
           />
         </label>
-      </div>
+      )}
+      {scheduleType === "custom" && (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium text-stone-700">Calendario manual</p>
+          {manualInstallments.map((item, index) => (
+            <div
+              key={item.id}
+              className="grid grid-cols-[1fr_1fr_auto] items-end gap-2"
+            >
+              <label className="text-xs text-stone-600">
+                Vencimiento {index + 1}
+                <input
+                  value={item.dueDate}
+                  onChange={(event) =>
+                    updateManualInstallment(
+                      item.id,
+                      "dueDate",
+                      event.target.value,
+                    )
+                  }
+                  type="date"
+                  min={today}
+                  className="mt-1 w-full rounded-xl border border-stone-300 px-2 py-2 text-sm text-stone-900"
+                />
+              </label>
+              <MoneyInput
+                label="Monto"
+                value={item.amount}
+                onChange={(value) =>
+                  updateManualInstallment(item.id, "amount", value)
+                }
+              />
+              <button
+                type="button"
+                aria-label={`Eliminar cuota ${index + 1}`}
+                disabled={manualInstallments.length === 1}
+                onClick={() =>
+                  setManualInstallments((items) =>
+                    items.filter((candidate) => candidate.id !== item.id),
+                  )
+                }
+                className="mb-0.5 rounded-lg border border-stone-300 p-2.5 text-stone-500 disabled:opacity-30"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={addManualInstallment}
+            disabled={manualInstallments.length >= 360}
+            className="flex items-center justify-center gap-1 rounded-lg border border-violet-300 py-2 text-sm text-violet-700 disabled:opacity-40"
+          >
+            <Plus className="h-4 w-4" /> Agregar cuota
+          </button>
+        </div>
+      )}
+      {Number.isFinite(totalToRepayCents) && totalToRepayCents > 0 && (
+        <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-600">
+          <p>
+            Total a devolver:{" "}
+            <strong className="text-stone-900">
+              {formatCents(totalToRepayCents)}
+            </strong>
+          </p>
+          {amountReceivedCents > 0 && loanCostCents >= 0 && (
+            <p>
+              Intereses y cargos:{" "}
+              <strong className="text-stone-900">
+                {formatCents(loanCostCents)}
+              </strong>
+            </p>
+          )}
+        </div>
+      )}
       <p className="text-xs text-stone-400">
         Fecha de recepción: {formatDateLabel(today)}. El préstamo no cuenta como
         ingreso ni altera tus porcentajes.
@@ -284,6 +451,29 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
         {saving ? "Guardando..." : "Confirmar préstamo"}
       </button>
     </form>
+  );
+}
+
+function InstallmentCountInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="text-sm text-stone-600">
+      Número de cuotas
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        type="number"
+        min="1"
+        max="360"
+        step="1"
+        className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900"
+      />
+    </label>
   );
 }
 
@@ -376,7 +566,7 @@ function LoanCard({
           Recibido: <span className="font-medium text-stone-800">{formatCents(loan.amountReceivedCents)}</span>
         </p>
         <p className="text-stone-500">
-          Costo total: <span className="font-medium text-stone-800">{formatCents(loan.totalToRepayCents - loan.amountReceivedCents)}</span>
+          Intereses y cargos: <span className="font-medium text-stone-800">{formatCents(loan.totalToRepayCents - loan.amountReceivedCents)}</span>
         </p>
         <p className="text-stone-500">
           Prestado en Necesidad: <span className="font-medium text-stone-800">{formatCents(availableByCategory.necesidad)}</span>

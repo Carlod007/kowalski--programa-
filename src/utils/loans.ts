@@ -79,6 +79,56 @@ export function generateLoanInstallments(
   }));
 }
 
+export function generateFixedAmountInstallments(
+  installmentAmountCents: number,
+  count: number,
+  firstDueDate: string,
+): LoanInstallment[] {
+  if (
+    !Number.isInteger(installmentAmountCents) ||
+    installmentAmountCents <= 0
+  ) {
+    throw new Error("La cuota debe ser mayor a 0");
+  }
+  if (!Number.isInteger(count) || count <= 0 || count > 360) {
+    throw new Error("La cantidad de cuotas debe estar entre 1 y 360");
+  }
+  return Array.from({ length: count }, (_, index) => ({
+    id: `installment-${index + 1}`,
+    number: index + 1,
+    dueDate: addMonthsToDate(firstDueDate, index),
+    amountCents: installmentAmountCents,
+    paidCents: 0,
+  }));
+}
+
+export function buildCustomLoanInstallments(
+  values: { dueDate: string; amountCents: number }[],
+): LoanInstallment[] {
+  if (values.length === 0 || values.length > 360) {
+    throw new Error("El calendario debe tener entre 1 y 360 cuotas");
+  }
+  values.forEach((item) => {
+    parseDate(item.dueDate);
+    if (!Number.isInteger(item.amountCents) || item.amountCents <= 0) {
+      throw new Error("Todas las cuotas deben tener un monto mayor a 0");
+    }
+  });
+  return values
+    .map((item, originalIndex) => ({ ...item, originalIndex }))
+    .sort(
+      (a, b) =>
+        a.dueDate.localeCompare(b.dueDate) || a.originalIndex - b.originalIndex,
+    )
+    .map((item, index) => ({
+      id: `installment-${index + 1}`,
+      number: index + 1,
+      dueDate: item.dueDate,
+      amountCents: item.amountCents,
+      paidCents: 0,
+    }));
+}
+
 export function getLoanOutstandingCents(loan: Loan): number {
   return Math.max(0, loan.totalToRepayCents - loan.paidCents);
 }

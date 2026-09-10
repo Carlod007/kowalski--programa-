@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   addMonthsToDate,
   allocateLoanPayment,
+  buildCustomLoanInstallments,
+  generateFixedAmountInstallments,
   generateLoanInstallments,
   getLoanInstallmentStatus,
   getBorrowedAvailableByCategory,
@@ -24,6 +26,37 @@ describe("préstamos", () => {
       "2026-10-15",
       "2026-11-15",
       "2026-12-15",
+    ]);
+  });
+
+  it("genera cuotas del monto fijo conocido", () => {
+    const installments = generateFixedAmountInstallments(
+      9_639,
+      12,
+      "2026-10-02",
+    );
+    expect(installments).toHaveLength(12);
+    expect(installments.every((item) => item.amountCents === 9_639)).toBe(true);
+    expect(
+      installments.reduce((sum, item) => sum + item.amountCents, 0),
+    ).toBe(115_668);
+  });
+
+  it("ordena y numera un calendario manual", () => {
+    expect(
+      buildCustomLoanInstallments([
+        { dueDate: "2026-12-02", amountCents: 12_000 },
+        { dueDate: "2026-10-02", amountCents: 10_000 },
+        { dueDate: "2026-11-02", amountCents: 11_000 },
+      ]).map(({ number, dueDate, amountCents }) => ({
+        number,
+        dueDate,
+        amountCents,
+      })),
+    ).toEqual([
+      { number: 1, dueDate: "2026-10-02", amountCents: 10_000 },
+      { number: 2, dueDate: "2026-11-02", amountCents: 11_000 },
+      { number: 3, dueDate: "2026-12-02", amountCents: 12_000 },
     ]);
   });
 
