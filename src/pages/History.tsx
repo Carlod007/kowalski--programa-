@@ -39,7 +39,7 @@ import type {
 } from "@/types/transaction";
 import BackButton from "@/components/BackButton";
 
-type Filter = "all" | "income" | "loan" | Category;
+type Filter = "all" | "income" | "loan" | "credit-card" | Category;
 
 type TxWithId = Transaction & { _id: string };
 
@@ -47,6 +47,7 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "Todos" },
   { key: "income", label: "Ingresos" },
   { key: "loan", label: "Préstamos" },
+  { key: "credit-card", label: "Tarjetas" },
   { key: "necesidad", label: "Necesidad" },
   { key: "ocio", label: "Ocio" },
   { key: "ahorro", label: "Ahorro" },
@@ -151,6 +152,9 @@ export default function History() {
         tx.type === "loan" ||
         (tx.type === "expense" && !!(tx.loanId || tx.fundedByLoanId))
       );
+    }
+    if (filter === "credit-card") {
+      return tx.type === "expense" && !!tx.creditCardId;
     }
     return tx.type === "expense" && tx.category === filter;
   });
@@ -368,7 +372,9 @@ function TransactionRow({
   const isLoanReceipt = tx.type === "loan";
   const isLoanExpense =
     tx.type === "expense" && !!(tx.loanId || tx.fundedByLoanId);
-  const canEdit = !isLoanReceipt && !isLoanExpense;
+  const isCardStatementCharge =
+    tx.type === "expense" && !!tx.creditCardStatementId;
+  const canEdit = !isLoanReceipt && !isLoanExpense && !isCardStatementCharge;
   const name = isIncome
     ? tx.source
     : isLoanReceipt
@@ -382,6 +388,10 @@ function TransactionRow({
         ? `${CATEGORY_META[tx.category].label} · financiado con ${tx.fundedByLoanName ?? "préstamo"}`
         : tx.loanPaymentId
           ? `${CATEGORY_META[tx.category].label} · pago de préstamo`
+          : tx.creditCardId
+            ? tx.creditCardChargeKind === "interest-fees"
+              ? `${CATEGORY_META[tx.category].label} · intereses/cargos de ${tx.creditCardName ?? "tarjeta"}`
+              : `${CATEGORY_META[tx.category].label} · tarjeta ${tx.creditCardName ?? "de crédito"}`
           : tx.description
             ? `${CATEGORY_META[tx.category].label} - ${tx.description}`
             : CATEGORY_META[tx.category].label;
@@ -419,7 +429,7 @@ function TransactionRow({
             {isPositive ? "+ " : "- "}
             {formatCents(tx.amountCents)}
           </span>
-          {isOpen && !isLoanReceipt && (
+          {isOpen && !isLoanReceipt && !isCardStatementCharge && (
             <div className="relative" ref={isMenuOpen ? menuRef : undefined}>
               <button
                 type="button"

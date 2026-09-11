@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import { checkAndCloseMonth, moveSurplus } from "@/services/monthService";
 import { getMonthInitialSplit } from "@/services/movementService";
 import { watchLoans } from "@/services/loanService";
+import { watchCreditCards } from "@/services/creditCardService";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
 import { getAssignableCents } from "@/utils/savings";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
@@ -19,11 +20,16 @@ import type { Month, MonthCaps } from "@/types/month";
 import type { Distribution } from "@/types/transaction";
 import type { MovementWithId } from "@/services/movementService";
 import type { LoanWithId } from "@/types/loan";
+import type { CreditCardWithId } from "@/types/creditCard";
 import {
   getLoanInstallmentStatus,
   getLoanOutstandingCents,
   getNextPendingInstallment,
 } from "@/utils/loans";
+import {
+  getAvailableCreditCents,
+  getCreditCardStatementStatus,
+} from "@/utils/creditCards";
 import { toDateInputValue, formatDateLabel } from "@/utils/date";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
@@ -98,6 +104,7 @@ export default function Dashboard() {
       />
 
       {isViewingCurrentMonth && <LoanSummaryCard userId={user.uid} />}
+      {isViewingCurrentMonth && <CreditCardSummaryCard userId={user.uid} />}
 
       {isViewingCurrentMonth && (
         <div className="mt-6 flex gap-3 px-5">
@@ -565,6 +572,81 @@ function LoanSummaryCard({ userId }: { userId: string }) {
               : next
                 ? `Próxima: ${formatDateLabel(next.installment.dueDate)}`
                 : "Sin cuotas pendientes"}
+          </p>
+        </div>
+      )}
+    </Link>
+  );
+}
+
+function CreditCardSummaryCard({ userId }: { userId: string }) {
+  const [cards, setCards] = useState<CreditCardWithId[]>([]);
+
+  useEffect(
+    () =>
+      watchCreditCards(userId, setCards, (error) => {
+        console.error("watchCreditCards falló:", error);
+      }),
+    [userId],
+  );
+
+  const today = toDateInputValue();
+  const totalDebt = cards.reduce((sum, card) => sum + card.currentDebtCents, 0);
+  const totalAvailable = cards.reduce(
+    (sum, card) => sum + Math.max(0, getAvailableCreditCents(card)),
+    0,
+  );
+  const activeStatements = cards
+    .filter((card) => card.activeStatement)
+    .map((card) => ({ card, statement: card.activeStatement! }));
+  const overdueCount = activeStatements.filter(
+    ({ statement }) =>
+      getCreditCardStatementStatus(statement, today) === "overdue",
+  ).length;
+  const nextStatement = activeStatements
+    .filter(
+      ({ statement }) =>
+        getCreditCardStatementStatus(statement, today) !== "paid",
+    )
+    .sort((a, b) => a.statement.dueDate.localeCompare(b.statement.dueDate))[0];
+
+  return (
+    <Link
+      to="/credit-cards"
+      className="mx-5 mt-4 block rounded-2xl border border-sky-200 bg-white p-4"
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-stone-900">
+          Tarjetas de crédito
+        </p>
+        <span className="text-xs font-medium text-sky-600">Ver →</span>
+      </div>
+      {cards.length === 0 ? (
+        <p className="mt-2 text-sm text-stone-400">Sin tarjetas registradas</p>
+      ) : (
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-lg font-semibold text-sky-700">
+              {formatCents(totalDebt)}
+            </p>
+            <p className="text-xs text-stone-400">deuda actual</p>
+          </div>
+          <div>
+            <p className="text-lg font-semibold text-stone-800">
+              {formatCents(totalAvailable)}
+            </p>
+            <p className="text-xs text-stone-400">línea disponible</p>
+          </div>
+          <p
+            className={`col-span-2 text-xs ${
+              overdueCount > 0 ? "text-red-600" : "text-stone-500"
+            }`}
+          >
+            {overdueCount > 0
+              ? `${overdueCount} ${overdueCount === 1 ? "pago mínimo vencido" : "pagos mínimos vencidos"}`
+              : nextStatement
+                ? `Próximo vencimiento: ${formatDateLabel(nextStatement.statement.dueDate)}`
+                : "Sin estados de cuenta pendientes"}
           </p>
         </div>
       )}

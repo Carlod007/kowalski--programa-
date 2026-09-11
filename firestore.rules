@@ -161,6 +161,106 @@ service cloud.firestore {
                       && !existsAfter(/databases/$(database)/documents/users/$(userId)/loans/$(loanId));
       }
     }
+    match /users/{userId}/creditCards/{cardId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.userId == userId
+                    && request.resource.data.issuer is string
+                    && request.resource.data.issuer.size() > 0
+                    && request.resource.data.issuer.size() <= 100
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 100
+                    && request.resource.data.creditLimitCents is int
+                    && request.resource.data.creditLimitCents > 0
+                    && request.resource.data.currentDebtCents == 0
+                    && request.resource.data.closingDay is int
+                    && request.resource.data.closingDay >= 1
+                    && request.resource.data.closingDay <= 31
+                    && request.resource.data.dueDay is int
+                    && request.resource.data.dueDay >= 1
+                    && request.resource.data.dueDay <= 31
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.updatedAt == request.time;
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.userId == resource.data.userId
+                    && request.resource.data.issuer == resource.data.issuer
+                    && request.resource.data.name == resource.data.name
+                    && request.resource.data.creditLimitCents == resource.data.creditLimitCents
+                    && request.resource.data.closingDay == resource.data.closingDay
+                    && request.resource.data.dueDay == resource.data.dueDay
+                    && request.resource.data.createdAt == resource.data.createdAt
+                    && request.resource.data.currentDebtCents is int
+                    && request.resource.data.currentDebtCents >= 0
+                    && request.resource.data.updatedAt == request.time;
+      allow delete: if request.auth != null
+                    && request.auth.uid == userId
+                    && resource.data.userId == userId
+                    && resource.data.currentDebtCents == 0;
+
+      match /statements/{statementId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null
+                      && request.auth.uid == userId
+                      && request.resource.data.userId == userId
+                      && request.resource.data.cardId == cardId
+                      && request.resource.data.id == statementId
+                      && request.resource.data.cardName is string
+                      && request.resource.data.cardName.size() > 0
+                      && request.resource.data.closingDate is string
+                      && request.resource.data.closingDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                      && request.resource.data.dueDate is string
+                      && request.resource.data.dueDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                      && request.resource.data.statementBalanceCents is int
+                      && request.resource.data.statementBalanceCents > 0
+                      && request.resource.data.minimumPaymentCents is int
+                      && request.resource.data.minimumPaymentCents >= 0
+                      && request.resource.data.totalPaymentCents is int
+                      && request.resource.data.totalPaymentCents > 0
+                      && request.resource.data.minimumPaymentCents <= request.resource.data.totalPaymentCents
+                      && request.resource.data.paidCents == 0
+                      && request.resource.data.interestChargesCents is int
+                      && request.resource.data.interestChargesCents >= 0
+                      && request.resource.data.recordedMonthId is string
+                      && request.resource.data.recordedMonthId.matches('^[0-9]{4}-[0-9]{2}$')
+                      && request.resource.data.createdAt == request.time;
+        allow update: if request.auth != null
+                      && request.auth.uid == userId
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paidCents'])
+                      && request.resource.data.paidCents is int
+                      && request.resource.data.paidCents >= 0
+                      && request.resource.data.paidCents <= resource.data.totalPaymentCents;
+        allow delete: if request.auth != null
+                      && request.auth.uid == userId
+                      && resource.data.userId == userId
+                      && resource.data.paidCents == 0;
+      }
+
+      match /payments/{paymentId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null
+                      && request.auth.uid == userId
+                      && request.resource.data.userId == userId
+                      && request.resource.data.cardId == cardId
+                      && request.resource.data.cardName is string
+                      && request.resource.data.cardName.size() > 0
+                      && request.resource.data.mode in ['total', 'minimum', 'other']
+                      && request.resource.data.amountCents is int
+                      && request.resource.data.amountCents > 0
+                      && request.resource.data.statementAppliedCents is int
+                      && request.resource.data.statementAppliedCents >= 0
+                      && request.resource.data.statementAppliedCents <= request.resource.data.amountCents
+                      && request.resource.data.paymentDate is string
+                      && request.resource.data.paymentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                      && request.resource.data.serverDate == request.time;
+        allow update: if false;
+        allow delete: if request.auth != null
+                      && request.auth.uid == userId
+                      && resource.data.userId == userId;
+      }
+    }
     match /users/{userId}/months/{monthId}/movements/{movementId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null

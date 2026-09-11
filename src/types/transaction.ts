@@ -47,6 +47,12 @@ export type ExpenseTransaction = TransactionBase & {
   /** Pago de deuda vinculado a un registro de pago del préstamo. */
   loanPaymentId?: string;
   loanId?: string;
+  /** Compra o cargo que aumentó la deuda de una tarjeta de crédito. */
+  creditCardId?: string;
+  creditCardName?: string;
+  /** Los intereses se corrigen desde su estado de cuenta, no aisladamente. */
+  creditCardStatementId?: string;
+  creditCardChargeKind?: "interest-fees";
 };
 
 export type LoanReceiptTransaction = TransactionBase & {

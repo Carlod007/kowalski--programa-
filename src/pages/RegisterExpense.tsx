@@ -9,7 +9,7 @@ import {
   type UpdateData,
   type WithFieldValue,
 } from "firebase/firestore";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -24,6 +24,10 @@ import {
   registerLoanFundedExpense,
   watchLoans,
 } from "@/services/loanService";
+import {
+  registerCreditCardPurchase,
+  watchCreditCards,
+} from "@/services/creditCardService";
 import { getMonthId, toDateInputValue, formatDateLabel } from "@/utils/date";
 import {
   CAP_CATEGORY_ORDER,
@@ -41,10 +45,15 @@ import {
   wasPurchased,
 } from "@/utils/savings";
 import { getBorrowedAvailableByCategory } from "@/utils/loans";
+import {
+  getAvailableCreditCents,
+  getCreditCardDisplayName,
+} from "@/utils/creditCards";
 import type { Month, MonthCaps } from "@/types/month";
 import type { SavingsGoal } from "@/types/user";
 import type { ExpenseTransaction } from "@/types/transaction";
 import type { LoanWithId } from "@/types/loan";
+import type { CreditCardWithId } from "@/types/creditCard";
 import { ArrowLeftIcon } from "@/components/BackButton";
 
 type Step = "category" | "detail" | "goal";
@@ -191,6 +200,10 @@ function ExpenseDetailStep({
   const [saving, setSaving] = useState(false);
   const [loans, setLoans] = useState<LoanWithId[]>([]);
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
+  const [creditCards, setCreditCards] = useState<CreditCardWithId[]>([]);
+  const [selectedCreditCardId, setSelectedCreditCardId] = useState<
+    string | null
+  >(null);
   const [showEmptyCapWarning, setShowEmptyCapWarning] = useState(false);
   const [pendingValues, setPendingValues] = useState<DetailFormValues | null>(
     null,
@@ -202,6 +215,7 @@ function ExpenseDetailStep({
     register,
     handleSubmit,
     setValue,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<DetailFormValues>({
     resolver: zodResolver(detailSchema),
@@ -219,11 +233,27 @@ function ExpenseDetailStep({
   );
   const selectedLoan =
     availableLoans.find((loan) => loan.id === selectedLoanId) ?? null;
+  const selectedCreditCard =
+    creditCards.find((card) => card.id === selectedCreditCardId) ?? null;
+  const watchedAmount = useWatch({ control, name: "amount" });
+  const enteredAmountCents = Math.round(
+    (parseFloat(watchedAmount) || 0) * 100,
+  );
+  const projectedCardAvailableCents = selectedCreditCard
+    ? getAvailableCreditCents(selectedCreditCard) - enteredAmountCents
+    : 0;
 
   useEffect(() => {
     if (!user) return;
     return watchLoans(user.uid, setLoans, (error) => {
       console.error("watchLoans falló:", error);
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    return watchCreditCards(user.uid, setCreditCards, (error) => {
+      console.error("watchCreditCards falló:", error);
     });
   }, [user]);
 
@@ -277,7 +307,9 @@ function ExpenseDetailStep({
   }
 
   async function saveExpense(values: DetailFormValues) {
-    if (!user || !subcategory || !paymentMethod) return;
+    if (!user || !subcategory || (!paymentMethod && !selectedCreditCard)) {
+      return;
+    }
 
     setSaving(true);
     setSubmitError(null);
@@ -287,6 +319,11 @@ function ExpenseDetailStep({
     const description = values.description?.trim();
 
     if (selectedLoan) {
+      if (!paymentMethod) {
+        setSubmitError("Selecciona un método de pago");
+        setSaving(false);
+        return;
+      }
       try {
         await registerLoanFundedExpense(user.uid, monthId, {
           loanId: selectedLoan.id,
@@ -307,6 +344,35 @@ function ExpenseDetailStep({
         );
         setSaving(false);
       }
+      return;
+    }
+
+    if (selectedCreditCard) {
+      try {
+        await registerCreditCardPurchase(user.uid, monthId, {
+          cardId: selectedCreditCard.id,
+          category,
+          subcategory,
+          amountCents,
+          date: values.date,
+          description,
+        });
+        navigate("/dashboard");
+      } catch (err) {
+        console.error("Error al registrar compra con tarjeta:", err);
+        setSubmitError(
+          err instanceof Error
+            ? err.message
+            : "No se pudo guardar. Revisa tu conexión e intenta de nuevo.",
+        );
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (!paymentMethod) {
+      setSubmitError("Selecciona un método de pago");
+      setSaving(false);
       return;
     }
 
@@ -347,8 +413,12 @@ function ExpenseDetailStep({
   }
 
   async function onSubmit(values: DetailFormValues) {
-    if (!subcategory || !paymentMethod) {
-      setPickError("Selecciona subcategoría y método de pago");
+    if (!subcategory || (!paymentMethod && !selectedCreditCard)) {
+      setPickError(
+        selectedCreditCard
+          ? "Selecciona una subcategoría"
+          : "Selecciona subcategoría y método de pago",
+      );
       return;
     }
     const amountCents = Math.round(parseFloat(values.amount) * 100);
@@ -481,9 +551,10 @@ function ExpenseDetailStep({
             </p>
             <select
               value={selectedLoanId ?? ""}
-              onChange={(event) =>
-                setSelectedLoanId(event.target.value || null)
-              }
+              onChange={(event) => {
+                setSelectedLoanId(event.target.value || null);
+                if (event.target.value) setSelectedCreditCardId(null);
+              }}
               className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-stone-900"
             >
               <option value="">No, usar presupuesto propio</option>
@@ -498,33 +569,76 @@ function ExpenseDetailStep({
           </div>
         )}
 
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium text-stone-700">Método de pago</p>
-          {paymentMethods.length === 0 ? (
-            <p className="text-sm text-stone-500">
-              No hay métodos de pago configurados.
+        {creditCards.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+            <p className="text-sm font-medium text-sky-900">
+              ¿Pagar con tarjeta de crédito?
             </p>
-          ) : (
-            <div className="flex items-center gap-2 rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
-              <WalletIcon className="h-4 w-4 text-stone-400" />
-              <select
-                value={paymentMethod ?? ""}
-                onChange={(e) => setPaymentMethod(e.target.value || null)}
-                className="w-full flex-1 appearance-none bg-transparent text-sm outline-none"
-              >
-                <option value="" disabled>
-                  Selecciona un método
+            <p className="text-xs text-sky-700">
+              Contará como gasto ahora y aumentará la deuda de la tarjeta.
+            </p>
+            <select
+              value={selectedCreditCardId ?? ""}
+              onChange={(event) => {
+                setSelectedCreditCardId(event.target.value || null);
+                if (event.target.value) setSelectedLoanId(null);
+              }}
+              className="rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm text-stone-900"
+            >
+              <option value="">No, usar otro método</option>
+              {creditCards.map((card) => (
+                <option key={card.id} value={card.id}>
+                  {getCreditCardDisplayName(card)} ·{" "}
+                  {formatCents(Math.max(0, getAvailableCreditCents(card)))} de
+                  línea disponible
                 </option>
-                {paymentMethods.map((pm) => (
-                  <option key={pm.id} value={pm.name}>
-                    {pm.name}
+              ))}
+            </select>
+            {selectedCreditCard && projectedCardAvailableCents < 0 && (
+              <p className="text-xs font-medium text-amber-700">
+                Aviso: esta compra superará la línea registrada por{" "}
+                {formatCents(-projectedCardAvailableCents)}. Podrás guardarla de
+                todas formas.
+              </p>
+            )}
+          </div>
+        )}
+
+        {selectedCreditCard ? (
+          <div className="rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm text-sky-800">
+            Método: {getCreditCardDisplayName(selectedCreditCard)}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium text-stone-700">
+              Método de pago
+            </p>
+            {paymentMethods.length === 0 ? (
+              <p className="text-sm text-stone-500">
+                No hay métodos de pago configurados.
+              </p>
+            ) : (
+              <div className="flex items-center gap-2 rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
+                <WalletIcon className="h-4 w-4 text-stone-400" />
+                <select
+                  value={paymentMethod ?? ""}
+                  onChange={(e) => setPaymentMethod(e.target.value || null)}
+                  className="w-full flex-1 appearance-none bg-transparent text-sm outline-none"
+                >
+                  <option value="" disabled>
+                    Selecciona un método
                   </option>
-                ))}
-              </select>
-              <ChevronDownIcon className="h-4 w-4 text-stone-400" />
-            </div>
-          )}
-        </div>
+                  {paymentMethods.map((pm) => (
+                    <option key={pm.id} value={pm.name}>
+                      {pm.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDownIcon className="h-4 w-4 text-stone-400" />
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <label

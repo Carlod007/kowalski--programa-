@@ -21,6 +21,7 @@ import AdminOnboarding from "@/pages/AdminOnboarding";
 
 const ChartsScreen = lazy(() => import("@/pages/ChartsScreen"));
 const Loans = lazy(() => import("@/pages/Loans"));
+const CreditCards = lazy(() => import("@/pages/CreditCards"));
 const ADMIN_UID = import.meta.env.VITE_ADMIN_UID;
 
 function LoadingScreen() {
@@ -166,6 +167,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<LoadingScreen />}>
             <Loans />
+          </Suspense>
+        ),
+      },
+      {
+        path: "/credit-cards",
+        element: (
+          <Suspense fallback={<LoadingScreen />}>
+            <CreditCards />
           </Suspense>
         ),
       },

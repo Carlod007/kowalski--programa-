@@ -22,6 +22,7 @@ import {
 import type { User } from "@/types/user";
 import type { Month } from "@/types/month";
 import type { Loan, LoanPayment } from "@/types/loan";
+import type { CreditCard } from "@/types/creditCard";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
@@ -145,6 +146,12 @@ export async function deleteTransaction(
           )
         : null;
     const paymentSnap = paymentRef ? await transaction.get(paymentRef) : null;
+    const linkedCardRef = expenseTx?.creditCardId
+      ? doc(db, "users", userId, "creditCards", expenseTx.creditCardId)
+      : null;
+    const linkedCardSnap = linkedCardRef
+      ? await transaction.get(linkedCardRef)
+      : null;
 
     if (tx.type === "income") {
       assertRevertible(
@@ -156,6 +163,32 @@ export async function deleteTransaction(
 
     if (tx.type === "expense") {
       const expense = tx as ExpenseTransaction;
+      if (expense.creditCardStatementId) {
+        throw new Error(
+          "Los intereses y cargos se corrigen desde su estado de cuenta.",
+        );
+      }
+      if (expense.creditCardId) {
+        if (!linkedCardRef || !linkedCardSnap?.exists()) {
+          throw new Error("No se encontró la tarjeta vinculada");
+        }
+        const linkedCard = linkedCardSnap.data() as CreditCard;
+        if (
+          linkedCard.lastStatementClosingDate &&
+          expense.transactionDate <= linkedCard.lastStatementClosingDate
+        ) {
+          throw new Error(
+            "Esta compra ya pertenece a un estado de cuenta confirmado.",
+          );
+        }
+        if (expense.amountCents > linkedCard.currentDebtCents) {
+          throw new Error("La deuda de la tarjeta no permite revertir la compra");
+        }
+        transaction.update(linkedCardRef, {
+          currentDebtCents: increment(-expense.amountCents),
+          updatedAt: serverTimestamp(),
+        });
+      }
       if (expense.category === "ahorro") {
         const userUpdate: Record<string, unknown> = {
           savingsTotalCents: increment(expense.amountCents),
@@ -302,10 +335,43 @@ export async function updateExpense(
     const tx = txSnap.data() as ExpenseTransaction;
     const delta = newValues.amountCents - tx.amountCents;
 
+    const linkedCardRef = tx.creditCardId
+      ? doc(db, "users", userId, "creditCards", tx.creditCardId)
+      : null;
+    const linkedCardSnap = linkedCardRef
+      ? await transaction.get(linkedCardRef)
+      : null;
+
     if ((tx.fundedByLoanId || tx.loanPaymentId) && delta !== 0) {
       throw new Error(
         "El monto de una operación vinculada a un préstamo no se edita. Bórrala y regístrala de nuevo.",
       );
+    }
+    if (tx.creditCardStatementId) {
+      throw new Error(
+        "Los intereses y cargos se corrigen desde su estado de cuenta.",
+      );
+    }
+    if (tx.creditCardId) {
+      if (!linkedCardRef || !linkedCardSnap?.exists()) {
+        throw new Error("No se encontró la tarjeta vinculada");
+      }
+      const linkedCard = linkedCardSnap.data() as CreditCard;
+      if (
+        linkedCard.lastStatementClosingDate &&
+        tx.transactionDate <= linkedCard.lastStatementClosingDate
+      ) {
+        throw new Error(
+          "Esta compra ya pertenece a un estado de cuenta confirmado.",
+        );
+      }
+      if (linkedCard.currentDebtCents + delta < 0) {
+        throw new Error("La deuda de la tarjeta no permite este cambio");
+      }
+      transaction.update(linkedCardRef, {
+        currentDebtCents: increment(delta),
+        updatedAt: serverTimestamp(),
+      });
     }
 
     if (tx.category === "ahorro") {
@@ -321,7 +387,9 @@ export async function updateExpense(
     transaction.update(txRef, {
       amountCents: newValues.amountCents,
       subcategory: newValues.subcategory,
-      paymentMethod: newValues.paymentMethod,
+      paymentMethod: tx.creditCardId
+        ? tx.paymentMethod
+        : newValues.paymentMethod,
       description: newValues.description
         ? newValues.description
         : deleteField(),

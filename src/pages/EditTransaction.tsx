@@ -160,6 +160,8 @@ export default function EditTransaction() {
   const amountDiffersFromFixed =
     !!matchedFixedIncome && newAmountCents !== matchedFixedIncome.monthlyAmountCents;
   const isSavingsExpense = !isIncome && (tx as ExpenseTransaction).category === "ahorro";
+  const isCreditCardExpense =
+    !isIncome && !!(tx as ExpenseTransaction).creditCardId;
   // Un aporte directo no tiene fuente, así que exigirla lo dejaría imposible
   // de guardar.
   const isDirectSavingsIncome =
@@ -272,7 +274,11 @@ export default function EditTransaction() {
       navigate("/history");
     } catch (err) {
       console.error("updateTransaction falló:", err);
-      setError("No se pudo guardar. Revisa tu conexión e intenta de nuevo.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo guardar. Revisa tu conexión e intenta de nuevo.",
+      );
       setSaving(false);
     }
   }
@@ -326,11 +332,22 @@ export default function EditTransaction() {
                 }
               />
             )}
-            <PaymentMethodChips
-              selected={paymentMethod}
-              onSelect={setPaymentMethod}
-              options={userProfile?.paymentMethods ?? []}
-            />
+            {isCreditCardExpense ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-stone-700">
+                  Método de pago
+                </span>
+                <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                  {(tx as ExpenseTransaction).creditCardName ?? paymentMethod}
+                </div>
+              </div>
+            ) : (
+              <PaymentMethodChips
+                selected={paymentMethod}
+                onSelect={setPaymentMethod}
+                options={userProfile?.paymentMethods ?? []}
+              />
+            )}
           </>
         )}
 
