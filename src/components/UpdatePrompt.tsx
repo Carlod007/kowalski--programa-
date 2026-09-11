@@ -14,6 +14,14 @@ function rememberCompletedUpdate(): void {
   }
 }
 
+function forgetCompletedUpdate(): void {
+  try {
+    localStorage.removeItem(UPDATE_COMPLETED_KEY);
+  } catch {
+    // No hay nada más que limpiar si storage no está disponible.
+  }
+}
+
 function consumeCompletedUpdate(): boolean {
   try {
     const storedAt = Number(localStorage.getItem(UPDATE_COMPLETED_KEY));
@@ -45,6 +53,7 @@ export default function UpdatePrompt() {
     },
     onRegisterError(error) {
       console.error("Error al registrar el service worker:", error);
+      forgetCompletedUpdate();
       setStatus("error");
     },
   });
@@ -62,13 +71,18 @@ export default function UpdatePrompt() {
       window.clearTimeout(updateTimeoutRef.current);
     }
     setStatus("updating");
+    // Se guarda antes de activar el nuevo worker porque algunos navegadores
+    // recargan la página antes de notificar el evento `controlling`.
+    rememberCompletedUpdate();
     try {
       await updateServiceWorker(true);
       updateTimeoutRef.current = window.setTimeout(() => {
+        forgetCompletedUpdate();
         setStatus("error");
       }, UPDATE_TIMEOUT_MS);
     } catch (error) {
       console.error("No se pudo actualizar la aplicación:", error);
+      forgetCompletedUpdate();
       setStatus("error");
     }
   }
