@@ -527,7 +527,14 @@ export async function cancelLatestCreditCardStatement(
         }
       : null;
     transaction.update(cardRef, {
-      currentDebtCents: increment(-statement.interestChargesCents),
+      // Use the concrete next value instead of a transform here. Besides making
+      // the reversal idempotent for zero-interest statements, this keeps the
+      // value type explicit for the Firestore rules during the multi-document
+      // transaction.
+      currentDebtCents: Math.max(
+        0,
+        card.currentDebtCents - statement.interestChargesCents,
+      ),
       activeStatement: previousSummary ?? deleteField(),
       lastStatementClosingDate:
         previousSummary?.closingDate ?? deleteField(),
