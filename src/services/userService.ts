@@ -2,21 +2,10 @@ import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { User as UserProfile } from "@/types/user";
 
-export async function getUserProfile(
-  userId: string,
-): Promise<UserProfile | null> {
-  const ref = doc(db, "users", userId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-  return snap.data() as UserProfile;
-}
-
-export async function createUserProfile(
-  userId: string,
+export function buildInitialUserProfile(
   data: Pick<UserProfile, "name" | "email">,
-): Promise<UserProfile> {
-  const ref = doc(db, "users", userId);
-  const profile: UserProfile = {
+): UserProfile {
+  return {
     name: data.name,
     email: data.email,
     sources: [],
@@ -34,6 +23,23 @@ export async function createUserProfile(
     fixedIncomes: [],
     essentialNeeds: [],
   };
+}
+
+export async function getUserProfile(
+  userId: string,
+): Promise<UserProfile | null> {
+  const ref = doc(db, "users", userId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  return snap.data() as UserProfile;
+}
+
+export async function createUserProfile(
+  userId: string,
+  data: Pick<UserProfile, "name" | "email">,
+): Promise<UserProfile> {
+  const ref = doc(db, "users", userId);
+  const profile = buildInitialUserProfile(data);
   await setDoc(ref, profile);
   return profile;
 }

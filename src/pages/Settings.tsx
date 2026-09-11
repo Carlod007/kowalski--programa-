@@ -23,6 +23,7 @@ import { getGoalAllocated, getGoalKind, wasPurchased } from "@/utils/savings";
 import { formatDateLabel } from "@/utils/date";
 import { saveGoalDefinitions } from "@/services/savingsGoalService";
 import BackButton from "@/components/BackButton";
+import DataDangerZone from "@/components/DataDangerZone";
 import { Link } from "react-router-dom";
 
 function ProfileSection() {
@@ -944,6 +945,8 @@ export default function Settings() {
           </Link>
         </div>
       </section>
+
+      <DataDangerZone />
 
       <div className="mt-8 px-5">
         <button

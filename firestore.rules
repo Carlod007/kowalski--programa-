@@ -1,17 +1,33 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isDeletingUserData(userId) {
+      return isOwner(userId)
+             && exists(/databases/$(database)/documents/users/$(userId))
+             && get(/databases/$(database)/documents/users/$(userId)).data.get('dataDeletionMode', '')
+                in ['reset', 'delete-account'];
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, create, update: if isOwner(userId);
+      allow delete: if isOwner(userId)
+                    && resource.data.get('dataDeletionMode', '') == 'delete-account';
     }
     match /users/{userId}/months/{monthId} {
       allow read: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && !isDeletingUserData(userId);
       allow update: if request.auth != null
                     && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
                     && (
                       request.resource.data.distribution == resource.data.distribution
                       || resource.data.incomeCount == 0
@@ -25,21 +41,30 @@ service cloud.firestore {
                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['remainder'])
                       )
                     );
-      allow delete: if false;
+      allow delete: if isDeletingUserData(userId);
     }
     match /users/{userId}/months/{monthId}/transactions/{txId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
                     && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
                     && !get(/databases/$(database)/documents/users/$(userId)/months/$(monthId)).data.closed;
-      allow update, delete: if request.auth != null
-                            && request.auth.uid == userId
-                            && !get(/databases/$(database)/documents/users/$(userId)/months/$(monthId)).data.closed;
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
+                    && !get(/databases/$(database)/documents/users/$(userId)/months/$(monthId)).data.closed;
+      allow delete: if request.auth != null
+                    && request.auth.uid == userId
+                    && (
+                      isDeletingUserData(userId)
+                      || !get(/databases/$(database)/documents/users/$(userId)/months/$(monthId)).data.closed
+                    );
     }
     match /users/{userId}/goalAllocations/{allocationId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
                     && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
                     && request.resource.data.userId == userId
                     && request.resource.data.goalId is string
                     && request.resource.data.goalName is string
@@ -50,12 +75,14 @@ service cloud.firestore {
                     && request.resource.data.transactionDate is string
                     && request.resource.data.transactionDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
                     && request.resource.data.serverDate == request.time;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isDeletingUserData(userId);
     }
     match /users/{userId}/loans/{loanId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
                     && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
                     && request.resource.data.userId == userId
                     && request.resource.data.amountReceivedCents is int
                     && request.resource.data.amountReceivedCents > 0
@@ -83,6 +110,7 @@ service cloud.firestore {
                     && request.resource.data.updatedAt == request.time;
       allow update: if request.auth != null
                     && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
                     && request.resource.data.userId == resource.data.userId
                     && request.resource.data.amountReceivedCents == resource.data.amountReceivedCents
                     && request.resource.data.totalToRepayCents == resource.data.totalToRepayCents
@@ -110,17 +138,21 @@ service cloud.firestore {
                     && request.resource.data.installments is list
                     && request.resource.data.installments.size() == resource.data.installments.size()
                     && request.resource.data.updatedAt == request.time;
-      allow delete: if request.auth != null
-                    && request.auth.uid == userId
-                    && resource.data.userId == userId
-                    && resource.data.paidCents == 0
-                    && resource.data.borrowedAvailableCents == resource.data.amountReceivedCents
-                    && !get(/databases/$(database)/documents/users/$(userId)/months/$(resource.data.receivedMonthId)).data.closed;
+      allow delete: if isDeletingUserData(userId)
+                    || (
+                      request.auth != null
+                      && request.auth.uid == userId
+                      && resource.data.userId == userId
+                      && resource.data.paidCents == 0
+                      && resource.data.borrowedAvailableCents == resource.data.amountReceivedCents
+                      && !get(/databases/$(database)/documents/users/$(userId)/months/$(resource.data.receivedMonthId)).data.closed
+                    );
 
       match /payments/{paymentId} {
         allow read: if request.auth != null && request.auth.uid == userId;
         allow create: if request.auth != null
                       && request.auth.uid == userId
+                      && !isDeletingUserData(userId)
                       && request.resource.data.userId == userId
                       && request.resource.data.loanId == loanId
                       && request.resource.data.amountCents is int
@@ -134,12 +166,16 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if request.auth != null
                       && request.auth.uid == userId
-                      && !get(/databases/$(database)/documents/users/$(userId)/months/$(resource.data.monthId)).data.closed;
+                      && (
+                        isDeletingUserData(userId)
+                        || !get(/databases/$(database)/documents/users/$(userId)/months/$(resource.data.monthId)).data.closed
+                      );
       }
       match /fundMovements/{movementId} {
         allow read: if request.auth != null && request.auth.uid == userId;
         allow create: if request.auth != null
                       && request.auth.uid == userId
+                      && !isDeletingUserData(userId)
                       && request.resource.data.userId == userId
                       && request.resource.data.loanId == loanId
                       && request.resource.data.origin in ['necesidad', 'ocio']
@@ -151,20 +187,24 @@ service cloud.firestore {
                       && request.resource.data.transactionDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
                       && request.resource.data.serverDate == request.time;
         allow update: if false;
-        allow delete: if request.auth != null
-                      && request.auth.uid == userId
-                      && get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.userId == userId
-                      && get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.paidCents == 0
-                      && get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.borrowedAvailableCents
-                         == get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.amountReceivedCents
-                      && !get(/databases/$(database)/documents/users/$(userId)/months/$(get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.receivedMonthId)).data.closed
-                      && !existsAfter(/databases/$(database)/documents/users/$(userId)/loans/$(loanId));
+        allow delete: if isDeletingUserData(userId)
+                      || (
+                        request.auth != null
+                        && request.auth.uid == userId
+                        && get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.userId == userId
+                        && get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.paidCents == 0
+                        && get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.borrowedAvailableCents
+                           == get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.amountReceivedCents
+                        && !get(/databases/$(database)/documents/users/$(userId)/months/$(get(/databases/$(database)/documents/users/$(userId)/loans/$(loanId)).data.receivedMonthId)).data.closed
+                        && !existsAfter(/databases/$(database)/documents/users/$(userId)/loans/$(loanId))
+                      );
       }
     }
     match /users/{userId}/creditCards/{cardId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
                     && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
                     && request.resource.data.userId == userId
                     && request.resource.data.issuer is string
                     && request.resource.data.issuer.size() > 0
@@ -185,6 +225,7 @@ service cloud.firestore {
                     && request.resource.data.updatedAt == request.time;
       allow update: if request.auth != null
                     && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
                     && request.resource.data.userId == resource.data.userId
                     && request.resource.data.issuer == resource.data.issuer
                     && request.resource.data.name == resource.data.name
@@ -195,15 +236,19 @@ service cloud.firestore {
                     && request.resource.data.currentDebtCents is int
                     && request.resource.data.currentDebtCents >= 0
                     && request.resource.data.updatedAt == request.time;
-      allow delete: if request.auth != null
-                    && request.auth.uid == userId
-                    && resource.data.userId == userId
-                    && resource.data.currentDebtCents == 0;
+      allow delete: if isDeletingUserData(userId)
+                    || (
+                      request.auth != null
+                      && request.auth.uid == userId
+                      && resource.data.userId == userId
+                      && resource.data.currentDebtCents == 0
+                    );
 
       match /statements/{statementId} {
         allow read: if request.auth != null && request.auth.uid == userId;
         allow create: if request.auth != null
                       && request.auth.uid == userId
+                      && !isDeletingUserData(userId)
                       && request.resource.data.userId == userId
                       && request.resource.data.cardId == cardId
                       && request.resource.data.id == statementId
@@ -228,20 +273,25 @@ service cloud.firestore {
                       && request.resource.data.createdAt == request.time;
         allow update: if request.auth != null
                       && request.auth.uid == userId
+                      && !isDeletingUserData(userId)
                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paidCents'])
                       && request.resource.data.paidCents is int
                       && request.resource.data.paidCents >= 0
                       && request.resource.data.paidCents <= resource.data.totalPaymentCents;
-        allow delete: if request.auth != null
-                      && request.auth.uid == userId
-                      && resource.data.userId == userId
-                      && resource.data.paidCents == 0;
+        allow delete: if isDeletingUserData(userId)
+                      || (
+                        request.auth != null
+                        && request.auth.uid == userId
+                        && resource.data.userId == userId
+                        && resource.data.paidCents == 0
+                      );
       }
 
       match /payments/{paymentId} {
         allow read: if request.auth != null && request.auth.uid == userId;
         allow create: if request.auth != null
                       && request.auth.uid == userId
+                      && !isDeletingUserData(userId)
                       && request.resource.data.userId == userId
                       && request.resource.data.cardId == cardId
                       && request.resource.data.cardName is string
@@ -265,6 +315,7 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
                     && request.auth.uid == userId
+                    && !isDeletingUserData(userId)
                     && !get(/databases/$(database)/documents/users/$(userId)/months/$(monthId)).data.closed
                     && request.resource.data.userId == userId
                     && request.resource.data.monthId == monthId
@@ -283,7 +334,15 @@ service cloud.firestore {
                         && request.resource.data.reason.size() <= 200
                       )
                     );
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isDeletingUserData(userId);
+    }
+
+    match /migrationBackups/{backupId} {
+      allow read, delete: if request.auth != null
+                          && resource.data.uid == request.auth.uid
+                          && isDeletingUserData(request.auth.uid);
+      allow create, update: if false;
     }
   }
 }

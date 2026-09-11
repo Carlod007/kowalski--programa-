@@ -3,6 +3,7 @@ import {
   Navigate,
   Outlet,
   RouterProvider,
+  useLocation,
 } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import Login from "@/pages/auth/Login";
@@ -36,6 +37,8 @@ function RootRedirect() {
   if (isAuthLoading || isProfileLoading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!userProfile) return <Navigate to="/login" replace />;
+  if (userProfile.dataDeletionMode)
+    return <Navigate to="/settings" replace />;
   if (!userProfile.onboardingCompleted)
     return <Navigate to="/onboarding" replace />;
   return <Navigate to="/dashboard" replace />;
@@ -47,6 +50,8 @@ function LoginGuard() {
   if (isAuthLoading || isProfileLoading) return <LoadingScreen />;
   if (!user) return <Outlet />;
   if (!userProfile) return <Outlet />;
+  if (userProfile.dataDeletionMode)
+    return <Navigate to="/settings" replace />;
   if (!userProfile.onboardingCompleted)
     return <Navigate to="/onboarding" replace />;
   return <Navigate to="/dashboard" replace />;
@@ -58,6 +63,8 @@ function OnboardingGuard() {
   if (isAuthLoading || isProfileLoading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!userProfile) return <Navigate to="/login" replace />;
+  if (userProfile.dataDeletionMode)
+    return <Navigate to="/settings" replace />;
   if (userProfile.onboardingCompleted)
     return <Navigate to="/dashboard" replace />;
   return <Outlet />;
@@ -65,10 +72,18 @@ function OnboardingGuard() {
 
 function ProtectedLayout() {
   const { user, userProfile, isAuthLoading, isProfileLoading } = useAuthStore();
+  const location = useLocation();
 
   if (isAuthLoading || isProfileLoading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!userProfile) return <Navigate to="/login" replace />;
+  if (userProfile.dataDeletionMode) {
+    return location.pathname === "/settings" ? (
+      <Outlet />
+    ) : (
+      <Navigate to="/settings" replace />
+    );
+  }
   if (!userProfile.onboardingCompleted)
     return <Navigate to="/onboarding" replace />;
   return <Outlet />;

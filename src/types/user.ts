@@ -61,6 +61,8 @@ export type EssentialNeed = {
   monthlyAmountCents: number;
 };
 
+export type DataDeletionMode = "reset" | "delete-account";
+
 export type User = {
   name: string;
   email: string;
@@ -75,4 +77,11 @@ export type User = {
   savingsGoals: SavingsGoal[];
   fixedIncomes?: FixedIncome[];
   essentialNeeds?: EssentialNeed[];
+  /**
+   * Activa temporalmente las reglas especiales de limpieza. Mientras exista,
+   * no se permiten nuevas operaciones financieras y el proceso puede
+   * reanudarse si la conexión o la aplicación se interrumpen.
+   */
+  dataDeletionMode?: DataDeletionMode;
+  dataDeletionStartedAt?: Timestamp | null;
 };

@@ -6,9 +6,17 @@ import { useAuthStore } from "@/store/authStore";
 import type { User as UserProfile } from "@/types/user";
 import AppRouter from "@/router";
 import UpdatePrompt from "@/components/UpdatePrompt";
+import PendingAccountDeletion from "@/components/PendingAccountDeletion";
+import { getPendingAccountDeletionUserId } from "@/utils/dataDeletion";
 
 export default function App() {
-  const { setUser, setUserProfile } = useAuthStore();
+  const {
+    user,
+    userProfile,
+    isProfileLoading,
+    setUser,
+    setUserProfile,
+  } = useAuthStore();
 
   useEffect(() => {
     let unsubProfile: (() => void) | undefined;
@@ -48,10 +56,20 @@ export default function App() {
     };
   }, [setUser, setUserProfile]);
 
+  const hasInterruptedAccountDeletion =
+    !isProfileLoading &&
+    !!user &&
+    !userProfile &&
+    getPendingAccountDeletionUserId() === user.uid;
+
   return (
     <>
       <UpdatePrompt />
-      <AppRouter />
+      {hasInterruptedAccountDeletion ? (
+        <PendingAccountDeletion />
+      ) : (
+        <AppRouter />
+      )}
     </>
   );
 }

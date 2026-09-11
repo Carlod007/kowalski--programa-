@@ -10,6 +10,7 @@ import {
 import { auth } from "@/lib/firebase";
 import { createUserProfile } from "@/services/userService";
 import { useAuthStore } from "@/store/authStore";
+import { useSearchParams } from "react-router-dom";
 
 const loginSchema = z.object({
   email: z.string().trim().email("Email inválido"),
@@ -26,11 +27,13 @@ type LoginForm = z.infer<typeof loginSchema>;
 type RegisterForm = z.infer<typeof registerSchema>;
 
 export default function Login() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const { setUserProfile } = useAuthStore();
+  const accountDeleted = searchParams.get("accountDeleted") === "success";
 
   const loginForm = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -86,6 +89,25 @@ export default function Login() {
     <div className="flex min-h-screen items-center justify-center p-5">
       <div className="w-full max-w-sm">
         <h1 className="mb-6 text-center text-2xl font-medium">Kowalski</h1>
+
+        {accountDeleted && (
+          <div
+            role="status"
+            className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700"
+          >
+            <span>Tu cuenta y todos sus datos fueron eliminados.</span>
+            <button
+              type="button"
+              onClick={() => {
+                searchParams.delete("accountDeleted");
+                setSearchParams(searchParams, { replace: true });
+              }}
+              className="text-xs font-medium"
+            >
+              Cerrar
+            </button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="mb-6 flex">
