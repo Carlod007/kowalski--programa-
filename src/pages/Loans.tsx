@@ -519,9 +519,9 @@ function LoanCard({
   userId: string;
   paymentMethods: { id: string; name: string }[];
 }) {
-  const [showSchedule, setShowSchedule] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
-  const [showReassign, setShowReassign] = useState(false);
+  const [openPanel, setOpenPanel] = useState<
+    "schedule" | "payment" | "reassign" | null
+  >(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const outstanding = getLoanOutstandingCents(loan);
@@ -532,6 +532,11 @@ function LoanCard({
       : 0;
   const canCancel = canCancelUnusedLoan(loan);
   const availableByCategory = getBorrowedAvailableByCategory(loan);
+
+  function togglePanel(panel: "schedule" | "payment" | "reassign") {
+    setConfirmCancel(false);
+    setOpenPanel((current) => (current === panel ? null : panel));
+  }
 
   async function handleCancelLoan() {
     setActionError(null);
@@ -586,15 +591,15 @@ function LoanCard({
       <div className="mt-3 flex gap-2">
         <button
           type="button"
-          onClick={() => setShowSchedule((value) => !value)}
+          onClick={() => togglePanel("schedule")}
           className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-stone-300 py-2 text-xs text-stone-600"
         >
-          Ver cuotas <ChevronDown className={`h-3 w-3 ${showSchedule ? "rotate-180" : ""}`} />
+          Ver cuotas <ChevronDown className={`h-3 w-3 ${openPanel === "schedule" ? "rotate-180" : ""}`} />
         </button>
         {outstanding > 0 && (
           <button
             type="button"
-            onClick={() => setShowPayment((value) => !value)}
+            onClick={() => togglePanel("payment")}
             className="flex-1 rounded-lg bg-violet-600 py-2 text-xs font-medium text-white"
           >
             Registrar pago
@@ -605,33 +610,36 @@ function LoanCard({
       {loan.borrowedAvailableCents > 0 && (
         <button
           type="button"
-          onClick={() => setShowReassign((value) => !value)}
+          onClick={() => togglePanel("reassign")}
           className="mt-2 w-full rounded-lg border border-violet-300 py-2 text-xs font-medium text-violet-700"
         >
           Reasignar fondos del préstamo
         </button>
       )}
 
-      {showSchedule && <InstallmentList loan={loan} />}
-      {showReassign && (
+      {openPanel === "schedule" && <InstallmentList loan={loan} />}
+      {openPanel === "reassign" && (
         <ReassignFundsForm
           userId={userId}
           loan={loan}
-          onDone={() => setShowReassign(false)}
+          onDone={() => setOpenPanel(null)}
         />
       )}
-      {showPayment && next && (
+      {openPanel === "payment" && next && (
         <PaymentForm
           userId={userId}
           loan={loan}
           paymentMethods={paymentMethods}
-          onDone={() => setShowPayment(false)}
+          onDone={() => setOpenPanel(null)}
         />
       )}
       {canCancel && !confirmCancel && (
         <button
           type="button"
-          onClick={() => setConfirmCancel(true)}
+          onClick={() => {
+            setOpenPanel(null);
+            setConfirmCancel(true);
+          }}
           className="mt-3 text-xs text-red-600"
         >
           Cancelar préstamo sin usar
