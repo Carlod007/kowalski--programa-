@@ -3,6 +3,7 @@ import {
   addMonthsToDate,
   allocateLoanPayment,
   buildCustomLoanInstallments,
+  canCancelUnusedLoan,
   generateFixedAmountInstallments,
   generateLoanInstallments,
   getLoanInstallmentStatus,
@@ -123,5 +124,48 @@ describe("préstamos", () => {
         15_000,
       ),
     ).toEqual({ necesidad: 35_000, ocio: 25_000 });
+  });
+
+  it("permite cancelar tras reasignar si todo el dinero sigue disponible", () => {
+    expect(
+      canCancelUnusedLoan({
+        userId: "u",
+        amountReceivedCents: 90_000,
+        totalToRepayCents: 115_668,
+        receivedDate: "2026-09-10",
+        receivedMonthId: "2026-09",
+        destinationCategory: "necesidad",
+        borrowedAvailableCents: 90_000,
+        borrowedAvailableByCategory: { necesidad: 90_000, ocio: 0 },
+        paidCents: 0,
+        fundMovementCount: 2,
+        installments: [],
+        receiptTransactionId: "tx",
+        createdAt: null,
+        updatedAt: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("impide cancelar si hubo pagos o queda dinero prestado usado", () => {
+    const loan = {
+      userId: "u",
+      amountReceivedCents: 90_000,
+      totalToRepayCents: 115_668,
+      receivedDate: "2026-09-10",
+      receivedMonthId: "2026-09",
+      destinationCategory: "necesidad" as const,
+      borrowedAvailableCents: 90_000,
+      paidCents: 0,
+      installments: [],
+      receiptTransactionId: "tx",
+      createdAt: null,
+      updatedAt: null,
+    };
+
+    expect(canCancelUnusedLoan({ ...loan, paidCents: 1 })).toBe(false);
+    expect(
+      canCancelUnusedLoan({ ...loan, borrowedAvailableCents: 89_999 }),
+    ).toBe(false);
   });
 });

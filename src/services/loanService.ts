@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDocs,
   increment,
   onSnapshot,
   orderBy,
@@ -16,6 +17,7 @@ import { toDateInputValue } from "@/utils/date";
 import {
   allocateLoanPayment,
   buildCustomLoanInstallments,
+  canCancelUnusedLoan,
   generateFixedAmountInstallments,
   generateLoanInstallments,
   getBorrowedAvailableByCategory,
@@ -219,6 +221,17 @@ export async function cancelUnusedLoan(
   loanId: string,
 ): Promise<void> {
   const loanRef = doc(db, "users", userId, "loans", loanId);
+  const fundMovementsSnapshot = await getDocs(
+    collection(db, "users", userId, "loans", loanId, "fundMovements"),
+  );
+
+  // Firestore admite como máximo 500 escrituras por transacción. Además de
+  // los movimientos se actualiza el mes y se borran la entrada y el préstamo.
+  if (fundMovementsSnapshot.size > 497) {
+    throw new Error(
+      "El préstamo tiene demasiadas reasignaciones para cancelarlo de una sola vez.",
+    );
+  }
 
   await runTransaction(db, async (transaction) => {
     const loanSnapshot = await transaction.get(loanRef);
@@ -245,13 +258,14 @@ export async function cancelUnusedLoan(
     if ((monthSnapshot.data() as Month).closed) {
       throw new Error("No se puede cancelar un préstamo de un mes cerrado");
     }
-    if (
-      loan.paidCents !== 0 ||
-      (loan.fundMovementCount ?? 0) !== 0 ||
-      loan.borrowedAvailableCents !== loan.amountReceivedCents
-    ) {
+    if (!canCancelUnusedLoan(loan)) {
       throw new Error(
         "Solo se puede cancelar un préstamo que todavía no tenga usos ni pagos.",
+      );
+    }
+    if ((loan.fundMovementCount ?? 0) !== fundMovementsSnapshot.size) {
+      throw new Error(
+        "Las reasignaciones cambiaron durante la cancelación. Inténtalo nuevamente.",
       );
     }
 
@@ -264,6 +278,9 @@ export async function cancelUnusedLoan(
         -availableByCategory.necesidad,
       ),
       "borrowedCapsCents.ocio": increment(-availableByCategory.ocio),
+    });
+    fundMovementsSnapshot.docs.forEach((movement) => {
+      transaction.delete(movement.ref);
     });
     transaction.delete(receiptRef);
     transaction.delete(loanRef);

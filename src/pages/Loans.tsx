@@ -19,6 +19,7 @@ import {
 import {
   addMonthsToDate,
   allocateLoanPayment,
+  canCancelUnusedLoan,
   getBorrowedAvailableByCategory,
   getLoanInstallmentStatus,
   getLoanOutstandingCents,
@@ -529,10 +530,7 @@ function LoanCard({
     loan.totalToRepayCents > 0
       ? Math.min(100, (loan.paidCents / loan.totalToRepayCents) * 100)
       : 0;
-  const canCancel =
-    loan.paidCents === 0 &&
-    (loan.fundMovementCount ?? 0) === 0 &&
-    loan.borrowedAvailableCents === loan.amountReceivedCents;
+  const canCancel = canCancelUnusedLoan(loan);
   const availableByCategory = getBorrowedAvailableByCategory(loan);
 
   async function handleCancelLoan() {

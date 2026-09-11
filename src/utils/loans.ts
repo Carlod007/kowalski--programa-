@@ -14,6 +14,17 @@ export function getBorrowedAvailableByCategory(loan: Loan): MonthCaps {
     : { necesidad: 0, ocio: loan.borrowedAvailableCents };
 }
 
+/**
+ * Una reasignación no consume dinero prestado. El préstamo sigue siendo
+ * cancelable mientras no tenga pagos y todo el monto recibido siga disponible.
+ */
+export function canCancelUnusedLoan(loan: Loan): boolean {
+  return (
+    loan.paidCents === 0 &&
+    loan.borrowedAvailableCents === loan.amountReceivedCents
+  );
+}
+
 export function reassignBorrowedBalance(
   available: MonthCaps,
   origin: keyof MonthCaps,
