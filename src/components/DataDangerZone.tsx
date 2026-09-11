@@ -192,6 +192,7 @@ export default function DataDangerZone() {
                   <button
                     type="button"
                     onClick={closeDialog}
+                    autoFocus
                     className="flex-1 rounded-xl border border-stone-300 py-2.5 text-sm text-stone-600"
                   >
                     Cancelar
