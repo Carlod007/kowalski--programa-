@@ -8,6 +8,7 @@ import {
   getPurchaseCount,
   getUnassignedCents,
   isOverAllocated,
+  restoreGoalAfterSavingsExpense,
   wasPurchased,
 } from "./savings";
 import type { SavingsGoal } from "../types/user";
@@ -176,5 +177,25 @@ describe("marca de meta ya adquirida", () => {
   it("deja de figurar al quedar sin compras", () => {
     // Ocurre al borrar la compra desde el historial.
     expect(wasPurchased(goal({ purchaseCount: 0 }))).toBe(false);
+  });
+});
+
+describe("restaurar meta al borrar un gasto de ahorro", () => {
+  it("devuelve un retiro al asignado del fondo", () => {
+    const restored = restoreGoalAfterSavingsExpense(
+      goal({ kind: "fondo", allocatedCents: 20000 }),
+      10000,
+    );
+    expect(restored.allocatedCents).toBe(30000);
+  });
+
+  it("desmarca una compra sin reasignar el monto", () => {
+    const restored = restoreGoalAfterSavingsExpense(
+      goal({ kind: "compra", allocatedCents: 0, purchaseCount: 1, lastPurchasedAt: "2026-09-12" }),
+      90000,
+    );
+    expect(restored.allocatedCents).toBe(0);
+    expect(wasPurchased(restored)).toBe(false);
+    expect(restored.lastPurchasedAt).toBeUndefined();
   });
 });

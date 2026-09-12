@@ -134,9 +134,9 @@ export default function StepIncomeSources({
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-medium">Ingresos</h2>
       <p className="text-xs text-gray-500">
-        Agrega tus fuentes de ingreso. Si alguna es fija todos los meses
-        (sueldo, pensión), márcala como fija e indica cuánto - con eso
-        calculamos el % mínimo recomendado de Necesidad.
+        Agrega al menos una fuente de ingreso. No tiene que ser fija. Si alguna
+        sí lo es todos los meses (sueldo, pensión), márcala como fija e indica
+        cuánto - con eso calculamos el % mínimo recomendado de Necesidad.
       </p>
       <p className="text-xs text-gray-400 italic">
         Ejemplos: Sueldo (fijo, S/ 2500) · Freelance (no fijo)

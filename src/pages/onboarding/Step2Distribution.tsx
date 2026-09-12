@@ -5,6 +5,7 @@ type Props = {
   onChange: (distribution: Distribution) => void;
   disabledKeys?: (keyof Distribution)[];
   minNecesidad?: number;
+  minimumUnavailableMessage?: string;
 };
 
 export default function Step2Distribution({
@@ -12,6 +13,7 @@ export default function Step2Distribution({
   onChange,
   disabledKeys = [],
   minNecesidad,
+  minimumUnavailableMessage,
 }: Props) {
   const total = data.necesidad + data.ocio + data.ahorro;
   const isValid = total === 100;
@@ -85,6 +87,13 @@ export default function Step2Distribution({
                     {minNecesidad}% (ya lo cumples)
                   </p>
                 ))}
+              {key === "necesidad" &&
+                minNecesidad === undefined &&
+                minimumUnavailableMessage && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    {minimumUnavailableMessage}
+                  </p>
+                )}
             </div>
           );
         },

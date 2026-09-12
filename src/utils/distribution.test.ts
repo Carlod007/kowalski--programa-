@@ -3,6 +3,7 @@ import {
   calculateDistribution,
   calculateMinimumNecesidadPercentage,
   calculateProportionalSplit,
+  getMinimumNecesidadRecommendation,
 } from "./distribution";
 import type { Distribution } from "../types/transaction";
 
@@ -82,6 +83,42 @@ describe("calculateMinimumNecesidadPercentage", () => {
 
   it("devuelve 0 si no hay necesidades declaradas", () => {
     expect(calculateMinimumNecesidadPercentage(300000, 0)).toBe(0);
+  });
+});
+
+describe("getMinimumNecesidadRecommendation", () => {
+  it("prioriza los ingresos fijos sobre la referencia", () => {
+    expect(
+      getMinimumNecesidadRecommendation(300000, 180000, 200000),
+    ).toEqual({
+      percentage: 60,
+      basis: "fixed-income",
+      basisCents: 300000,
+    });
+  });
+
+  it("usa la referencia cuando no hay ingresos fijos", () => {
+    expect(getMinimumNecesidadRecommendation(0, 180000, 240000)).toEqual({
+      percentage: 75,
+      basis: "reference-income",
+      basisCents: 240000,
+    });
+  });
+
+  it("distingue la falta de base de un minimo real de cero", () => {
+    expect(getMinimumNecesidadRecommendation(0, 180000)).toEqual({
+      percentage: null,
+      basis: null,
+      basisCents: 0,
+    });
+  });
+
+  it("conserva el deficit calculado a partir de la referencia", () => {
+    expect(getMinimumNecesidadRecommendation(0, 150000, 100000)).toEqual({
+      percentage: 150,
+      basis: "reference-income",
+      basisCents: 100000,
+    });
   });
 });
 

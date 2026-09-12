@@ -19,6 +19,55 @@ export function calculateMinimumNecesidadPercentage(
   return Math.ceil((essentialNeedsCents / fixedIncomesCents) * 100);
 }
 
+export type MinimumNecesidadRecommendation =
+  | {
+      percentage: number;
+      basis: "fixed-income" | "reference-income";
+      basisCents: number;
+    }
+  | {
+      percentage: null;
+      basis: null;
+      basisCents: 0;
+    };
+
+/**
+ * Decide con qué ingreso se puede calcular el mínimo recomendado.
+ * Los ingresos fijos siempre tienen prioridad; la referencia es solo una
+ * alternativa temporal para pantallas de configuración.
+ */
+export function getMinimumNecesidadRecommendation(
+  fixedIncomesCents: number,
+  essentialNeedsCents: number,
+  referenceIncomeCents = 0,
+): MinimumNecesidadRecommendation {
+  const basis =
+    fixedIncomesCents > 0
+      ? "fixed-income"
+      : referenceIncomeCents > 0
+        ? "reference-income"
+        : null;
+  const basisCents =
+    basis === "fixed-income"
+      ? fixedIncomesCents
+      : basis === "reference-income"
+        ? referenceIncomeCents
+        : 0;
+
+  if (basis === null) {
+    return { percentage: null, basis: null, basisCents: 0 };
+  }
+
+  return {
+    percentage: calculateMinimumNecesidadPercentage(
+      basisCents,
+      essentialNeedsCents,
+    ),
+    basis,
+    basisCents,
+  };
+}
+
 export function calculateProportionalSplit(
   newAmountCents: number,
   originalAmountCents: number,

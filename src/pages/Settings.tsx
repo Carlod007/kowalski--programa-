@@ -8,7 +8,7 @@ import Step2Distribution from "@/pages/onboarding/Step2Distribution";
 import Step3Subcategories from "@/pages/onboarding/Step3Subcategories";
 import Step4PaymentMethods from "@/pages/onboarding/Step4PaymentMethods";
 import { updateDistributionNow } from "@/services/monthService";
-import { calculateMinimumNecesidadPercentage } from "@/utils/distribution";
+import { getMinimumNecesidadRecommendation } from "@/utils/distribution";
 import type {
   Source,
   PaymentMethod,
@@ -137,11 +137,12 @@ function DistributionSection() {
     (sum, n) => sum + n.monthlyAmountCents,
     0,
   );
-  const minNecesidad = calculateMinimumNecesidadPercentage(
+  const minimumRecommendation = getMinimumNecesidadRecommendation(
     fixedIncomesTotalCents,
     essentialNeedsTotalCents,
   );
-  const hasDeficit = minNecesidad > 100;
+  const minNecesidad = minimumRecommendation.percentage;
+  const hasDeficit = minNecesidad !== null && minNecesidad > 100;
   const deficitKey = `${fixedIncomesTotalCents}:${essentialNeedsTotalCents}`;
   const deficitAcknowledged = acknowledgedDeficitKey === deficitKey;
 
@@ -170,7 +171,11 @@ function DistributionSection() {
       setError('Marca "Continuar con déficit" para guardar de todas formas');
       return;
     }
-    if (!hasDeficit && draft.necesidad < minNecesidad) {
+    if (
+      !hasDeficit &&
+      minNecesidad !== null &&
+      draft.necesidad < minNecesidad
+    ) {
       setError(
         `Según tus ingresos y necesidades declaradas, Necesidad debería ser al menos ${minNecesidad}%`,
       );
@@ -218,8 +223,15 @@ function DistributionSection() {
             data={draft!}
             onChange={setDraft}
             minNecesidad={
-              fixedIncomesTotalCents > 0 && !hasDeficit
+              minNecesidad !== null && !hasDeficit
                 ? minNecesidad
+                : undefined
+            }
+            minimumUnavailableMessage={
+              minimumRecommendation.basis === null
+                ? essentialNeedsTotalCents > 0
+                  ? `Mínimo no calculable: tienes ${formatCents(essentialNeedsTotalCents)} de gastos fijos y no has configurado ingresos fijos. La referencia del onboarding no se guarda. Puedes ajustar el reparto manualmente.`
+                  : "Mínimo no calculable: no has configurado ingresos fijos. La referencia del onboarding no se guarda."
                 : undefined
             }
           />

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { calculateMinimumNecesidadPercentage } from "@/utils/distribution";
+import { getMinimumNecesidadRecommendation } from "@/utils/distribution";
 import { formatCents } from "@/utils/currency";
 import type {
   Source,
@@ -24,6 +24,19 @@ export type OnboardingData = {
 
 const TOTAL_STEPS = 4;
 
+function parseOptionalReferenceIncome(value: string): {
+  cents: number;
+  invalid: boolean;
+} {
+  if (value.trim() === "") return { cents: 0, invalid: false };
+  const parsed = Number(value);
+  const cents = Math.round(parsed * 100);
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(cents) || cents <= 0) {
+    return { cents: 0, invalid: true };
+  }
+  return { cents, invalid: false };
+}
+
 type Props = {
   initialData: OnboardingData;
   onFinish: (data: OnboardingData) => Promise<void>;
@@ -39,6 +52,7 @@ export default function OnboardingFlow({
 }: Props) {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<OnboardingData>(initialData);
+  const [referenceIncomeInput, setReferenceIncomeInput] = useState("");
   const [acknowledgedDeficitKey, setAcknowledgedDeficitKey] = useState<
     string | null
   >(null);
@@ -54,12 +68,17 @@ export default function OnboardingFlow({
     (sum, n) => sum + n.monthlyAmountCents,
     0,
   );
-  const minNecesidad = calculateMinimumNecesidadPercentage(
+  const referenceIncome = parseOptionalReferenceIncome(referenceIncomeInput);
+  const referenceApplies =
+    fixedIncomesTotalCents === 0 && essentialNeedsTotalCents > 0;
+  const minimumRecommendation = getMinimumNecesidadRecommendation(
     fixedIncomesTotalCents,
     essentialNeedsTotalCents,
+    referenceApplies && !referenceIncome.invalid ? referenceIncome.cents : 0,
   );
-  const hasDeficit = minNecesidad > 100;
-  const deficitKey = `${fixedIncomesTotalCents}:${essentialNeedsTotalCents}`;
+  const minNecesidad = minimumRecommendation.percentage;
+  const hasDeficit = minNecesidad !== null && minNecesidad > 100;
+  const deficitKey = `${minimumRecommendation.basis}:${minimumRecommendation.basisCents}:${essentialNeedsTotalCents}`;
   const deficitAcknowledged = acknowledgedDeficitKey === deficitKey;
 
   const distributionValid =
@@ -67,21 +86,24 @@ export default function OnboardingFlow({
       formData.distribution.ocio +
       formData.distribution.ahorro ===
     100;
-  const necesidadMeetsMinimum = formData.distribution.necesidad >= minNecesidad;
+  const necesidadMeetsMinimum =
+    minNecesidad === null || formData.distribution.necesidad >= minNecesidad;
 
   function next() {
     setStep((s) => s + 1);
   }
 
   function back() {
+    setAcknowledgedDeficitKey(null);
     setStep((s) => s - 1);
   }
 
   const canAdvance =
     step === 1
-      ? fixedIncomesTotalCents > 0
+      ? formData.sources.length > 0
       : step === 3
-        ? distributionValid &&
+        ? (!referenceApplies || !referenceIncome.invalid) &&
+          distributionValid &&
           (hasDeficit ? deficitAcknowledged : necesidadMeetsMinimum)
         : true;
 
@@ -115,30 +137,81 @@ export default function OnboardingFlow({
         <StepIncomeSources
           sources={formData.sources}
           fixedIncomes={formData.fixedIncomes}
-          onChange={(sources, fixedIncomes) =>
-            setFormData((d) => ({ ...d, sources, fixedIncomes }))
-          }
+          onChange={(sources, fixedIncomes) => {
+            setAcknowledgedDeficitKey(null);
+            setFormData((d) => ({ ...d, sources, fixedIncomes }));
+          }}
         />
+      )}
+      {step === 1 && formData.sources.length === 0 && (
+        <p className="mt-3 text-xs text-amber-700">
+          Agrega al menos una fuente para continuar.
+        </p>
       )}
       {step === 2 && (
         <Step3Subcategories
           data={formData.subcategories}
           essentialNeeds={formData.essentialNeeds}
-          onChange={(subcategories, essentialNeeds) =>
-            setFormData((d) => ({ ...d, subcategories, essentialNeeds }))
-          }
+          onChange={(subcategories, essentialNeeds) => {
+            setAcknowledgedDeficitKey(null);
+            setFormData((d) => ({ ...d, subcategories, essentialNeeds }));
+          }}
         />
       )}
       {step === 3 && (
         <>
+          {referenceApplies && (
+            <div className="mb-5 rounded-xl border border-stone-200 bg-white p-4">
+              <label
+                htmlFor="reference-income"
+                className="text-sm font-medium text-stone-900"
+              >
+                Ingreso mensual de referencia (opcional)
+              </label>
+              <p className="mt-1 text-xs text-stone-500">
+                Usa un estimado o promedio. Solo calcula esta recomendación
+                inicial: no registra dinero, no crea una transacción y no se
+                guarda al terminar.
+              </p>
+              <div className="mt-3 flex items-center rounded-lg bg-stone-50 px-3 py-2">
+                <span className="mr-2 text-sm text-stone-500">S/</span>
+                <input
+                  id="reference-income"
+                  value={referenceIncomeInput}
+                  onChange={(event) => {
+                    setReferenceIncomeInput(event.target.value);
+                    setAcknowledgedDeficitKey(null);
+                  }}
+                  type="number"
+                  inputMode="decimal"
+                  min="0.01"
+                  step="0.01"
+                  placeholder="0.00"
+                  className="min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none"
+                />
+              </div>
+              {referenceIncome.invalid && (
+                <p className="mt-1 text-xs text-red-500">
+                  Si indicas una referencia, debe ser mayor a 0.
+                </p>
+              )}
+            </div>
+          )}
           <Step2Distribution
             data={formData.distribution}
             onChange={(distribution) =>
               setFormData((d) => ({ ...d, distribution }))
             }
             minNecesidad={
-              fixedIncomesTotalCents > 0 && !hasDeficit
+              minNecesidad !== null && !hasDeficit
                 ? minNecesidad
+                : undefined
+            }
+            minimumUnavailableMessage={
+              minimumRecommendation.basis === null
+                ? essentialNeedsTotalCents > 0
+                  ? `Mínimo no calculable: tienes ${formatCents(essentialNeedsTotalCents)} de gastos fijos y no has indicado ingresos fijos ni una referencia. Puedes continuar con un reparto manual.`
+                  : "Mínimo no calculable: no has indicado ingresos fijos. Puedes continuar con un reparto manual."
                 : undefined
             }
           />
@@ -146,9 +219,12 @@ export default function OnboardingFlow({
             <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3">
               <p className="text-sm text-amber-800">
                 Tus necesidades ({formatCents(essentialNeedsTotalCents)})
-                superan tus ingresos fijos ({formatCents(fixedIncomesTotalCents)}
-                ) en{" "}
-                {formatCents(essentialNeedsTotalCents - fixedIncomesTotalCents)}
+                superan {minimumRecommendation.basis === "fixed-income"
+                  ? "tus ingresos fijos"
+                  : "tu ingreso de referencia"} ({formatCents(minimumRecommendation.basisCents)}) en{" "}
+                {formatCents(
+                  essentialNeedsTotalCents - minimumRecommendation.basisCents,
+                )}
                 . Ningún reparto puede cubrir esto sin corregir tus ingresos o
                 necesidades.
               </p>

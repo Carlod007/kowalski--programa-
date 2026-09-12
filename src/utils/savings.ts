@@ -63,6 +63,29 @@ export function wasPurchased(goal: SavingsGoal): boolean {
   return getPurchaseCount(goal) > 0;
 }
 
+/**
+ * Restores the goal state when an Ahorro expense is deleted from the history.
+ * Fund withdrawals return the amount to the fund; purchases only undo their
+ * purchase marker because the purchase amount was already released from the
+ * goal when it was made.
+ */
+export function restoreGoalAfterSavingsExpense(
+  goal: SavingsGoal,
+  amountCents: number,
+): SavingsGoal {
+  if (getGoalKind(goal) === "fondo") {
+    return {
+      ...goal,
+      allocatedCents: getGoalAllocated(goal) + amountCents,
+    };
+  }
+
+  const nextCount = Math.max(0, getPurchaseCount(goal) - 1);
+  const next = { ...goal, purchaseCount: nextCount };
+  if (nextCount === 0) delete next.lastPurchasedAt;
+  return next;
+}
+
 export type GoalProgress = {
   kind: GoalKind;
   allocatedCents: number;

@@ -18,6 +18,7 @@ import {
   getGoalKind,
   getPurchaseCount,
   getUnassignedCents,
+  restoreGoalAfterSavingsExpense,
 } from "@/utils/savings";
 import type { User } from "@/types/user";
 import type { Month } from "@/types/month";
@@ -111,19 +112,28 @@ export async function deleteTransaction(
       );
     }
 
-    // Si el egreso era la compra de una meta, hay que deshacer el contador de
-    // compras además de devolver la plata. Se lee el perfil ANTES de escribir
-    // nada, porque una transacción de Firestore no admite lecturas después de
-    // la primera escritura.
-    const purchasedGoalId =
-      tx.type === "expense" &&
-      (tx as ExpenseTransaction).category === "ahorro" &&
-      (tx as ExpenseTransaction).goalId
-        ? (tx as ExpenseTransaction).goalId
-        : null;
+    // Si el egreso estaba vinculado a una meta, hay que restaurar su estado
+    // además de devolver la plata. Se lee el perfil ANTES de escribir nada,
+    // porque una transacción de Firestore no admite lecturas después de la
+    // primera escritura.
     const userSnap = await transaction.get(userRef);
 
     const expenseTx = tx.type === "expense" ? tx : null;
+    const userGoals = userSnap.exists()
+      ? ((userSnap.data() as User).savingsGoals ?? [])
+      : [];
+    const savingsGoalId =
+      expenseTx?.category === "ahorro"
+        ? expenseTx.goalId ??
+          // Retiros antiguos no guardaban goalId. Solo hacemos recuperación
+          // segura para fondos con nombre idéntico; las compras requieren su
+          // vínculo explícito para no alterar una meta equivocada.
+          userGoals.find(
+            (goal) =>
+              getGoalKind(goal) === "fondo" &&
+              goal.name === expenseTx.subcategory,
+          )?.id
+        : undefined;
     const linkedLoanId =
       expenseTx?.fundedByLoanId ??
       (expenseTx?.loanPaymentId ? expenseTx.loanId : undefined);
@@ -194,15 +204,10 @@ export async function deleteTransaction(
           savingsTotalCents: increment(expense.amountCents),
         };
 
-        if (purchasedGoalId && userSnap?.exists()) {
-          const goals = (userSnap.data() as User).savingsGoals ?? [];
-          userUpdate.savingsGoals = goals.map((g) => {
-            if (g.id !== purchasedGoalId) return g;
-            const nextCount = Math.max(0, getPurchaseCount(g) - 1);
-            const next = { ...g, purchaseCount: nextCount };
-            // Al quedar sin compras vivas, deja de figurar como comprada.
-            if (nextCount === 0) delete next.lastPurchasedAt;
-            return next;
+        if (savingsGoalId && userSnap?.exists()) {
+          userUpdate.savingsGoals = userGoals.map((g) => {
+            if (g.id !== savingsGoalId) return g;
+            return restoreGoalAfterSavingsExpense(g, expense.amountCents);
           });
         }
 
@@ -578,6 +583,7 @@ export async function withdrawFromFund(
       transactionDate: input.date,
       serverDate: serverTimestamp(),
       localDate: new Date().toISOString(),
+      goalId: goal.id,
       ...(input.description ? { description: input.description } : {}),
     };
     transaction.set(txRef, tx);
