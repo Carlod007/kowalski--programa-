@@ -18,7 +18,7 @@ export default defineConfig({
         skipWaiting: false,
         clientsClaim: false,
       },
-      includeAssets: ["favicon.svg", "apple-touch-icon.png"],
+      includeAssets: ["icon-192.png", "apple-touch-icon.png"],
       manifest: {
         name: "Kowalski",
         short_name: "Kowalski",

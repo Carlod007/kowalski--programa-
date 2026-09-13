@@ -1,5 +1,37 @@
 @import "tailwindcss";
 
+@keyframes auto-dismiss-success {
+  0%,
+  82% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes auto-dismiss-success-reduced {
+  0%,
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.auto-dismiss-success {
+  animation: auto-dismiss-success 4s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auto-dismiss-success {
+    animation-name: auto-dismiss-success-reduced;
+  }
+}
+
 @layer base {
   /*
    * Comportamiento de app, no de página web: mantener pulsado no debe

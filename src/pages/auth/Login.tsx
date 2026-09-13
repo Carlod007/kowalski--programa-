@@ -93,7 +93,11 @@ export default function Login() {
         {accountDeleted && (
           <div
             role="status"
-            className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700"
+            onAnimationEnd={() => {
+              searchParams.delete("accountDeleted");
+              setSearchParams(searchParams, { replace: true });
+            }}
+            className="auto-dismiss-success mb-4 flex items-center justify-between gap-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700"
           >
             <span>Tu cuenta y todos sus datos fueron eliminados.</span>
             <button

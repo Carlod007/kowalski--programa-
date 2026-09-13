@@ -97,9 +97,10 @@ export default function UpdatePrompt() {
     <div
       role="status"
       aria-live="polite"
+      onAnimationEnd={isSuccess ? () => setStatus("idle") : undefined}
       className={`fixed inset-x-0 top-0 z-50 flex items-center justify-between gap-3 px-5 py-3 text-white ${
         isSuccess ? "bg-emerald-700" : isError ? "bg-red-700" : "bg-stone-900"
-      }`}
+      } ${isSuccess ? "auto-dismiss-success" : ""}`}
     >
       <p className="text-sm">
         {isUpdating

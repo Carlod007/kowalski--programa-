@@ -7,6 +7,7 @@ import { checkAndCloseMonth, moveSurplus } from "@/services/monthService";
 import { getMonthInitialSplit } from "@/services/movementService";
 import { watchLoans } from "@/services/loanService";
 import { watchCreditCards } from "@/services/creditCardService";
+import { getMonthExpenses } from "@/services/analyticsService";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
 import { getAssignableCents } from "@/utils/savings";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
@@ -17,7 +18,10 @@ import {
   getCategoryStatus,
 } from "@/utils/category";
 import type { Month, MonthCaps } from "@/types/month";
-import type { Distribution } from "@/types/transaction";
+import type {
+  Distribution,
+  ExpenseTransaction,
+} from "@/types/transaction";
 import type { MovementWithId } from "@/services/movementService";
 import type { LoanWithId } from "@/types/loan";
 import type { CreditCardWithId } from "@/types/creditCard";
@@ -31,6 +35,7 @@ import {
   getCreditCardStatementStatus,
 } from "@/utils/creditCards";
 import { toDateInputValue, formatDateLabel } from "@/utils/date";
+import { summarizeOutflows } from "@/utils/expenseClassification";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
 import CategoryIcon from "@/components/CategoryIcon";
@@ -155,6 +160,7 @@ function MonthSummary({
   const [initialSplitDeterminable, setInitialSplitDeterminable] =
     useState(true);
   const [showMovementsModal, setShowMovementsModal] = useState(false);
+  const [expenses, setExpenses] = useState<ExpenseTransaction[] | null>(null);
 
   useEffect(() => {
     const monthRef = doc(db, "users", userId, "months", monthId);
@@ -170,6 +176,18 @@ function MonthSummary({
       },
     );
     return () => unsubscribe();
+  }, [userId, monthId]);
+
+  useEffect(() => {
+    return getMonthExpenses(
+      userId,
+      monthId,
+      setExpenses,
+      (err) => {
+        console.error("No se pudo cargar el origen de los gastos:", err);
+        setExpenses([]);
+      },
+    );
   }, [userId, monthId]);
 
   useEffect(() => {
@@ -260,6 +278,7 @@ function MonthSummary({
                 essentialNeedsTotalCents={essentialNeedsTotalCents}
                 initialSplit={initialSplit}
                 initialSplitDeterminable={initialSplitDeterminable}
+                expenses={expenses}
               />
             ))}
             <SavingsRow
@@ -309,6 +328,7 @@ function CategoryRow({
   essentialNeedsTotalCents,
   initialSplit,
   initialSplitDeterminable,
+  expenses,
 }: {
   category: keyof MonthCaps;
   month: Month;
@@ -319,6 +339,7 @@ function CategoryRow({
   essentialNeedsTotalCents: number;
   initialSplit: Distribution | null;
   initialSplitDeterminable: boolean;
+  expenses: ExpenseTransaction[] | null;
 }) {
   const meta = CATEGORY_META[category];
   const cap = month.capsCents[category];
@@ -366,7 +387,56 @@ function CategoryRow({
     month.totalIncomeCents > 0
       ? ((ownedCap / month.totalIncomeCents) * 100).toFixed(1)
       : "0.0";
-
+  const classified =
+    expenses === null
+      ? null
+      : summarizeOutflows(
+          expenses.filter((expense) => expense.category === category),
+        );
+  const classifiedTotal = classified
+    ? Object.values(classified).reduce((sum, amount) => sum + amount, 0)
+    : 0;
+  const unclassifiedHistorical = Math.max(0, spent - classifiedTotal);
+  const sourceItems = classified
+    ? [
+        {
+          key: "owned",
+          label: "Propio",
+          amount: classified["owned-consumption"],
+          color: "bg-emerald-500",
+        },
+        {
+          key: "loan",
+          label: "Préstamo",
+          amount: classified["loan-consumption"],
+          color: "bg-violet-500",
+        },
+        {
+          key: "card",
+          label: "Tarjeta",
+          amount: classified["card-consumption"],
+          color: "bg-sky-500",
+        },
+        {
+          key: "interest",
+          label: "Intereses",
+          amount: classified["card-interest"],
+          color: "bg-amber-500",
+        },
+        {
+          key: "debt",
+          label: "Deuda",
+          amount: classified["debt-payment"],
+          color: "bg-rose-500",
+        },
+        {
+          key: "historical",
+          label: "Sin detalle",
+          amount: unclassifiedHistorical,
+          color: "bg-stone-400",
+        },
+      ].filter((item) => item.amount > 0)
+    : [];
   return (
     <div
       ref={infoRef}
@@ -429,16 +499,6 @@ function CategoryRow({
                 {formatCents(spent)}
               </p>
               <p className="text-stone-400">de {formatCents(cap)}</p>
-              {borrowedAvailable > 0 && (
-                <>
-                  <p className="mt-1 text-stone-500">
-                    Propio disponible: {formatCents(movableSurplus)}
-                  </p>
-                  <p className="text-violet-600">
-                    Prestado disponible: {formatCents(borrowedAvailable)}
-                  </p>
-                </>
-              )}
             </div>
 
             {(capWasAdjusted || !initialSplitDeterminable) && (
@@ -456,6 +516,41 @@ function CategoryRow({
               </div>
             )}
           </div>
+
+          {sourceItems.length > 0 && (
+            <div className="mt-3 px-1">
+              <p className="text-xs font-medium text-stone-500">
+                Origen del gasto
+              </p>
+              <div
+                className={`mt-2 grid gap-x-3 gap-y-2 ${
+                  sourceItems.length >= 3
+                    ? "grid-cols-3"
+                    : sourceItems.length === 2
+                      ? "grid-cols-2"
+                      : "grid-cols-1"
+                }`}
+              >
+                {sourceItems.map((item) => (
+                  <div key={item.key} className="min-w-0 text-xs">
+                    <p className="flex items-center gap-1.5 text-stone-500">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${item.color}`} />
+                      <span>{item.label}</span>
+                    </p>
+                    <p className="mt-0.5 pl-3.5 font-medium text-stone-900">
+                      {formatCents(item.amount)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {borrowedAvailable > 0 && (
+            <p className="mt-2 px-1 text-xs font-medium text-violet-600">
+              Prestado disponible: {formatCents(borrowedAvailable)}
+            </p>
+          )}
 
           {/* El botón solo se oculta cuando el panel real está abierto: si
               apareció el aviso de "sin excedente", sigue a la vista. */}

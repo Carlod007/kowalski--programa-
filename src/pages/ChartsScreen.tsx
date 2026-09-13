@@ -19,6 +19,7 @@ import {
   computeTopSubcategories,
   computeTopPaymentMethods,
   watchTrailingMonths,
+  watchCreditCardPaymentsForMonth,
   type TrailingMonth,
 } from "@/services/analyticsService";
 import {
@@ -31,6 +32,13 @@ import { formatCents } from "@/utils/currency";
 import { CATEGORY_META } from "@/utils/category";
 import type { Month } from "@/types/month";
 import type { ExpenseTransaction } from "@/types/transaction";
+import type { CreditCardPaymentWithId } from "@/types/creditCard";
+import {
+  classifyOutflow,
+  getConsumptionByCategory,
+  isConsumptionExpense,
+  summarizeOutflows,
+} from "@/utils/expenseClassification";
 import RankedBar from "@/components/RankedBar";
 import BottomNav from "@/components/BottomNav";
 import BackButton from "@/components/BackButton";
@@ -143,6 +151,9 @@ function MonthAnalytics({
 }) {
   const [month, setMonth] = useState<Month | null>(null);
   const [expenses, setExpenses] = useState<ExpenseTransaction[]>([]);
+  const [cardPayments, setCardPayments] = useState<
+    CreditCardPaymentWithId[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<CategoryFilter>("all");
 
@@ -158,11 +169,21 @@ function MonthAnalytics({
       if (!active) return;
       setExpenses(txs);
     });
+    const unsubCardPayments = watchCreditCardPaymentsForMonth(
+      userId,
+      monthId,
+      (payments) => {
+        if (!active) return;
+        setCardPayments(payments);
+      },
+      (error) => console.error("No se pudieron cargar los pagos de tarjetas:", error),
+    );
 
     return () => {
       active = false;
       unsubMonth();
       unsubTx();
+      unsubCardPayments();
     };
   }, [userId, monthId]);
 
@@ -175,14 +196,17 @@ function MonthAnalytics({
     );
   }
 
-  const breakdown = formatCategoryBreakdown(month.spentCents);
-  const totalSpent = month.spentCents.necesidad + month.spentCents.ocio;
-  // "Todo" es la vista de gasto contra topes, así que deja fuera el ahorro:
-  // usarlo no consume tope de ningún mes. Con la pestaña Ahorro sí se mira.
+  const consumptionExpenses = expenses.filter(isConsumptionExpense);
+  const consumptionByCategory = getConsumptionByCategory(consumptionExpenses);
+  const breakdown = formatCategoryBreakdown(consumptionByCategory);
+  const totalConsumption =
+    consumptionByCategory.necesidad + consumptionByCategory.ocio;
+  // "Todo" compara el consumo de las categorías presupuestadas. Ahorro sigue
+  // teniendo su pestaña propia y los pagos de deuda su bloque independiente.
   const filteredExpenses =
     filter === "all"
-      ? expenses.filter((e) => e.category !== "ahorro")
-      : expenses.filter((e) => e.category === filter);
+      ? consumptionExpenses.filter((e) => e.category !== "ahorro")
+      : consumptionExpenses.filter((e) => e.category === filter);
   const topSubcategories = computeTopSubcategories(filteredExpenses, TOP_LIMIT);
   const topPaymentMethods = computeTopPaymentMethods(
     filteredExpenses,
@@ -199,15 +223,51 @@ function MonthAnalytics({
   // Las compras de metas y los retiros del fondo ya se guardan como egresos
   // con categoría "ahorro": no hay que calcular nada nuevo, solo mirarlos.
   const isAhorro = filter === "ahorro";
-  const ahorroOutCents = expenses
+  const ahorroOutCents = consumptionExpenses
     .filter((e) => e.category === "ahorro")
     .reduce((sum, e) => sum + e.amountCents, 0);
+  const originTotals = summarizeOutflows(filteredExpenses);
+  const originItems = [
+    {
+      key: "owned",
+      label: "Consumo propio",
+      amount: originTotals["owned-consumption"],
+      color: "bg-emerald-500",
+    },
+    {
+      key: "loan",
+      label: "Con préstamo",
+      amount: originTotals["loan-consumption"],
+      color: "bg-violet-500",
+    },
+    {
+      key: "card",
+      label: "Con tarjeta",
+      amount: originTotals["card-consumption"],
+      color: "bg-sky-500",
+    },
+    {
+      key: "interest",
+      label: "Intereses y cargos",
+      amount: originTotals["card-interest"],
+      color: "bg-amber-500",
+    },
+  ].filter((item) => item.amount > 0);
+  const originTotal = originItems.reduce((sum, item) => sum + item.amount, 0);
+  const loanPaymentCents = expenses
+    .filter((expense) => classifyOutflow(expense) === "debt-payment")
+    .reduce((sum, expense) => sum + expense.amountCents, 0);
+  const cardPaymentCents = cardPayments.reduce(
+    (sum, payment) => sum + payment.amountCents,
+    0,
+  );
+  const debtPaymentCents = loanPaymentCents + cardPaymentCents;
 
   return (
     <>
       <section className="mx-5 mt-6">
         <h2 className="text-sm font-medium text-stone-500">
-          Distribución {formatMonthLabel(monthId)}
+          Consumo {formatMonthLabel(monthId)}
         </h2>
         <div className="mt-3 flex items-center gap-6">
           {/* Tamaño fijo: no hace falta medir el contenedor. Medirlo hacía que
@@ -229,7 +289,7 @@ function MonthAnalytics({
             </PieChart>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-base font-semibold text-stone-900">
-                {formatCents(totalSpent)}
+                {formatCents(totalConsumption)}
               </span>
               <span className="text-xs text-stone-400">gastado</span>
             </div>
@@ -246,8 +306,8 @@ function MonthAnalytics({
                 />
                 <span className="text-stone-700">
                   {entry.label}{" "}
-                  {totalSpent > 0
-                    ? Math.round((entry.value / totalSpent) * 100)
+                  {totalConsumption > 0
+                    ? Math.round((entry.value / totalConsumption) * 100)
                     : 0}
                   %
                 </span>
@@ -260,6 +320,78 @@ function MonthAnalytics({
       <div className="mx-5 mt-6">
         <CategoryTabs value={filter} onChange={setFilter} />
       </div>
+
+      {!isAhorro && (
+        <section className="mx-5 mt-6">
+          <h2 className="text-sm font-medium text-stone-500">
+            Origen del consumo
+          </h2>
+          {originItems.length === 0 ? (
+            <p className="mt-3 text-sm text-stone-400">Sin consumo este mes</p>
+          ) : (
+            <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-4">
+              <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
+                {originItems.map((item) => (
+                  <span
+                    key={item.key}
+                    className={item.color}
+                    style={{ width: `${(item.amount / originTotal) * 100}%` }}
+                  />
+                ))}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                {originItems.map((item) => (
+                  <div key={item.key}>
+                    <p className="flex items-center gap-1.5 text-xs text-stone-400">
+                      <span className={`h-2 w-2 rounded-full ${item.color}`} />
+                      {item.label}
+                    </p>
+                    <p className="mt-0.5 text-sm font-medium text-stone-900">
+                      {formatCents(item.amount)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {originTotals["card-consumption"] > 0 && (
+                <p className="mt-3 text-xs text-stone-400">
+                  La tarjeta representa consumo y deuda; no aumenta tu dinero disponible.
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      <section className="mx-5 mt-6">
+        <h2 className="text-sm font-medium text-stone-500">
+          Pagos de deudas del mes
+        </h2>
+        <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs text-stone-400">Préstamos</p>
+              <p className="mt-0.5 font-medium text-stone-900">
+                {formatCents(loanPaymentCents)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-stone-400">Tarjetas</p>
+              <p className="mt-0.5 font-medium text-stone-900">
+                {formatCents(cardPaymentCents)}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center justify-between border-t border-stone-100 pt-3">
+            <span className="text-xs text-stone-500">Total pagado</span>
+            <span className="font-semibold text-stone-900">
+              {formatCents(debtPaymentCents)}
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-stone-400">
+            Reduce la deuda, pero no se vuelve a sumar como consumo.
+          </p>
+        </div>
+      </section>
 
       {/* Acá solo va lo que esta pantalla explica mejor que ninguna otra: en
           qué se usó el ahorro. Cuánto entró se muestra en Ver detalle, que
@@ -358,13 +490,13 @@ function TrailingBars({
     monthId: m.monthId,
     label: formatMonthShortLabel(m.monthId),
     Ingresos: m.totalIncomeCents / 100,
-    Egresos: m.expenseCents / 100,
+    Consumo: m.expenseCents / 100,
   }));
 
   return (
     <section className="mx-5 mt-8">
       <h2 className="text-sm font-medium text-stone-500">
-        Ingresos vs egresos
+        Ingresos vs consumo
       </h2>
       {/* El ancho sigue siendo responsivo; la altura va en píxeles porque ya
           era fija. Con una medida positiva desde el primer render, recharts
@@ -385,7 +517,7 @@ function TrailingBars({
               }
             />
             <Bar dataKey="Ingresos" fill="#10b981" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Egresos" fill="#ef4444" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="Consumo" fill="#ef4444" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -394,7 +526,7 @@ function TrailingBars({
           <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Ingresos
         </span>
         <span className="flex items-center gap-1.5 text-stone-600">
-          <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Egresos
+          <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Consumo
         </span>
       </div>
     </section>

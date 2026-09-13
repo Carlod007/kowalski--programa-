@@ -38,7 +38,11 @@ export default function Onboarding() {
       {resetSucceeded && (
         <div
           role="status"
-          className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-sm items-center justify-between gap-3 rounded-xl bg-emerald-700 px-4 py-3 text-white shadow-lg"
+          onAnimationEnd={() => {
+            searchParams.delete("reset");
+            setSearchParams(searchParams, { replace: true });
+          }}
+          className="auto-dismiss-success fixed inset-x-4 top-4 z-50 mx-auto flex max-w-sm items-center justify-between gap-3 rounded-xl bg-emerald-700 px-4 py-3 text-white shadow-lg"
         >
           <p className="text-sm">Tus datos se eliminaron correctamente.</p>
           <button
