@@ -43,6 +43,7 @@ type CreateLoanCommon = {
   lender?: string;
   amountReceivedCents: number;
   receivedDate: string;
+  importedExisting?: boolean;
   destinationCategory: LoanDestinationCategory;
 };
 
@@ -119,7 +120,16 @@ export async function createLoan(
   if (input.amountReceivedCents <= 0) {
     throw new Error("El monto recibido debe ser mayor a 0");
   }
-  const receivedMonthId = input.receivedDate.slice(0, 7);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.receivedDate)) {
+    throw new Error("Ingresa una fecha de recepción válida");
+  }
+  const registrationDate = toDateInputValue();
+  if (input.receivedDate > registrationDate) {
+    throw new Error("La fecha de recepción no puede estar en el futuro");
+  }
+  const receivedMonthId = (
+    input.importedExisting ? registrationDate : input.receivedDate
+  ).slice(0, 7);
   const monthRef = doc(db, "users", userId, "months", receivedMonthId);
   const loanRef = doc(collection(db, "users", userId, "loans"));
   const receiptRef = doc(
@@ -174,6 +184,7 @@ export async function createLoan(
       amountReceivedCents: input.amountReceivedCents,
       totalToRepayCents,
       scheduleType: input.scheduleType,
+      ...(input.importedExisting ? { importedExisting: true } : {}),
       receivedDate: input.receivedDate,
       receivedMonthId,
       destinationCategory: input.destinationCategory,
@@ -195,10 +206,14 @@ export async function createLoan(
       ...(input.lender ? { lender: input.lender } : {}),
       destinationCategory: input.destinationCategory,
       amountCents: input.amountReceivedCents,
-      transactionDate: input.receivedDate,
+      transactionDate: input.importedExisting
+        ? registrationDate
+        : input.receivedDate,
       serverDate: serverTimestamp(),
       localDate: new Date().toISOString(),
-      description: "Préstamo recibido",
+      description: input.importedExisting
+        ? "Préstamo anterior incorporado"
+        : "Préstamo recibido",
     };
 
     transaction.set(loanRef, loan);

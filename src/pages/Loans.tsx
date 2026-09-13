@@ -181,6 +181,8 @@ export default function Loans() {
 function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void }) {
   const today = toDateInputValue();
   const [lender, setLender] = useState("");
+  const [importedExisting, setImportedExisting] = useState(false);
+  const [receivedDate, setReceivedDate] = useState(today);
   const [received, setReceived] = useState("");
   const [total, setTotal] = useState("");
   const [installmentAmount, setInstallmentAmount] = useState("");
@@ -255,7 +257,8 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
       const common = {
         lender: lender.trim() || undefined,
         amountReceivedCents,
-        receivedDate: today,
+        receivedDate,
+        importedExisting,
         destinationCategory: category,
       };
       if (scheduleType === "fixed-known") {
@@ -294,6 +297,39 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
       className="mt-4 flex flex-col gap-3 rounded-2xl border border-violet-200 bg-white p-4"
     >
       <p className="font-medium text-stone-900">Nuevo préstamo</p>
+      <label className="flex items-start gap-3 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
+        <input
+          type="checkbox"
+          checked={importedExisting}
+          onChange={(event) => {
+            const checked = event.target.checked;
+            setImportedExisting(checked);
+            if (!checked) {
+              setReceivedDate(today);
+              setFirstDueDate(today);
+            }
+          }}
+          className="mt-0.5"
+        />
+        <span>
+          <strong className="block text-stone-900">Registrar préstamo anterior</strong>
+          Úsalo si ya recibiste el dinero y quieres incorporar su deuda e historial
+          desde ahora, sin reabrir meses pasados.
+        </span>
+      </label>
+      {importedExisting && (
+        <label className="text-sm text-stone-600">
+          Fecha real de recepción
+          <input
+            value={receivedDate}
+            onChange={(event) => setReceivedDate(event.target.value)}
+            type="date"
+            max={today}
+            required
+            className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900"
+          />
+        </label>
+      )}
       <label className="text-sm text-stone-600">
         Entidad / comercio / persona{" "}
         <span className="text-stone-400">(opcional)</span>
@@ -366,7 +402,7 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
             value={firstDueDate}
             onChange={(event) => setFirstDueDate(event.target.value)}
             type="date"
-            min={today}
+            min={receivedDate}
             className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900"
           />
         </label>
@@ -391,7 +427,7 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
                     )
                   }
                   type="date"
-                  min={today}
+                  min={receivedDate}
                   className="mt-1 w-full rounded-xl border border-stone-300 px-2 py-2 text-sm text-stone-900"
                 />
               </label>
@@ -446,8 +482,9 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
         </div>
       )}
       <p className="text-xs text-stone-400">
-        Fecha de recepción: {formatDateLabel(today)}. El préstamo no cuenta como
-        ingreso ni altera tus porcentajes.
+        Fecha de recepción: {formatDateLabel(receivedDate)}. {importedExisting
+          ? "Se incorporará al mes actual sin crear ni reabrir meses anteriores. "
+          : ""}El préstamo no cuenta como ingreso ni altera tus porcentajes.
       </p>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button

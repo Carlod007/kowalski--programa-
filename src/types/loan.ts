@@ -21,6 +21,8 @@ export type Loan = {
   totalToRepayCents: number;
   /** Método usado para construir el calendario. Ausente en préstamos antiguos. */
   scheduleType?: LoanScheduleType;
+  /** Se incorporó después de su recepción, sin reabrir meses pasados. */
+  importedExisting?: boolean;
   receivedDate: string;
   receivedMonthId: string;
   destinationCategory: LoanDestinationCategory;

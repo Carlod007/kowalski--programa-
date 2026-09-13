@@ -89,6 +89,7 @@ service cloud.firestore {
                     && request.resource.data.totalToRepayCents is int
                     && request.resource.data.totalToRepayCents >= request.resource.data.amountReceivedCents
                     && request.resource.data.scheduleType in ['fixed-known', 'total-known', 'custom']
+                    && request.resource.data.get('importedExisting', false) is bool
                     && request.resource.data.borrowedAvailableCents == request.resource.data.amountReceivedCents
                     && request.resource.data.borrowedAvailableByCategory is map
                     && request.resource.data.borrowedAvailableByCategory.necesidad is int
@@ -115,6 +116,7 @@ service cloud.firestore {
                     && request.resource.data.amountReceivedCents == resource.data.amountReceivedCents
                     && request.resource.data.totalToRepayCents == resource.data.totalToRepayCents
                     && request.resource.data.get('scheduleType', 'total-known') == resource.data.get('scheduleType', 'total-known')
+                    && request.resource.data.get('importedExisting', false) == resource.data.get('importedExisting', false)
                     && request.resource.data.receivedDate == resource.data.receivedDate
                     && request.resource.data.receivedMonthId == resource.data.receivedMonthId
                     && request.resource.data.destinationCategory == resource.data.destinationCategory

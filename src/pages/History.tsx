@@ -383,9 +383,9 @@ function TransactionRow({
   const detail = isIncome
     ? tx.description
     : isLoanReceipt
-      ? `Préstamo recibido · ${CATEGORY_META[(tx as LoanReceiptTransaction).destinationCategory].label}`
+      ? `${tx.description === "Préstamo anterior incorporado" ? "Préstamo anterior incorporado" : "Préstamo recibido"} · ${CATEGORY_META[(tx as LoanReceiptTransaction).destinationCategory].label}`
       : tx.fundedByLoanId
-        ? `${CATEGORY_META[tx.category].label} · financiado con ${tx.fundedByLoanName ?? "préstamo"}`
+        ? `${CATEGORY_META[tx.category].label} · financiado con ${tx.fundedByLoanName ?? "préstamo"}${tx.description ? ` · ${tx.description}` : ""}`
         : tx.loanPaymentId
           ? `${CATEGORY_META[tx.category].label} · pago de préstamo`
           : tx.creditCardId
