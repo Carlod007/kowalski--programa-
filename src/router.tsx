@@ -20,6 +20,7 @@ import Movements from "@/pages/Movements";
 import SavingsGoals from "@/pages/SavingsGoals";
 import AdminOnboarding from "@/pages/AdminOnboarding";
 import ExpenseTemplates from "@/pages/ExpenseTemplates";
+import SubcategoryBudgets from "@/pages/SubcategoryBudgets";
 
 const ChartsScreen = lazy(() => import("@/pages/ChartsScreen"));
 const Loans = lazy(() => import("@/pages/Loans"));
@@ -139,6 +140,10 @@ const router = createBrowserRouter([
       {
         path: "/expense-templates",
         element: <ExpenseTemplates />,
+      },
+      {
+        path: "/subcategory-budgets",
+        element: <SubcategoryBudgets />,
       },
       {
         path: "/close-month",

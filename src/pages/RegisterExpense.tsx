@@ -50,6 +50,11 @@ import {
   getCreditCardDisplayName,
 } from "@/utils/creditCards";
 import { isExpenseTemplateUsable } from "@/utils/expenseTemplates";
+import { getMonthExpenses } from "@/services/analyticsService";
+import {
+  getSubcategoryBudgetStatus,
+  getSubcategoryConsumptionCents,
+} from "@/utils/subcategoryBudgets";
 import type { Month, MonthCaps } from "@/types/month";
 import type { ExpenseTemplate, SavingsGoal } from "@/types/user";
 import type { ExpenseTransaction } from "@/types/transaction";
@@ -292,6 +297,7 @@ function ExpenseDetailStep({
   const [loans, setLoans] = useState<LoanWithId[]>([]);
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [creditCards, setCreditCards] = useState<CreditCardWithId[]>([]);
+  const [monthExpenses, setMonthExpenses] = useState<ExpenseTransaction[]>([]);
   const [selectedCreditCardId, setSelectedCreditCardId] = useState<
     string | null
   >(null);
@@ -339,6 +345,20 @@ function ExpenseDetailStep({
   const projectedCardAvailableCents = selectedCreditCard
     ? getAvailableCreditCents(selectedCreditCard) - enteredAmountCents
     : 0;
+  const subcategoryBudget = userProfile?.subcategoryBudgets?.find(
+    (budget) =>
+      budget.category === category && budget.subcategory === subcategory,
+  );
+  const subcategorySpentCents = subcategoryBudget
+    ? getSubcategoryConsumptionCents(monthExpenses, subcategoryBudget)
+    : 0;
+  const subcategoryBudgetStatus = subcategoryBudget
+    ? getSubcategoryBudgetStatus(
+        subcategoryBudget.monthlyLimitCents,
+        subcategorySpentCents,
+        enteredAmountCents,
+      )
+    : null;
 
   useEffect(() => {
     if (!user) return;
@@ -351,6 +371,13 @@ function ExpenseDetailStep({
     if (!user) return;
     return watchCreditCards(user.uid, setCreditCards, (error) => {
       console.error("watchCreditCards falló:", error);
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    return getMonthExpenses(user.uid, getMonthId(), setMonthExpenses, (error) => {
+      console.error("No se pudo cargar el consumo de la subcategoría:", error);
     });
   }, [user]);
 
@@ -649,6 +676,57 @@ function ExpenseDetailStep({
             </div>
           )}
         </div>
+
+        {subcategoryBudget && subcategoryBudgetStatus && (
+          <div
+            className={`rounded-2xl border p-4 ${
+              subcategoryBudgetStatus.level === "exceeded"
+                ? "border-red-200 bg-red-50"
+                : subcategoryBudgetStatus.level === "near"
+                  ? "border-amber-200 bg-amber-50"
+                  : "border-stone-200 bg-white"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="font-medium text-stone-700">
+                Presupuesto de {subcategoryBudget.subcategory}
+              </span>
+              <span className="text-stone-500">
+                {formatCents(subcategoryBudgetStatus.projectedCents)} de{" "}
+                {formatCents(subcategoryBudget.monthlyLimitCents)}
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
+              <div
+                className={`h-full rounded-full ${
+                  subcategoryBudgetStatus.level === "exceeded"
+                    ? "bg-red-500"
+                    : subcategoryBudgetStatus.level === "near"
+                      ? "bg-amber-500"
+                      : CATEGORY_META[category].bar
+                }`}
+                style={{
+                  width: `${Math.min(100, subcategoryBudgetStatus.percentage)}%`,
+                }}
+              />
+            </div>
+            <p
+              className={`mt-2 text-xs ${
+                subcategoryBudgetStatus.level === "exceeded"
+                  ? "font-medium text-red-700"
+                  : subcategoryBudgetStatus.level === "near"
+                    ? "font-medium text-amber-700"
+                    : "text-stone-500"
+              }`}
+            >
+              {subcategoryBudgetStatus.level === "exceeded"
+                ? `Superarías el límite por ${formatCents(Math.max(0, -subcategoryBudgetStatus.remainingCents))}. Puedes registrar el gasto igual.`
+                : subcategoryBudgetStatus.level === "near"
+                  ? `Llegarías al ${subcategoryBudgetStatus.percentage}% del límite. El aviso no bloquea el gasto.`
+                  : `${formatCents(subcategoryBudgetStatus.remainingCents)} disponibles después de este gasto.`}
+            </p>
+          </div>
+        )}
 
         {availableLoans.length > 0 && (
           <div className="flex flex-col gap-2 rounded-2xl border border-violet-200 bg-violet-50 p-4">

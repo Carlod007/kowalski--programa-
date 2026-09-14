@@ -42,6 +42,10 @@ import {
 import RankedBar from "@/components/RankedBar";
 import BottomNav from "@/components/BottomNav";
 import BackButton from "@/components/BackButton";
+import {
+  getSubcategoryBudgetStatus,
+  getSubcategoryConsumptionCents,
+} from "@/utils/subcategoryBudgets";
 
 const CURRENT_MONTH_ID = getMonthId();
 const TOP_LIMIT = 4;
@@ -149,6 +153,7 @@ function MonthAnalytics({
   userId: string;
   monthId: string;
 }) {
+  const userProfile = useAuthStore((state) => state.userProfile);
   const [month, setMonth] = useState<Month | null>(null);
   const [expenses, setExpenses] = useState<ExpenseTransaction[]>([]);
   const [cardPayments, setCardPayments] = useState<
@@ -262,6 +267,22 @@ function MonthAnalytics({
     0,
   );
   const debtPaymentCents = loanPaymentCents + cardPaymentCents;
+  const subcategoryBudgetItems = (userProfile?.subcategoryBudgets ?? [])
+    .filter(
+      (budget) =>
+        filter === "all" ||
+        (filter !== "ahorro" && budget.category === filter),
+    )
+    .map((budget) => {
+      const spentCents = getSubcategoryConsumptionCents(expenses, budget);
+      return {
+        ...budget,
+        status: getSubcategoryBudgetStatus(
+          budget.monthlyLimitCents,
+          spentCents,
+        ),
+      };
+    });
 
   return (
     <>
@@ -359,6 +380,74 @@ function MonthAnalytics({
               )}
             </div>
           )}
+        </section>
+      )}
+
+      {!isAhorro && subcategoryBudgetItems.length > 0 && (
+        <section className="mx-5 mt-6">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-medium text-stone-500">
+              Presupuestos por subcategoría
+            </h2>
+            <Link
+              to="/subcategory-budgets"
+              className="text-xs font-medium text-teal-600"
+            >
+              Configurar
+            </Link>
+          </div>
+          <div className="mt-3 flex flex-col gap-3">
+            {subcategoryBudgetItems.map((item) => (
+              <div
+                key={`${item.category}:${item.subcategory}`}
+                className="rounded-2xl border border-stone-200 bg-white p-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-stone-800">
+                      {item.subcategory}
+                    </p>
+                    {filter === "all" && (
+                      <p className="text-xs text-stone-400">
+                        {CATEGORY_META[item.category].label}
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-xs text-stone-500">
+                    {formatCents(item.status.spentCents)} de{" "}
+                    {formatCents(item.monthlyLimitCents)}
+                  </p>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
+                  <div
+                    className={`h-full rounded-full ${
+                      item.status.level === "exceeded"
+                        ? "bg-red-500"
+                        : item.status.level === "near"
+                          ? "bg-amber-500"
+                          : CATEGORY_META[item.category].bar
+                    }`}
+                    style={{ width: `${Math.min(100, item.status.percentage)}%` }}
+                  />
+                </div>
+                <p
+                  className={`mt-2 text-xs ${
+                    item.status.level === "exceeded"
+                      ? "font-medium text-red-600"
+                      : item.status.level === "near"
+                        ? "font-medium text-amber-700"
+                        : "text-stone-400"
+                  }`}
+                >
+                  {item.status.level === "exceeded"
+                    ? `Excedido por ${formatCents(-item.status.remainingCents)}`
+                    : item.status.level === "near"
+                      ? `${item.status.percentage}% utilizado`
+                      : `${formatCents(item.status.remainingCents)} disponible`}
+                </p>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 

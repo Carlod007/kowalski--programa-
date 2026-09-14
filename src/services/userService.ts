@@ -23,6 +23,7 @@ export function buildInitialUserProfile(
     fixedIncomes: [],
     essentialNeeds: [],
     expenseTemplates: [],
+    subcategoryBudgets: [],
   };
 }
 

@@ -71,6 +71,12 @@ export type ExpenseTemplate = {
   paymentMethod: string;
 };
 
+export type SubcategoryBudget = {
+  category: "necesidad" | "ocio";
+  subcategory: string;
+  monthlyLimitCents: number;
+};
+
 export type DataDeletionMode = "reset" | "delete-account";
 
 export type User = {
@@ -89,6 +95,8 @@ export type User = {
   essentialNeeds?: EssentialNeed[];
   /** Atajos de formulario: nunca guardan préstamos ni tarjetas. */
   expenseTemplates?: ExpenseTemplate[];
+  /** Referencias informativas; no modifican los topes del mes. */
+  subcategoryBudgets?: SubcategoryBudget[];
   /**
    * Activa temporalmente las reglas especiales de limpieza. Mientras exista,
    * no se permiten nuevas operaciones financieras y el proceso puede
