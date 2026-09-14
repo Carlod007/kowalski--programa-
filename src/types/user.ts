@@ -61,6 +61,16 @@ export type EssentialNeed = {
   monthlyAmountCents: number;
 };
 
+export type ExpenseTemplate = {
+  id: string;
+  category: "necesidad" | "ocio";
+  subcategory: string;
+  /** Si no existe, el usuario escribe el monto cada vez que usa la plantilla. */
+  amountCents?: number;
+  description?: string;
+  paymentMethod: string;
+};
+
 export type DataDeletionMode = "reset" | "delete-account";
 
 export type User = {
@@ -77,6 +87,8 @@ export type User = {
   savingsGoals: SavingsGoal[];
   fixedIncomes?: FixedIncome[];
   essentialNeeds?: EssentialNeed[];
+  /** Atajos de formulario: nunca guardan préstamos ni tarjetas. */
+  expenseTemplates?: ExpenseTemplate[];
   /**
    * Activa temporalmente las reglas especiales de limpieza. Mientras exista,
    * no se permiten nuevas operaciones financieras y el proceso puede

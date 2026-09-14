@@ -19,6 +19,7 @@ import Settings from "@/pages/Settings";
 import Movements from "@/pages/Movements";
 import SavingsGoals from "@/pages/SavingsGoals";
 import AdminOnboarding from "@/pages/AdminOnboarding";
+import ExpenseTemplates from "@/pages/ExpenseTemplates";
 
 const ChartsScreen = lazy(() => import("@/pages/ChartsScreen"));
 const Loans = lazy(() => import("@/pages/Loans"));
@@ -134,6 +135,10 @@ const router = createBrowserRouter([
       {
         path: "/expense/new",
         element: <RegisterExpense />,
+      },
+      {
+        path: "/expense-templates",
+        element: <ExpenseTemplates />,
       },
       {
         path: "/close-month",

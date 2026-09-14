@@ -22,6 +22,7 @@ export function buildInitialUserProfile(
     savingsGoals: [],
     fixedIncomes: [],
     essentialNeeds: [],
+    expenseTemplates: [],
   };
 }
 

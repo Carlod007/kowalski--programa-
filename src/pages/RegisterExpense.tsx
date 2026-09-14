@@ -49,8 +49,9 @@ import {
   getAvailableCreditCents,
   getCreditCardDisplayName,
 } from "@/utils/creditCards";
+import { isExpenseTemplateUsable } from "@/utils/expenseTemplates";
 import type { Month, MonthCaps } from "@/types/month";
-import type { SavingsGoal } from "@/types/user";
+import type { ExpenseTemplate, SavingsGoal } from "@/types/user";
 import type { ExpenseTransaction } from "@/types/transaction";
 import type { LoanWithId } from "@/types/loan";
 import type { CreditCardWithId } from "@/types/creditCard";
@@ -77,12 +78,43 @@ export default function RegisterExpense() {
   const location = useLocation();
   // Atajo desde Metas: se entra con la meta ya elegida, saltando el paso de
   // categoría. Si no viene nada, el flujo arranca como siempre.
-  const initialGoalId =
-    (location.state as { goalId?: string } | null)?.goalId ?? null;
+  const routeState = location.state as {
+    goalId?: string;
+    templateId?: string;
+  } | null;
+  const initialGoalId = routeState?.goalId ?? null;
+  const routeTemplate =
+    userProfile?.expenseTemplates?.find(
+      (template) => template.id === routeState?.templateId,
+    ) ?? null;
+  const initialTemplate =
+    routeTemplate &&
+    userProfile &&
+    isExpenseTemplateUsable(
+      routeTemplate,
+      userProfile.subcategories,
+      userProfile.paymentMethods,
+    )
+      ? routeTemplate
+      : null;
   const [month, setMonth] = useState<Month | null>(null);
   const [loading, setLoading] = useState(true);
-  const [step, setStep] = useState<Step>(initialGoalId ? "goal" : "category");
-  const [category, setCategory] = useState<keyof MonthCaps | null>(null);
+  const [step, setStep] = useState<Step>(
+    initialGoalId ? "goal" : initialTemplate ? "detail" : "category",
+  );
+  const [category, setCategory] = useState<keyof MonthCaps | null>(
+    initialTemplate?.category ?? null,
+  );
+  const [selectedTemplate, setSelectedTemplate] =
+    useState<ExpenseTemplate | null>(initialTemplate);
+  const usableTemplates = (userProfile?.expenseTemplates ?? []).filter(
+    (template) =>
+      isExpenseTemplateUsable(
+        template,
+        userProfile?.subcategories ?? { necesidad: [], ocio: [] },
+        userProfile?.paymentMethods ?? [],
+      ),
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -121,7 +153,11 @@ export default function RegisterExpense() {
         category={category}
         capCents={month?.capsCents[category] ?? 0}
         spentCents={month?.spentCents[category] ?? 0}
-        onBack={() => setStep("category")}
+        initialTemplate={selectedTemplate}
+        onBack={() => {
+          setSelectedTemplate(null);
+          setStep("category");
+        }}
       />
     );
   }
@@ -153,6 +189,40 @@ export default function RegisterExpense() {
       </p>
 
       <div className="mt-6 flex flex-col gap-3">
+        {usableTemplates.length > 0 && (
+          <section className="mb-2 rounded-2xl border border-stone-200 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-stone-900">
+                Gastos frecuentes
+              </p>
+              <Link
+                to="/expense-templates"
+                className="text-xs font-medium text-teal-600"
+              >
+                Administrar
+              </Link>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {usableTemplates.slice(0, 6).map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTemplate(template);
+                    setCategory(template.category);
+                    setStep("detail");
+                  }}
+                  className="rounded-full border border-stone-200 bg-stone-50 px-3 py-2 text-left text-sm text-stone-700"
+                >
+                  {template.description?.trim() || template.subcategory}
+                  {template.amountCents
+                    ? ` · ${formatCents(template.amountCents)}`
+                    : ""}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         {CAP_CATEGORY_ORDER.map((cat) => (
           <CategorySelectCard
             key={cat}
@@ -162,6 +232,7 @@ export default function RegisterExpense() {
             selected={category === cat}
             onSelect={(selectedCat) => {
               if (selectedCat === "necesidad" || selectedCat === "ocio") {
+                setSelectedTemplate(null);
                 setCategory(selectedCat);
                 setStep("detail");
               }
@@ -174,6 +245,12 @@ export default function RegisterExpense() {
           selected={false}
           onSelect={() => setStep("goal")}
         />
+        <Link
+          to="/expense-templates"
+          className="mt-1 text-center text-sm font-medium text-teal-600"
+        >
+          Administrar gastos frecuentes
+        </Link>
       </div>
     </div>
   );
@@ -183,18 +260,32 @@ function ExpenseDetailStep({
   category,
   capCents,
   spentCents,
+  initialTemplate,
   onBack,
 }: {
   category: keyof MonthCaps;
   capCents: number;
   spentCents: number;
+  initialTemplate: ExpenseTemplate | null;
   onBack: () => void;
 }) {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
-  const [subcategory, setSubcategory] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
+  const [subcategory, setSubcategory] = useState<string | null>(() =>
+    initialTemplate &&
+    userProfile?.subcategories[category]?.includes(initialTemplate.subcategory)
+      ? initialTemplate.subcategory
+      : null,
+  );
+  const [paymentMethod, setPaymentMethod] = useState<string | null>(() =>
+    initialTemplate &&
+    userProfile?.paymentMethods.some(
+      (method) => method.name === initialTemplate.paymentMethod,
+    )
+      ? initialTemplate.paymentMethod
+      : null,
+  );
   const [pickError, setPickError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -219,7 +310,13 @@ function ExpenseDetailStep({
     formState: { errors, isSubmitting },
   } = useForm<DetailFormValues>({
     resolver: zodResolver(detailSchema),
-    defaultValues: { date: today, amount: "", description: "" },
+    defaultValues: {
+      date: today,
+      amount: initialTemplate?.amountCents
+        ? (initialTemplate.amountCents / 100).toFixed(2)
+        : "",
+      description: initialTemplate?.description ?? "",
+    },
   });
 
   const subcategories = userProfile?.subcategories[category] ?? [];
@@ -492,6 +589,12 @@ function ExpenseDetailStep({
           <p className="text-sm text-stone-500">Registra tu egreso</p>
         </div>
       </div>
+
+      {initialTemplate && (
+        <div className="mt-4 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-800">
+          Plantilla aplicada. Revisa los datos y confirma el egreso.
+        </div>
+      )}
 
       <form
         onSubmit={handleSubmit(onSubmit)}
