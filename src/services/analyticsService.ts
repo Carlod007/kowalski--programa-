@@ -49,11 +49,51 @@ export function getMonthExpenses(
   );
 }
 
-/** Lee pagos de todas las tarjetas del usuario para un mes, sin convertirlos
- * en transacciones de gasto ni modificar la contabilidad existente. */
-export function watchCreditCardPaymentsForMonth(
+/** Combina los egresos de los meses que atraviesa un rango analítico. Solo
+ * lee transacciones existentes; el filtro exacto por fecha se aplica después. */
+export function watchExpensesForMonths(
   userId: string,
-  monthId: string,
+  monthIds: string[],
+  onData: (txs: ExpenseTransaction[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  if (monthIds.length === 0) {
+    onData([]);
+    return () => undefined;
+  }
+
+  const expensesByMonth = new Map<string, ExpenseTransaction[]>();
+  const reported = new Set<string>();
+  const emitWhenReady = () => {
+    if (reported.size < monthIds.length) return;
+    onData(monthIds.flatMap((monthId) => expensesByMonth.get(monthId) ?? []));
+  };
+
+  const unsubs = monthIds.map((monthId) =>
+    getMonthExpenses(
+      userId,
+      monthId,
+      (expenses) => {
+        expensesByMonth.set(monthId, expenses);
+        reported.add(monthId);
+        emitWhenReady();
+      },
+      (error) => {
+        expensesByMonth.set(monthId, []);
+        reported.add(monthId);
+        onError?.(error);
+        emitWhenReady();
+      },
+    ),
+  );
+  return () => unsubs.forEach((unsubscribe) => unsubscribe());
+}
+
+/** Lee los pagos de tarjetas realizados dentro de un rango analítico. */
+export function watchCreditCardPaymentsForRange(
+  userId: string,
+  fromDate: string,
+  toDate: string,
   onData: (payments: CreditCardPaymentWithId[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
@@ -77,9 +117,6 @@ export function watchCreditCardPaymentsForMonth(
 
       const paymentsByCard = new Map<string, CreditCardPaymentWithId[]>();
       const reported = new Set<string>();
-      const startDate = `${monthId}-01`;
-      const nextMonthDate = `${shiftMonthId(monthId, 1)}-01`;
-
       const emitWhenReady = () => {
         if (
           currentGeneration !== generation ||
@@ -93,8 +130,8 @@ export function watchCreditCardPaymentsForMonth(
       for (const cardId of cardIds) {
         const paymentsQuery = query(
           collection(db, "users", userId, "creditCards", cardId, "payments"),
-          where("paymentDate", ">=", startDate),
-          where("paymentDate", "<", nextMonthDate),
+          where("paymentDate", ">=", fromDate),
+          where("paymentDate", "<=", toDate),
         );
         paymentUnsubs.push(
           onSnapshot(

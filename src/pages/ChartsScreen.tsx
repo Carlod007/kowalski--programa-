@@ -15,11 +15,11 @@ import {
 import { useAuthStore } from "@/store/authStore";
 import {
   formatCategoryBreakdown,
-  getMonthExpenses,
   computeTopSubcategories,
   computeTopPaymentMethods,
   watchTrailingMonths,
-  watchCreditCardPaymentsForMonth,
+  watchCreditCardPaymentsForRange,
+  watchExpensesForMonths,
   type TrailingMonth,
 } from "@/services/analyticsService";
 import {
@@ -50,6 +50,15 @@ import {
   getAvailableExpenseTags,
   hasExpenseTag,
 } from "@/utils/expenseTags";
+import {
+  formatAnalysisDateRange,
+  getAnalysisDateRange,
+  getMonthIdsInRange,
+  isDateInAnalysisRange,
+  validateAnalysisDateRange,
+  type AnalysisDateRange,
+  type AnalysisPeriodMode,
+} from "@/utils/analysisPeriod";
 
 const CURRENT_MONTH_ID = getMonthId();
 const TOP_LIMIT = 4;
@@ -62,10 +71,33 @@ export default function ChartsScreen() {
   const user = useAuthStore((s) => s.user);
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [periodMode, setPeriodMode] = useState<AnalysisPeriodMode>("month");
+  const initialRange = getAnalysisDateRange(CURRENT_MONTH_ID, "month")!;
+  const [customFromDate, setCustomFromDate] = useState(initialRange.fromDate);
+  const [customToDate, setCustomToDate] = useState(initialRange.toDate);
 
   if (!user) return null;
 
   const canGoForward = viewedMonthId < CURRENT_MONTH_ID;
+  const customRange = { fromDate: customFromDate, toDate: customToDate };
+  const customRangeError =
+    periodMode === "custom" ? validateAnalysisDateRange(customRange) : null;
+  const selectedRange = getAnalysisDateRange(
+    viewedMonthId,
+    periodMode,
+    customRange,
+  );
+
+  const shiftViewedMonth = (delta: number) => {
+    const nextMonthId = shiftMonthId(viewedMonthId, delta);
+    setViewedMonthId(nextMonthId);
+    setSelectedTag(null);
+    if (periodMode === "custom") {
+      const nextRange = getAnalysisDateRange(nextMonthId, "month")!;
+      setCustomFromDate(nextRange.fromDate);
+      setCustomToDate(nextRange.toDate);
+    }
+  };
 
   return (
     <div className="min-h-dvh bg-stone-50 pb-24">
@@ -77,10 +109,7 @@ export default function ChartsScreen() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => {
-              setSelectedTag(null);
-              setViewedMonthId((id) => shiftMonthId(id, -1));
-            }}
+            onClick={() => shiftViewedMonth(-1)}
             className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200"
           >
             ‹
@@ -90,10 +119,7 @@ export default function ChartsScreen() {
           </span>
           <button
             type="button"
-            onClick={() => {
-              setSelectedTag(null);
-              setViewedMonthId((id) => shiftMonthId(id, 1));
-            }}
+            onClick={() => shiftViewedMonth(1)}
             disabled={!canGoForward}
             className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 disabled:opacity-30"
           >
@@ -102,14 +128,86 @@ export default function ChartsScreen() {
         </div>
       </header>
 
-      <MonthAnalytics
-        key={`month-${viewedMonthId}`}
-        userId={user.uid}
-        monthId={viewedMonthId}
-        selectedTag={selectedTag}
-        onSelectedTagChange={setSelectedTag}
-      />
-      {!selectedTag && (
+      <section className="mx-5 mt-5 rounded-2xl border border-stone-200 bg-white p-3">
+        <p className="text-xs font-medium text-stone-500">Periodo de análisis</p>
+        <div className="mt-2 grid grid-cols-4 gap-1 rounded-xl bg-stone-100 p-1">
+          {(
+            [
+              ["month", "Mes"],
+              ["first-half", "1–15"],
+              ["second-half", "16–fin"],
+              ["custom", "Rango"],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => {
+                setPeriodMode(mode);
+                setSelectedTag(null);
+              }}
+              className={`rounded-lg px-1 py-1.5 text-xs font-medium ${
+                periodMode === mode
+                  ? "bg-white text-stone-900 shadow-sm"
+                  : "text-stone-500"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {periodMode === "custom" && (
+          <div className="mt-3">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs text-stone-500">
+                Desde
+                <input
+                  type="date"
+                  value={customFromDate}
+                  onChange={(event) => {
+                    setCustomFromDate(event.target.value);
+                    setSelectedTag(null);
+                  }}
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800"
+                />
+              </label>
+              <label className="text-xs text-stone-500">
+                Hasta
+                <input
+                  type="date"
+                  value={customToDate}
+                  onChange={(event) => {
+                    setCustomToDate(event.target.value);
+                    setSelectedTag(null);
+                  }}
+                  className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800"
+                />
+              </label>
+            </div>
+            <p className={`mt-2 text-xs ${customRangeError ? "text-red-600" : "text-stone-400"}`}>
+              {customRangeError ??
+                "Puedes usar un rango entre una fecha de pago y la siguiente."}
+            </p>
+          </div>
+        )}
+      </section>
+
+      {selectedRange ? (
+        <MonthAnalytics
+          key={`period-${viewedMonthId}-${periodMode}`}
+          userId={user.uid}
+          monthId={viewedMonthId}
+          range={selectedRange}
+          periodMode={periodMode}
+          selectedTag={selectedTag}
+          onSelectedTagChange={setSelectedTag}
+        />
+      ) : (
+        <p className="mx-5 mt-6 text-sm text-stone-400">
+          Corrige el rango para ver el análisis.
+        </p>
+      )}
+      {periodMode === "month" && !selectedTag && (
         <TrailingBars
           key={`trailing-${viewedMonthId}`}
           userId={user.uid}
@@ -164,15 +262,20 @@ function CategoryTabs({
 function MonthAnalytics({
   userId,
   monthId,
+  range,
+  periodMode,
   selectedTag,
   onSelectedTagChange,
 }: {
   userId: string;
   monthId: string;
+  range: AnalysisDateRange;
+  periodMode: AnalysisPeriodMode;
   selectedTag: string | null;
   onSelectedTagChange: (tag: string | null) => void;
 }) {
   const userProfile = useAuthStore((state) => state.userProfile);
+  const { fromDate, toDate } = range;
   const [month, setMonth] = useState<Month | null>(null);
   const [expenses, setExpenses] = useState<ExpenseTransaction[]>([]);
   const [cardPayments, setCardPayments] = useState<
@@ -189,13 +292,19 @@ function MonthAnalytics({
       setMonth(snap.exists() ? (snap.data() as Month) : null);
       setLoading(false);
     });
-    const unsubTx = getMonthExpenses(userId, monthId, (txs) => {
-      if (!active) return;
-      setExpenses(txs);
-    });
-    const unsubCardPayments = watchCreditCardPaymentsForMonth(
+    const unsubTx = watchExpensesForMonths(
       userId,
-      monthId,
+      getMonthIdsInRange({ fromDate, toDate }),
+      (txs) => {
+        if (!active) return;
+        setExpenses(txs);
+      },
+      (error) => console.error("No se pudieron cargar los egresos:", error),
+    );
+    const unsubCardPayments = watchCreditCardPaymentsForRange(
+      userId,
+      fromDate,
+      toDate,
       (payments) => {
         if (!active) return;
         setCardPayments(payments);
@@ -209,7 +318,7 @@ function MonthAnalytics({
       unsubTx();
       unsubCardPayments();
     };
-  }, [userId, monthId]);
+  }, [userId, monthId, fromDate, toDate]);
 
   if (loading) {
     return <p className="mt-8 text-center text-stone-400">Cargando...</p>;
@@ -220,7 +329,10 @@ function MonthAnalytics({
     );
   }
 
-  const allConsumptionExpenses = expenses.filter(isConsumptionExpense);
+  const periodExpenses = expenses.filter((expense) =>
+    isDateInAnalysisRange(expense.transactionDate, range),
+  );
+  const allConsumptionExpenses = periodExpenses.filter(isConsumptionExpense);
   const availableTags = getAvailableExpenseTags(allConsumptionExpenses);
   const consumptionExpenses = allConsumptionExpenses.filter((expense) =>
     hasExpenseTag(expense.tags, selectedTag),
@@ -282,7 +394,7 @@ function MonthAnalytics({
     },
   ].filter((item) => item.amount > 0);
   const originTotal = originItems.reduce((sum, item) => sum + item.amount, 0);
-  const loanPaymentCents = expenses
+  const loanPaymentCents = periodExpenses
     .filter((expense) => classifyOutflow(expense) === "debt-payment")
     .reduce((sum, expense) => sum + expense.amountCents, 0);
   const cardPaymentCents = cardPayments.reduce(
@@ -297,7 +409,7 @@ function MonthAnalytics({
         (filter !== "ahorro" && budget.category === filter),
     )
     .map((budget) => {
-      const spentCents = getSubcategoryConsumptionCents(expenses, budget);
+      const spentCents = getSubcategoryConsumptionCents(periodExpenses, budget);
       return {
         ...budget,
         status: getSubcategoryBudgetStatus(
@@ -311,7 +423,10 @@ function MonthAnalytics({
     <>
       <section className="mx-5 mt-6">
         <h2 className="text-sm font-medium text-stone-500">
-          Consumo {formatMonthLabel(monthId)}
+          Consumo{" "}
+          {periodMode === "month"
+            ? formatMonthLabel(monthId)
+            : formatAnalysisDateRange(range)}
         </h2>
         <div className="mt-3 flex items-center gap-6">
           {/* Tamaño fijo: no hace falta medir el contenedor. Medirlo hacía que
@@ -402,7 +517,9 @@ function MonthAnalytics({
             Origen del consumo
           </h2>
           {originItems.length === 0 ? (
-            <p className="mt-3 text-sm text-stone-400">Sin consumo este mes</p>
+            <p className="mt-3 text-sm text-stone-400">
+              Sin consumo en este periodo
+            </p>
           ) : (
             <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-4">
               <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
@@ -437,78 +554,83 @@ function MonthAnalytics({
         </section>
       )}
 
-      {!isAhorro && !selectedTag && subcategoryBudgetItems.length > 0 && (
-        <section className="mx-5 mt-6">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-medium text-stone-500">
-              Presupuestos por subcategoría
-            </h2>
-            <Link
-              to="/subcategory-budgets"
-              className="text-xs font-medium text-teal-600"
-            >
-              Configurar
-            </Link>
-          </div>
-          <div className="mt-3 flex flex-col gap-3">
-            {subcategoryBudgetItems.map((item) => (
-              <div
-                key={`${item.category}:${item.subcategory}`}
-                className="rounded-2xl border border-stone-200 bg-white p-4"
+      {!isAhorro &&
+        periodMode === "month" &&
+        !selectedTag &&
+        subcategoryBudgetItems.length > 0 && (
+          <section className="mx-5 mt-6">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-medium text-stone-500">
+                Presupuestos por subcategoría
+              </h2>
+              <Link
+                to="/subcategory-budgets"
+                className="text-xs font-medium text-teal-600"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-stone-800">
-                      {item.subcategory}
-                    </p>
-                    {filter === "all" && (
-                      <p className="text-xs text-stone-400">
-                        {CATEGORY_META[item.category].label}
+                Configurar
+              </Link>
+            </div>
+            <div className="mt-3 flex flex-col gap-3">
+              {subcategoryBudgetItems.map((item) => (
+                <div
+                  key={`${item.category}:${item.subcategory}`}
+                  className="rounded-2xl border border-stone-200 bg-white p-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-stone-800">
+                        {item.subcategory}
                       </p>
-                    )}
+                      {filter === "all" && (
+                        <p className="text-xs text-stone-400">
+                          {CATEGORY_META[item.category].label}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs text-stone-500">
+                      {formatCents(item.status.spentCents)} de{" "}
+                      {formatCents(item.monthlyLimitCents)}
+                    </p>
                   </div>
-                  <p className="text-xs text-stone-500">
-                    {formatCents(item.status.spentCents)} de{" "}
-                    {formatCents(item.monthlyLimitCents)}
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
+                    <div
+                      className={`h-full rounded-full ${
+                        item.status.level === "exceeded"
+                          ? "bg-red-500"
+                          : item.status.level === "near"
+                            ? "bg-amber-500"
+                            : CATEGORY_META[item.category].bar
+                      }`}
+                      style={{
+                        width: `${Math.min(100, item.status.percentage)}%`,
+                      }}
+                    />
+                  </div>
+                  <p
+                    className={`mt-2 text-xs ${
+                      item.status.level === "exceeded"
+                        ? "font-medium text-red-600"
+                        : item.status.level === "near"
+                          ? "font-medium text-amber-700"
+                          : "text-stone-400"
+                    }`}
+                  >
+                    {item.status.level === "exceeded"
+                      ? `Excedido por ${formatCents(-item.status.remainingCents)}`
+                      : item.status.level === "near"
+                        ? `${item.status.percentage}% utilizado`
+                        : `${formatCents(item.status.remainingCents)} disponible`}
                   </p>
                 </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
-                  <div
-                    className={`h-full rounded-full ${
-                      item.status.level === "exceeded"
-                        ? "bg-red-500"
-                        : item.status.level === "near"
-                          ? "bg-amber-500"
-                          : CATEGORY_META[item.category].bar
-                    }`}
-                    style={{ width: `${Math.min(100, item.status.percentage)}%` }}
-                  />
-                </div>
-                <p
-                  className={`mt-2 text-xs ${
-                    item.status.level === "exceeded"
-                      ? "font-medium text-red-600"
-                      : item.status.level === "near"
-                        ? "font-medium text-amber-700"
-                        : "text-stone-400"
-                  }`}
-                >
-                  {item.status.level === "exceeded"
-                    ? `Excedido por ${formatCents(-item.status.remainingCents)}`
-                    : item.status.level === "near"
-                      ? `${item.status.percentage}% utilizado`
-                      : `${formatCents(item.status.remainingCents)} disponible`}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+              ))}
+            </div>
+          </section>
+        )}
 
       {!selectedTag && (
         <section className="mx-5 mt-6">
           <h2 className="text-sm font-medium text-stone-500">
-            Pagos de deudas del mes
+            Pagos de deudas del periodo
           </h2>
           <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-4">
             <div className="grid grid-cols-2 gap-3">
@@ -544,12 +666,12 @@ function MonthAnalytics({
       {isAhorro && (
         <section className="mx-5 mt-6">
           <div className="rounded-2xl border border-stone-200 bg-white p-4">
-            <p className="text-xs text-stone-400">Ahorro usado este mes</p>
+            <p className="text-xs text-stone-400">Ahorro usado en el periodo</p>
             <p className="mt-0.5 text-xl font-semibold text-red-600">
               -{formatCents(ahorroOutCents)}
             </p>
             <p className="mt-1 text-xs text-stone-400">
-              Compras de metas y retiros de fondos hechos este mes. No refleja
+              Compras de metas y retiros de fondos hechos en el periodo. No refleja
               cuánto tiene asignado cada meta hoy.
             </p>
             <Link
@@ -564,13 +686,13 @@ function MonthAnalytics({
 
       <section className="mx-5 mt-8">
         <h2 className="text-sm font-medium text-stone-500">
-          {isAhorro ? "En qué usaste el ahorro este mes" : "Top subcategorías"}
+          {isAhorro ? "En qué usaste el ahorro en el periodo" : "Top subcategorías"}
         </h2>
         {topSubcategories.length === 0 ? (
           <p className="mt-3 text-sm text-stone-400">
             {isAhorro
-              ? "No usaste ahorro este mes"
-              : "Sin gastos este mes"}
+              ? "No usaste ahorro en el periodo"
+              : "Sin gastos en el periodo"}
           </p>
         ) : (
           <div className="mt-3 flex flex-col gap-4">
@@ -594,8 +716,8 @@ function MonthAnalytics({
         {topPaymentMethods.length === 0 ? (
           <p className="mt-3 text-sm text-stone-400">
             {isAhorro
-              ? "No usaste ahorro este mes"
-              : "Sin gastos este mes"}
+              ? "No usaste ahorro en el periodo"
+              : "Sin gastos en el periodo"}
           </p>
         ) : (
           <div className="mt-3 flex flex-col gap-4">
