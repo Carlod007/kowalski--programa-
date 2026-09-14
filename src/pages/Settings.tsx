@@ -25,6 +25,77 @@ import { saveGoalDefinitions } from "@/services/savingsGoalService";
 import BackButton from "@/components/BackButton";
 import DataDangerZone from "@/components/DataDangerZone";
 import { Link } from "react-router-dom";
+import {
+  getResolvedTheme,
+  saveTheme,
+  type AppTheme,
+} from "@/utils/theme";
+
+const THEME_OPTIONS: {
+  value: AppTheme;
+  label: string;
+}[] = [
+  {
+    value: "light",
+    label: "Claro",
+  },
+  {
+    value: "dark-neutral",
+    label: "Oscuro neutro",
+  },
+  {
+    value: "dark-blue",
+    label: "Oscuro azulado",
+  },
+];
+
+function AppearanceSection() {
+  const [theme, setTheme] = useState<AppTheme>(() => getResolvedTheme());
+
+  return (
+    <section className="mx-5 mt-6">
+      <h2 className="text-xs font-medium uppercase tracking-wide text-stone-400">
+        Apariencia
+      </h2>
+      <div
+        role="radiogroup"
+        aria-label="Tema de la aplicación"
+        className="mt-2 overflow-hidden rounded-2xl border border-stone-200 bg-white"
+      >
+        {THEME_OPTIONS.map((option) => {
+          const selected = theme === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => {
+                saveTheme(option.value);
+                setTheme(option.value);
+              }}
+              className="flex w-full items-center justify-between gap-3 border-b border-stone-200 px-4 py-3 text-left last:border-b-0"
+            >
+              <span className="text-sm font-medium text-stone-900">
+                {option.label}
+              </span>
+              <span
+                aria-hidden="true"
+                className={`flex h-5 w-5 items-center justify-center rounded-full border text-xs ${
+                  selected
+                    ? "border-teal-500 bg-teal-500 text-white"
+                    : "border-stone-300 text-transparent"
+                }`}
+              >
+                ✓
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function ProfileSection() {
   const { user, userProfile, setUserProfile } = useAuthStore();
@@ -918,12 +989,14 @@ export default function Settings() {
 
   return (
     <div className="min-h-dvh bg-stone-50 pb-8">
-      <header className="flex items-center gap-3 px-5 pt-8">
+      <header className="px-5 pt-8">
         <BackButton to="/dashboard" />
-        <h1 className="text-xl font-semibold text-stone-900">Configuración</h1>
+        <h1 className="mt-4 text-xl font-semibold text-stone-900">Configuración</h1>
       </header>
 
       <ProfileSection />
+
+      <AppearanceSection />
 
       <section className="mx-5 mt-6">
         <h2 className="text-xs font-medium uppercase tracking-wide text-stone-400">

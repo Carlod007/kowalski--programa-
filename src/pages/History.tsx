@@ -201,19 +201,19 @@ export default function History() {
 
   return (
     <div className="min-h-dvh bg-stone-50 pb-24">
-      <header className="flex items-center justify-between gap-3 px-5 pt-8">
-        <div className="flex items-center gap-3">
-          <BackButton to="/dashboard" fixed />
-          <h1 className="text-3xl font-bold text-stone-900">Historial</h1>
+      <header className="px-5 pt-8">
+        <BackButton to="/dashboard" fixed />
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold text-stone-900">Historial</h1>
+          <button
+            type="button"
+            onClick={() => setShowExport((v) => !v)}
+            aria-label="Exportar historial"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white text-emerald-600"
+          >
+            <Download size={18} />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowExport((v) => !v)}
-          aria-label="Exportar historial"
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white text-emerald-600"
-        >
-          <Download size={18} />
-        </button>
       </header>
 
       {user && showExport && (
@@ -474,46 +474,51 @@ function TransactionRow({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="grid shrink-0 grid-cols-[auto_1.5rem] items-start gap-2">
           <span
-            className={`text-sm font-medium ${
+            className={`whitespace-nowrap pt-0.5 text-right text-sm font-medium ${
               isPositive ? "text-emerald-600" : "text-red-600"
             }`}
           >
             {isPositive ? "+ " : "- "}
             {formatCents(tx.amountCents)}
           </span>
-          {isOpen && !isLoanReceipt && !isCardStatementCharge && (
-            <div className="relative" ref={isMenuOpen ? menuRef : undefined}>
-              <button
-                type="button"
-                onClick={onToggleMenu}
-                className="flex h-6 w-6 items-center justify-center text-stone-400"
-              >
-                <MoreVertical size={16} />
-              </button>
-              {isMenuOpen && (
-                <div className="absolute right-0 top-8 z-10 w-36 rounded-xl border border-stone-200 bg-white py-1 shadow-lg">
-                  {canEdit && (
+          <div
+            className="relative h-6 w-6"
+            ref={isMenuOpen ? menuRef : undefined}
+          >
+            {isOpen && !isLoanReceipt && !isCardStatementCharge && (
+              <>
+                <button
+                  type="button"
+                  onClick={onToggleMenu}
+                  className="flex h-6 w-6 items-center justify-center text-stone-400"
+                >
+                  <MoreVertical size={16} />
+                </button>
+                {isMenuOpen && (
+                  <div className="absolute right-0 top-8 z-10 w-36 rounded-xl border border-stone-200 bg-white py-1 shadow-lg">
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={onEdit}
+                        className="w-full px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50"
+                      >
+                        Editar
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={onEdit}
-                      className="w-full px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50"
+                      onClick={onDelete}
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-stone-50"
                     >
-                      Editar
+                      Borrar
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={onDelete}
-                    className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-stone-50"
-                  >
-                    Borrar
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

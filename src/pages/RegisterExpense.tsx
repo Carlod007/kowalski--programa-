@@ -67,7 +67,7 @@ import type { ExpenseTemplate, SavingsGoal } from "@/types/user";
 import type { ExpenseTransaction } from "@/types/transaction";
 import type { LoanWithId } from "@/types/loan";
 import type { CreditCardWithId } from "@/types/creditCard";
-import { ArrowLeftIcon } from "@/components/BackButton";
+import BackButton from "@/components/BackButton";
 
 type Step = "category" | "detail" | "goal";
 
@@ -237,13 +237,7 @@ export default function RegisterExpense() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <Link
-        to="/dashboard"
-        className="flex items-center gap-1 text-sm text-stone-500"
-      >
-        <ArrowLeftIcon className="h-4 w-4" />
-        Cancelar
-      </Link>
+      <BackButton to="/dashboard" fixed label="Cancelar" />
 
       <h1 className="mt-4 text-2xl font-semibold text-stone-900">
         Nuevo egreso
@@ -355,12 +349,6 @@ export default function RegisterExpense() {
           selected={false}
           onSelect={() => setStep("goal")}
         />
-        <Link
-          to="/expense-templates"
-          className="mt-1 text-center text-sm font-medium text-teal-600"
-        >
-          Administrar gastos frecuentes
-        </Link>
       </div>
     </div>
   );
@@ -703,14 +691,7 @@ function ExpenseDetailStep({
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
       <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1 text-sm text-stone-500"
-        >
-          <ArrowLeftIcon className="h-4 w-4" />
-          Volver a categorías
-        </button>
+        <BackButton onClick={onBack} label="Volver a categorías" />
         {!status.isEmpty && (
           <span
             className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
@@ -1327,14 +1308,7 @@ function GoalPurchaseStep({
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
       <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1 text-sm text-stone-500"
-        >
-          <ArrowLeftIcon className="h-4 w-4" />
-          Volver a categorías
-        </button>
+        <BackButton onClick={onBack} label="Volver a categorías" />
         <span className="flex items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-medium text-teal-700">
           <WalletIcon />
           {formatCents(savingsTotalCents)} ahorrado

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   collection,
   doc,
@@ -21,7 +21,7 @@ import { doc as firestoreDoc, getDoc } from "firebase/firestore";
 import { formatCents } from "@/utils/currency";
 import type { IncomeTransaction, Distribution } from "@/types/transaction";
 import type { Month } from "@/types/month";
-import { ArrowLeftIcon } from "@/components/BackButton";
+import BackButton from "@/components/BackButton";
 
 /** Etiqueta fija de los aportes directos: no ensucia las fuentes del usuario. */
 const DIRECT_SAVINGS_LABEL = "Aporte directo";
@@ -213,24 +213,16 @@ export default function RegisterIncome() {
         >
           Registrar un aporte directo a Ahorro
         </button>
-        <Link to="/dashboard" className="text-sm text-stone-500">
-          Volver al inicio
-        </Link>
+        <BackButton to="/dashboard" fixed label="Volver al inicio" />
       </div>
     );
   }
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <Link
-        to="/dashboard"
-        className="flex items-center gap-1 text-sm text-emerald-600"
-      >
-        <ArrowLeftIcon className="h-4 w-4" />
-        Cancelar
-      </Link>
+      <BackButton to="/dashboard" fixed label="Cancelar" />
 
-      <h1 className="mt-4 text-3xl font-bold text-stone-900">
+      <h1 className="mt-4 text-2xl font-semibold text-stone-900">
         Registrar ingreso
       </h1>
       <p className="mt-1 text-sm text-stone-500">

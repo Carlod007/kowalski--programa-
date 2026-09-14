@@ -1,35 +1,12 @@
 import { useLocation, useNavigate } from "react-router-dom";
 
-function BackIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect
-        x="1.5"
-        y="1.5"
-        width="21"
-        height="21"
-        rx="6"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M14 7l-5 5 5 5"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 export function ArrowLeftIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <path
-        d="M18 7l-5 5 5 5"
+        d="m14 7-5 5 5 5M9 12h10"
         stroke="currentColor"
-        strokeWidth="2.5"
+        strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -48,19 +25,28 @@ export function ArrowLeftIcon({ className = "" }: { className?: string }) {
 export default function BackButton({
   to,
   fixed = false,
+  label = "Volver",
+  onClick,
 }: {
-  to: string;
+  to?: string;
   /**
    * Ignora el historial y va siempre a `to`. Para pantallas alcanzables desde
    * la barra inferior, donde volver a la anterior deja al usuario en un lugar
    * que no esperaba.
    */
   fixed?: boolean;
+  label?: string;
+  onClick?: () => void;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
 
   function handleBack() {
+    if (onClick) {
+      onClick();
+      return;
+    }
+    if (!to) return;
     if (fixed || location.key === "default") {
       navigate(to, { replace: true });
     } else {
@@ -72,10 +58,11 @@ export default function BackButton({
     <button
       type="button"
       onClick={handleBack}
-      aria-label="Volver"
-      className="text-stone-500"
+      aria-label={label}
+      className="inline-flex h-9 shrink-0 items-center gap-1 text-sm font-medium text-stone-500 transition-colors hover:text-stone-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
     >
-      <BackIcon className="h-9 w-9" />
+      <ArrowLeftIcon className="h-4 w-4" />
+      <span>{label}</span>
     </button>
   );
 }

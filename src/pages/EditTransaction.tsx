@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
@@ -14,7 +14,7 @@ import type {
   IncomeTransaction,
   Transaction,
 } from "@/types/transaction";
-import { ArrowLeftIcon } from "@/components/BackButton";
+import BackButton from "@/components/BackButton";
 import { normalizeExpenseTags } from "@/utils/expenseTags";
 
 type Tx = ExpenseTransaction | IncomeTransaction;
@@ -122,9 +122,7 @@ export default function EditTransaction() {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-3 px-6 text-center">
         <p className="text-stone-600">{error}</p>
-        <Link to="/history" className="text-sm font-medium text-teal-700">
-          Volver al historial
-        </Link>
+        <BackButton to="/history" fixed label="Volver al historial" />
       </div>
     );
   }
@@ -135,9 +133,7 @@ export default function EditTransaction() {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-3 px-6 text-center">
         <p className="text-stone-600">Este mes ya está cerrado</p>
-        <Link to="/history" className="text-sm font-medium text-teal-700">
-          Volver al historial
-        </Link>
+        <BackButton to="/history" fixed label="Volver al historial" />
       </div>
     );
   }
@@ -289,13 +285,7 @@ export default function EditTransaction() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <Link
-        to="/history"
-        className="flex items-center gap-1 text-sm text-stone-500"
-      >
-        <ArrowLeftIcon className="h-4 w-4" />
-        Cancelar
-      </Link>
+      <BackButton to="/history" fixed label="Cancelar" />
 
       <h1 className="mt-4 text-2xl font-semibold text-stone-900">
         {isIncome ? "Editar ingreso" : "Editar egreso"}

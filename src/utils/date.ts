@@ -20,6 +20,16 @@ export function formatMonthLabel(monthId: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1).replace(".", "");
 }
 
+export function formatMonthLongLabel(monthId: string): string {
+  const [year, month] = monthId.split("-").map(Number);
+  const date = new Date(year, month - 1, 1);
+  const label = date.toLocaleDateString("es-PE", {
+    month: "long",
+    year: "numeric",
+  });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 export function toDateInputValue(date: Date = new Date()): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");

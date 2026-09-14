@@ -69,9 +69,9 @@ export default function CreditCards() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pb-10 pt-8">
-      <header className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <BackButton to="/dashboard" fixed />
+      <header>
+        <BackButton to="/dashboard" fixed />
+        <div className="mt-4 flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-stone-900">
               Tarjetas de crédito
@@ -80,14 +80,14 @@ export default function CreditCards() {
               Deuda revolvente, separada de tu presupuesto
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowCreate((value) => !value)}
+            className="flex shrink-0 items-center gap-1 rounded-xl bg-sky-600 px-3 py-2 text-sm font-medium text-white"
+          >
+            <Plus size={15} /> {showCreate ? "Cerrar" : "Nueva"}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCreate((value) => !value)}
-          className="flex items-center gap-1 rounded-xl bg-sky-600 px-3 py-2 text-sm font-medium text-white"
-        >
-          <Plus size={15} /> {showCreate ? "Cerrar" : "Nueva"}
-        </button>
       </header>
 
       <section className="mt-5 grid grid-cols-2 gap-3 rounded-2xl border border-sky-200 bg-white p-4">

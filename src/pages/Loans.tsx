@@ -109,21 +109,21 @@ export default function Loans() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pb-10 pt-8">
-      <header className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <BackButton to="/dashboard" />
+      <header>
+        <BackButton to="/dashboard" />
+        <div className="mt-4 flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-stone-900">Préstamos</h1>
             <p className="text-sm text-stone-500">Solo dinero que recibiste</p>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowCreate((value) => !value)}
+            className="shrink-0 rounded-xl bg-stone-900 px-3 py-2 text-sm font-medium text-white"
+          >
+            {showCreate ? "Cerrar" : "+ Nuevo"}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCreate((value) => !value)}
-          className="rounded-xl bg-stone-900 px-3 py-2 text-sm font-medium text-white"
-        >
-          {showCreate ? "Cerrar" : "+ Nuevo"}
-        </button>
       </header>
 
       <section className="mt-5 rounded-3xl bg-violet-600 p-5 text-white">

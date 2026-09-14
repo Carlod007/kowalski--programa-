@@ -23,9 +23,9 @@ export default function Movements() {
 
   return (
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
-      <div className="flex items-center gap-3">
+      <div>
         <BackButton to="/dashboard" />
-        <h1 className="text-xl font-semibold text-stone-900">Movimientos</h1>
+        <h1 className="mt-4 text-xl font-semibold text-stone-900">Movimientos</h1>
       </div>
 
       <div className="mt-5 flex items-center justify-center">

@@ -6,11 +6,6 @@ import {
   PieChart,
   Pie,
   Cell,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  Tooltip,
 } from "recharts";
 import { useAuthStore } from "@/store/authStore";
 import {
@@ -26,7 +21,7 @@ import {
   getMonthId,
   shiftMonthId,
   formatMonthLabel,
-  formatMonthShortLabel,
+  formatMonthLongLabel,
 } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import { CATEGORY_META } from "@/utils/category";
@@ -64,8 +59,6 @@ const CURRENT_MONTH_ID = getMonthId();
 const TOP_LIMIT = 4;
 /** Debe coincidir con las clases h-36 w-36 del contenedor de la torta (9rem). */
 const PIE_SIZE = 144;
-/** Debe coincidir con la clase h-48 del contenedor de las barras (12rem). */
-const BARS_HEIGHT = 192;
 
 export default function ChartsScreen() {
   const user = useAuthStore((s) => s.user);
@@ -101,30 +94,30 @@ export default function ChartsScreen() {
 
   return (
     <div className="min-h-dvh bg-stone-50 pb-24">
-      <header className="flex items-center justify-between px-5 pt-8">
-        <div className="flex items-center gap-3">
-          <BackButton to="/dashboard" />
-          <h1 className="text-xl font-semibold text-stone-900">Análisis</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => shiftViewedMonth(-1)}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200"
-          >
-            ‹
-          </button>
-          <span className="text-sm font-medium text-stone-900">
-            {formatMonthLabel(viewedMonthId)}
-          </span>
-          <button
-            type="button"
-            onClick={() => shiftViewedMonth(1)}
-            disabled={!canGoForward}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 disabled:opacity-30"
-          >
-            ›
-          </button>
+      <header className="px-5 pt-8">
+        <BackButton to="/dashboard" />
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold text-stone-900">Análisis</h1>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => shiftViewedMonth(-1)}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200"
+            >
+              ‹
+            </button>
+            <span className="text-sm font-medium text-stone-900">
+              {formatMonthLabel(viewedMonthId)}
+            </span>
+            <button
+              type="button"
+              onClick={() => shiftViewedMonth(1)}
+              disabled={!canGoForward}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 disabled:opacity-30"
+            >
+              ›
+            </button>
+          </div>
         </div>
       </header>
 
@@ -753,48 +746,75 @@ function TrailingBars({
 
   if (months === null || months.length === 0) return null;
 
-  const chartData = months.map((m) => ({
-    monthId: m.monthId,
-    label: formatMonthShortLabel(m.monthId),
-    Ingresos: m.totalIncomeCents / 100,
-    Consumo: m.expenseCents / 100,
-  }));
-
   return (
     <section className="mx-5 mt-8">
       <h2 className="text-sm font-medium text-stone-500">
-        Ingresos vs consumo
+        Consumo sobre ingresos
       </h2>
-      {/* El ancho sigue siendo responsivo; la altura va en píxeles porque ya
-          era fija. Con una medida positiva desde el primer render, recharts
-          deja de avisar por consola mientras React monta dos veces en
-          desarrollo (StrictMode). */}
-      <div className="mt-3 w-full">
-        <ResponsiveContainer width="100%" height={BARS_HEIGHT}>
-          <BarChart data={chartData}>
-            <XAxis
-              dataKey="label"
-              axisLine={false}
-              tickLine={false}
-              fontSize={12}
-            />
-            <Tooltip
-              formatter={(value) =>
-                formatCents(Math.round(Number(value) * 100))
-              }
-            />
-            <Bar dataKey="Ingresos" fill="#10b981" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Consumo" fill="#ef4444" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="mt-2 flex items-center justify-center gap-4 text-xs">
-        <span className="flex items-center gap-1.5 text-stone-600">
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Ingresos
-        </span>
-        <span className="flex items-center gap-1.5 text-stone-600">
-          <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Consumo
-        </span>
+      <div className="mt-3 overflow-hidden rounded-2xl border border-stone-200 bg-white">
+        {months.map((month) => {
+          const percentage =
+            month.totalIncomeCents > 0
+              ? Math.round(
+                  (month.expenseCents / month.totalIncomeCents) * 100,
+                )
+              : null;
+          const hasConsumptionWithoutIncome =
+            month.totalIncomeCents === 0 && month.expenseCents > 0;
+          const barWidth = hasConsumptionWithoutIncome
+            ? 100
+            : Math.min(100, Math.max(0, percentage ?? 0));
+          return (
+            <div
+              key={month.monthId}
+              className="border-b border-stone-100 px-4 py-3 last:border-b-0"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-medium text-stone-900">
+                  {formatMonthLongLabel(month.monthId)}
+                </p>
+                <p
+                  className={`text-xs font-medium ${
+                    hasConsumptionWithoutIncome || (percentage ?? 0) >= 100
+                      ? "text-red-600"
+                      : (percentage ?? 0) >= 80
+                        ? "text-amber-700"
+                        : "text-stone-500"
+                  }`}
+                >
+                  {percentage === null
+                    ? "Sin ingresos registrados"
+                    : `${percentage}% consumido`}
+                </p>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-3 text-xs">
+                <p className="text-stone-500">
+                  Ingresos{" "}
+                  <span className="font-medium text-emerald-600">
+                    {formatCents(month.totalIncomeCents)}
+                  </span>
+                </p>
+                <p className="text-right text-stone-500">
+                  Consumo{" "}
+                  <span className="font-medium text-red-600">
+                    {formatCents(month.expenseCents)}
+                  </span>
+                </p>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
+                <div className="flex h-full w-full">
+                  <span
+                    className="h-full bg-red-500"
+                    style={{ width: `${barWidth}%` }}
+                  />
+                  {month.totalIncomeCents > 0 && barWidth < 100 && (
+                    <span className="h-full flex-1 bg-emerald-500" />
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

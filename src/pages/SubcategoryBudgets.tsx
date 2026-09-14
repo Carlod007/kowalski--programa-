@@ -67,9 +67,9 @@ export default function SubcategoryBudgets() {
 
   return (
     <div className="min-h-dvh bg-stone-50 pb-10">
-      <header className="flex items-center gap-3 px-5 pt-8">
+      <header className="px-5 pt-8">
         <BackButton to="/settings" />
-        <div>
+        <div className="mt-4">
           <h1 className="text-xl font-semibold text-stone-900">
             Presupuestos por subcategoría
           </h1>

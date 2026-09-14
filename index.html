@@ -6,6 +6,32 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#10b981" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        try {
+          const savedTheme = localStorage.getItem("kowalski-theme");
+          const normalizedTheme =
+            savedTheme === "dark" ? "dark-neutral" : savedTheme;
+          const isDark =
+            normalizedTheme === "dark-neutral" ||
+            normalizedTheme === "dark-blue";
+          document.documentElement.classList.toggle("dark", isDark);
+          document.documentElement.classList.toggle(
+            "dark-neutral",
+            normalizedTheme === "dark-neutral",
+          );
+          document.documentElement.classList.toggle(
+            "dark-blue",
+            normalizedTheme === "dark-blue",
+          );
+          document.documentElement.style.colorScheme = isDark
+            ? "dark"
+            : "light";
+        } catch {
+          // La inicialización completa se repite al cargar la aplicación.
+        }
+      })();
+    </script>
     <title>kowalski</title>
   </head>
   <body>
