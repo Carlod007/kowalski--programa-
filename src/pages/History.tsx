@@ -38,6 +38,10 @@ import type {
   Transaction,
 } from "@/types/transaction";
 import BackButton from "@/components/BackButton";
+import {
+  getAvailableExpenseTags,
+  hasExpenseTag,
+} from "@/utils/expenseTags";
 
 type Filter = "all" | "income" | "loan" | "credit-card" | Category;
 
@@ -79,6 +83,7 @@ export default function History() {
   const [transactions, setTransactions] = useState<TxWithId[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -144,19 +149,25 @@ export default function History() {
     }
   }, [openMenuId]);
 
+  const availableTags = getAvailableExpenseTags(
+    transactions.filter((tx) => tx.type === "expense"),
+  );
   const filtered = transactions.filter((tx) => {
-    if (filter === "all") return true;
-    if (filter === "income") return tx.type === "income";
-    if (filter === "loan") {
-      return (
+    let matchesMainFilter: boolean;
+    if (filter === "all") matchesMainFilter = true;
+    else if (filter === "income") matchesMainFilter = tx.type === "income";
+    else if (filter === "loan") {
+      matchesMainFilter =
         tx.type === "loan" ||
-        (tx.type === "expense" && !!(tx.loanId || tx.fundedByLoanId))
-      );
+        (tx.type === "expense" && !!(tx.loanId || tx.fundedByLoanId));
+    } else if (filter === "credit-card") {
+      matchesMainFilter = tx.type === "expense" && !!tx.creditCardId;
+    } else {
+      matchesMainFilter = tx.type === "expense" && tx.category === filter;
     }
-    if (filter === "credit-card") {
-      return tx.type === "expense" && !!tx.creditCardId;
-    }
-    return tx.type === "expense" && tx.category === filter;
+    if (!matchesMainFilter) return false;
+    if (!selectedTag) return true;
+    return tx.type === "expense" && hasExpenseTag(tx.tags, selectedTag);
   });
 
   const grouped = groupByDate(filtered);
@@ -272,6 +283,37 @@ export default function History() {
           </button>
         ))}
       </div>
+
+      {availableTags.length > 0 && (
+        <div className="mt-3 flex gap-2 overflow-x-auto px-5">
+          <button
+            type="button"
+            onClick={() => setSelectedTag(null)}
+            className={`whitespace-nowrap rounded-full px-3 py-1 text-xs ${
+              selectedTag === null
+                ? "bg-stone-800 text-white"
+                : "bg-stone-100 text-stone-600"
+            }`}
+          >
+            Todas las etiquetas
+          </button>
+          {availableTags.map((tag) => (
+            <button
+              key={tag.toLocaleLowerCase("es")}
+              type="button"
+              onClick={() => setSelectedTag(tag)}
+              className={`whitespace-nowrap rounded-full px-3 py-1 text-xs ${
+                selectedTag?.toLocaleLowerCase("es") ===
+                tag.toLocaleLowerCase("es")
+                  ? "bg-teal-600 text-white"
+                  : "bg-teal-50 text-teal-700"
+              }`}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
 
       <main className="mt-4 flex flex-col gap-3 px-5">
         {grouped.length === 0 ? (
@@ -417,6 +459,18 @@ function TransactionRow({
           {detail && <p className="mt-0.5 text-xs text-stone-400">{detail}</p>}
           {tx.type === "expense" && (
             <p className="mt-0.5 text-xs text-stone-400">{tx.paymentMethod}</p>
+          )}
+          {tx.type === "expense" && (tx.tags?.length ?? 0) > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {tx.tags!.map((tag) => (
+                <span
+                  key={tag.toLocaleLowerCase("es")}
+                  className="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] text-teal-700"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
           )}
         </div>
 

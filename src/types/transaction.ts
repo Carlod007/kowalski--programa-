@@ -53,6 +53,8 @@ export type ExpenseTransaction = TransactionBase & {
   /** Los intereses se corrigen desde su estado de cuenta, no aisladamente. */
   creditCardStatementId?: string;
   creditCardChargeKind?: "interest-fees";
+  /** Contexto opcional para búsquedas; no altera la clasificación contable. */
+  tags?: string[];
 };
 
 export type LoanReceiptTransaction = TransactionBase & {

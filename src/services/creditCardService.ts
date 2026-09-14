@@ -164,6 +164,7 @@ export async function registerCreditCardPurchase(
     amountCents: number;
     date: string;
     description?: string;
+    tags?: string[];
   },
 ): Promise<void> {
   if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
@@ -201,6 +202,7 @@ export async function registerCreditCardPurchase(
       creditCardId: input.cardId,
       creditCardName: cardName,
       ...(input.description ? { description: input.description } : {}),
+      ...(input.tags?.length ? { tags: input.tags } : {}),
     };
 
     transaction.set(txRef, expense);

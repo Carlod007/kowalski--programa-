@@ -307,6 +307,7 @@ export async function updateExpense(
     subcategory: string;
     paymentMethod: string;
     description?: string;
+    tags?: string[];
   },
 ): Promise<void> {
   const userRef = doc(db, "users", userId);
@@ -398,6 +399,7 @@ export async function updateExpense(
       description: newValues.description
         ? newValues.description
         : deleteField(),
+      tags: newValues.tags?.length ? newValues.tags : deleteField(),
     });
   });
 }

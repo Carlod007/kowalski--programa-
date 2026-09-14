@@ -61,6 +61,7 @@ import {
   type ExpenseSuggestion,
 } from "@/utils/expenseSuggestions";
 import { getRecentExpenseHistory } from "@/services/expenseSuggestionService";
+import { normalizeExpenseTags } from "@/utils/expenseTags";
 import type { Month, MonthCaps } from "@/types/month";
 import type { ExpenseTemplate, SavingsGoal } from "@/types/user";
 import type { ExpenseTransaction } from "@/types/transaction";
@@ -79,6 +80,7 @@ const detailSchema = z.object({
       message: "El monto debe ser mayor a 0",
     }),
   description: z.string().optional(),
+  tags: z.string().max(200, "Usa etiquetas más cortas").optional(),
 });
 
 type DetailFormValues = z.infer<typeof detailSchema>;
@@ -433,6 +435,7 @@ function ExpenseDetailStep({
       description:
         initialTemplate?.description ??
         (initialSuggestion ? suggestionDescription.trim() : ""),
+      tags: "",
     },
   });
 
@@ -558,6 +561,7 @@ function ExpenseDetailStep({
     const amountCents = Math.round(parseFloat(values.amount) * 100);
     const monthId = getMonthId();
     const description = values.description?.trim();
+    const tags = normalizeExpenseTags(values.tags ?? "");
 
     if (selectedLoan) {
       if (!paymentMethod) {
@@ -574,6 +578,7 @@ function ExpenseDetailStep({
           amountCents,
           date: values.date,
           description,
+          tags,
         });
         navigate("/dashboard");
       } catch (err) {
@@ -597,6 +602,7 @@ function ExpenseDetailStep({
           amountCents,
           date: values.date,
           description,
+          tags,
         });
         navigate("/dashboard");
       } catch (err) {
@@ -632,6 +638,7 @@ function ExpenseDetailStep({
       serverDate: serverTimestamp(),
       localDate: new Date().toISOString(),
       ...(description ? { description } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
     };
     batch.set(txRef, tx);
 
@@ -978,6 +985,26 @@ function ExpenseDetailStep({
             {...register("description")}
             className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
           />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label htmlFor="tags" className="text-sm font-medium text-stone-700">
+            Etiquetas <span className="text-stone-400">(opcional)</span>
+          </label>
+          <input
+            id="tags"
+            type="text"
+            placeholder="Ej. trabajo, viaje"
+            {...register("tags")}
+            className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
+          />
+          <p className="text-xs text-stone-400">
+            Hasta 5, separadas por comas. Sirven para filtrar Historial y
+            Análisis.
+          </p>
+          {errors.tags && (
+            <p className="text-xs text-red-600">{errors.tags.message}</p>
+          )}
         </div>
 
         {pickError && <p className="text-sm text-red-600">{pickError}</p>}

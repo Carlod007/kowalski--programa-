@@ -15,6 +15,7 @@ import type {
   Transaction,
 } from "@/types/transaction";
 import { ArrowLeftIcon } from "@/components/BackButton";
+import { normalizeExpenseTags } from "@/utils/expenseTags";
 
 type Tx = ExpenseTransaction | IncomeTransaction;
 
@@ -38,6 +39,7 @@ export default function EditTransaction() {
   const [subcategory, setSubcategory] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [description, setDescription] = useState("");
+  const [tagsText, setTagsText] = useState("");
   const [showAmountConfirm, setShowAmountConfirm] = useState(false);
 
   useEffect(() => {
@@ -89,6 +91,7 @@ export default function EditTransaction() {
         } else {
           setSubcategory(transaction.subcategory);
           setPaymentMethod(transaction.paymentMethod);
+          setTagsText((transaction.tags ?? []).join(", "));
         }
 
         if (transaction.description) {
@@ -269,6 +272,7 @@ export default function EditTransaction() {
           subcategory,
           paymentMethod,
           description: description.trim() || undefined,
+          tags: normalizeExpenseTags(tagsText),
         });
       }
       navigate("/history");
@@ -400,6 +404,22 @@ export default function EditTransaction() {
             className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
           />
         </div>
+
+        {!isIncome && (
+          <div className="flex flex-col gap-1">
+            <label htmlFor="tags" className="text-sm font-medium text-stone-700">
+              Etiquetas <span className="text-stone-400">(opcional)</span>
+            </label>
+            <input
+              id="tags"
+              type="text"
+              value={tagsText}
+              onChange={(event) => setTagsText(event.target.value)}
+              placeholder="Ej. trabajo, viaje"
+              className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
+            />
+          </div>
+        )}
 
         {preview && (
           <div className="rounded-xl bg-sky-50 p-3">

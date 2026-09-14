@@ -46,6 +46,10 @@ import {
   getSubcategoryBudgetStatus,
   getSubcategoryConsumptionCents,
 } from "@/utils/subcategoryBudgets";
+import {
+  getAvailableExpenseTags,
+  hasExpenseTag,
+} from "@/utils/expenseTags";
 
 const CURRENT_MONTH_ID = getMonthId();
 const TOP_LIMIT = 4;
@@ -57,6 +61,7 @@ const BARS_HEIGHT = 192;
 export default function ChartsScreen() {
   const user = useAuthStore((s) => s.user);
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   if (!user) return null;
 
@@ -72,7 +77,10 @@ export default function ChartsScreen() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
+            onClick={() => {
+              setSelectedTag(null);
+              setViewedMonthId((id) => shiftMonthId(id, -1));
+            }}
             className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200"
           >
             ‹
@@ -82,7 +90,10 @@ export default function ChartsScreen() {
           </span>
           <button
             type="button"
-            onClick={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
+            onClick={() => {
+              setSelectedTag(null);
+              setViewedMonthId((id) => shiftMonthId(id, 1));
+            }}
             disabled={!canGoForward}
             className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 disabled:opacity-30"
           >
@@ -95,12 +106,16 @@ export default function ChartsScreen() {
         key={`month-${viewedMonthId}`}
         userId={user.uid}
         monthId={viewedMonthId}
+        selectedTag={selectedTag}
+        onSelectedTagChange={setSelectedTag}
       />
-      <TrailingBars
-        key={`trailing-${viewedMonthId}`}
-        userId={user.uid}
-        endMonthId={viewedMonthId}
-      />
+      {!selectedTag && (
+        <TrailingBars
+          key={`trailing-${viewedMonthId}`}
+          userId={user.uid}
+          endMonthId={viewedMonthId}
+        />
+      )}
 
       <BottomNav />
     </div>
@@ -149,9 +164,13 @@ function CategoryTabs({
 function MonthAnalytics({
   userId,
   monthId,
+  selectedTag,
+  onSelectedTagChange,
 }: {
   userId: string;
   monthId: string;
+  selectedTag: string | null;
+  onSelectedTagChange: (tag: string | null) => void;
 }) {
   const userProfile = useAuthStore((state) => state.userProfile);
   const [month, setMonth] = useState<Month | null>(null);
@@ -201,7 +220,11 @@ function MonthAnalytics({
     );
   }
 
-  const consumptionExpenses = expenses.filter(isConsumptionExpense);
+  const allConsumptionExpenses = expenses.filter(isConsumptionExpense);
+  const availableTags = getAvailableExpenseTags(allConsumptionExpenses);
+  const consumptionExpenses = allConsumptionExpenses.filter((expense) =>
+    hasExpenseTag(expense.tags, selectedTag),
+  );
   const consumptionByCategory = getConsumptionByCategory(consumptionExpenses);
   const breakdown = formatCategoryBreakdown(consumptionByCategory);
   const totalConsumption =
@@ -342,6 +365,37 @@ function MonthAnalytics({
         <CategoryTabs value={filter} onChange={setFilter} />
       </div>
 
+      {availableTags.length > 0 && (
+        <div className="mx-5 mt-3 flex gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => onSelectedTagChange(null)}
+            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium ${
+              selectedTag === null
+                ? "border-stone-800 bg-stone-800 text-white"
+                : "border-stone-200 bg-white text-stone-500"
+            }`}
+          >
+            Todas las etiquetas
+          </button>
+          {availableTags.map((tag) => (
+            <button
+              key={tag.toLocaleLowerCase("es")}
+              type="button"
+              onClick={() => onSelectedTagChange(tag)}
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium ${
+                selectedTag?.toLocaleLowerCase("es") ===
+                tag.toLocaleLowerCase("es")
+                  ? "border-teal-600 bg-teal-50 text-teal-700"
+                  : "border-stone-200 bg-white text-stone-500"
+              }`}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
+
       {!isAhorro && (
         <section className="mx-5 mt-6">
           <h2 className="text-sm font-medium text-stone-500">
@@ -383,7 +437,7 @@ function MonthAnalytics({
         </section>
       )}
 
-      {!isAhorro && subcategoryBudgetItems.length > 0 && (
+      {!isAhorro && !selectedTag && subcategoryBudgetItems.length > 0 && (
         <section className="mx-5 mt-6">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-stone-500">
@@ -451,36 +505,38 @@ function MonthAnalytics({
         </section>
       )}
 
-      <section className="mx-5 mt-6">
-        <h2 className="text-sm font-medium text-stone-500">
-          Pagos de deudas del mes
-        </h2>
-        <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-xs text-stone-400">Préstamos</p>
-              <p className="mt-0.5 font-medium text-stone-900">
-                {formatCents(loanPaymentCents)}
-              </p>
+      {!selectedTag && (
+        <section className="mx-5 mt-6">
+          <h2 className="text-sm font-medium text-stone-500">
+            Pagos de deudas del mes
+          </h2>
+          <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs text-stone-400">Préstamos</p>
+                <p className="mt-0.5 font-medium text-stone-900">
+                  {formatCents(loanPaymentCents)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-stone-400">Tarjetas</p>
+                <p className="mt-0.5 font-medium text-stone-900">
+                  {formatCents(cardPaymentCents)}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-stone-400">Tarjetas</p>
-              <p className="mt-0.5 font-medium text-stone-900">
-                {formatCents(cardPaymentCents)}
-              </p>
+            <div className="mt-3 flex items-center justify-between border-t border-stone-100 pt-3">
+              <span className="text-xs text-stone-500">Total pagado</span>
+              <span className="font-semibold text-stone-900">
+                {formatCents(debtPaymentCents)}
+              </span>
             </div>
+            <p className="mt-2 text-xs text-stone-400">
+              Reduce la deuda, pero no se vuelve a sumar como consumo.
+            </p>
           </div>
-          <div className="mt-3 flex items-center justify-between border-t border-stone-100 pt-3">
-            <span className="text-xs text-stone-500">Total pagado</span>
-            <span className="font-semibold text-stone-900">
-              {formatCents(debtPaymentCents)}
-            </span>
-          </div>
-          <p className="mt-2 text-xs text-stone-400">
-            Reduce la deuda, pero no se vuelve a sumar como consumo.
-          </p>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Acá solo va lo que esta pantalla explica mejor que ninguna otra: en
           qué se usó el ahorro. Cuánto entró se muestra en Ver detalle, que

@@ -103,6 +103,7 @@ export async function buildHistoryCsv(
             CATEGORY_META[expense.category].label,
             csvEscape(expense.subcategory),
             csvEscape(expense.description ?? ""),
+            csvEscape((expense.tags ?? []).join(" | ")),
             csvEscape(expense.paymentMethod),
             csvEscape(loanRelation),
             centsToPlain(expense.amountCents),
@@ -122,7 +123,7 @@ export async function buildHistoryCsv(
     ...loanRows,
     "",
     "EGRESOS",
-    "Mes,Fecha,Categoría,Subcategoría,Descripción,Método de pago,Relación con préstamo,Monto",
+    "Mes,Fecha,Categoría,Subcategoría,Descripción,Etiquetas,Método de pago,Relación con préstamo,Monto",
     ...expenseRows,
   ];
 

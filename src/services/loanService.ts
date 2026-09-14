@@ -313,6 +313,7 @@ export async function registerLoanFundedExpense(
     amountCents: number;
     date: string;
     description?: string;
+    tags?: string[];
   },
 ): Promise<void> {
   const loanRef = doc(db, "users", userId, "loans", input.loanId);
@@ -352,6 +353,7 @@ export async function registerLoanFundedExpense(
       fundedByLoanId: input.loanId,
       fundedByLoanName: loanName,
       ...(input.description ? { description: input.description } : {}),
+      ...(input.tags?.length ? { tags: input.tags } : {}),
     };
 
     transaction.set(txRef, expense);
