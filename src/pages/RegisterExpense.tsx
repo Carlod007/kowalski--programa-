@@ -55,6 +55,12 @@ import {
   getSubcategoryBudgetStatus,
   getSubcategoryConsumptionCents,
 } from "@/utils/subcategoryBudgets";
+import {
+  normalizeExpenseText,
+  suggestExpenseClassification,
+  type ExpenseSuggestion,
+} from "@/utils/expenseSuggestions";
+import { getRecentExpenseHistory } from "@/services/expenseSuggestionService";
 import type { Month, MonthCaps } from "@/types/month";
 import type { ExpenseTemplate, SavingsGoal } from "@/types/user";
 import type { ExpenseTransaction } from "@/types/transaction";
@@ -112,6 +118,15 @@ export default function RegisterExpense() {
   );
   const [selectedTemplate, setSelectedTemplate] =
     useState<ExpenseTemplate | null>(initialTemplate);
+  const [suggestionPrefill, setSuggestionPrefill] =
+    useState<ExpenseSuggestion | null>(null);
+  const [suggestionText, setSuggestionText] = useState("");
+  const [suggestionHistory, setSuggestionHistory] = useState<
+    ExpenseTransaction[]
+  >([]);
+  const [currentSuggestionExpenses, setCurrentSuggestionExpenses] = useState<
+    ExpenseTransaction[]
+  >([]);
   const usableTemplates = (userProfile?.expenseTemplates ?? []).filter(
     (template) =>
       isExpenseTemplateUsable(
@@ -120,6 +135,18 @@ export default function RegisterExpense() {
         userProfile?.paymentMethods ?? [],
       ),
   );
+  const suggestion = suggestExpenseClassification(
+    suggestionText,
+    usableTemplates,
+    [...suggestionHistory, ...currentSuggestionExpenses],
+  );
+  const usableSuggestion =
+    suggestion &&
+    userProfile?.subcategories[suggestion.category]?.includes(
+      suggestion.subcategory,
+    )
+      ? suggestion
+      : null;
 
   useEffect(() => {
     if (!user) return;
@@ -144,6 +171,33 @@ export default function RegisterExpense() {
     return () => unsubscribe();
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    getRecentExpenseHistory(user.uid)
+      .then((expenses) => {
+        if (active) setSuggestionHistory(expenses);
+      })
+      .catch((error) => {
+        console.error("No se pudo cargar el historial para sugerencias:", error);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    return getMonthExpenses(
+      user.uid,
+      getMonthId(),
+      setCurrentSuggestionExpenses,
+      (error) => {
+        console.error("No se pudo actualizar el historial de sugerencias:", error);
+      },
+    );
+  }, [user]);
+
   if (loading) {
     return (
       <div className="flex h-dvh items-center justify-center text-stone-400">
@@ -159,8 +213,11 @@ export default function RegisterExpense() {
         capCents={month?.capsCents[category] ?? 0}
         spentCents={month?.spentCents[category] ?? 0}
         initialTemplate={selectedTemplate}
+        initialSuggestion={suggestionPrefill}
+        suggestionDescription={suggestionText}
         onBack={() => {
           setSelectedTemplate(null);
+          setSuggestionPrefill(null);
           setStep("category");
         }}
       />
@@ -194,6 +251,50 @@ export default function RegisterExpense() {
       </p>
 
       <div className="mt-6 flex flex-col gap-3">
+        <section className="mb-2 rounded-2xl border border-stone-200 bg-white p-4">
+          <label
+            htmlFor="expense-suggestion"
+            className="text-sm font-medium text-stone-800"
+          >
+            ¿Qué compraste o pagaste?
+          </label>
+          <p className="mt-1 text-xs text-stone-400">
+            La sugerencia usa solo tus plantillas y gastos anteriores.
+          </p>
+          <input
+            id="expense-suggestion"
+            value={suggestionText}
+            onChange={(event) => setSuggestionText(event.target.value)}
+            placeholder="Ej. Almuerzo de oficina"
+            className="mt-3 w-full rounded-xl border border-stone-300 px-3 py-2 text-sm outline-none"
+          />
+          {usableSuggestion && (
+            <div className="mt-3 rounded-xl bg-stone-50 p-3">
+              <p className="text-xs text-stone-500">
+                Sugerencia: {CATEGORY_META[usableSuggestion.category].label} ·{" "}
+                {usableSuggestion.subcategory}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTemplate(null);
+                  setSuggestionPrefill(usableSuggestion);
+                  setCategory(usableSuggestion.category);
+                  setStep("detail");
+                }}
+                className="mt-2 text-sm font-medium text-teal-600"
+              >
+                Usar sugerencia
+              </button>
+            </div>
+          )}
+          {!usableSuggestion &&
+            normalizeExpenseText(suggestionText).length >= 3 && (
+              <p className="mt-2 text-xs text-stone-400">
+                Sin una coincidencia clara. Elige la categoría manualmente.
+              </p>
+            )}
+        </section>
         {usableTemplates.length > 0 && (
           <section className="mb-2 rounded-2xl border border-stone-200 bg-white p-4">
             <div className="flex items-center justify-between">
@@ -213,6 +314,7 @@ export default function RegisterExpense() {
                   key={template.id}
                   type="button"
                   onClick={() => {
+                    setSuggestionPrefill(null);
                     setSelectedTemplate(template);
                     setCategory(template.category);
                     setStep("detail");
@@ -238,6 +340,7 @@ export default function RegisterExpense() {
             onSelect={(selectedCat) => {
               if (selectedCat === "necesidad" || selectedCat === "ocio") {
                 setSelectedTemplate(null);
+                setSuggestionPrefill(null);
                 setCategory(selectedCat);
                 setStep("detail");
               }
@@ -266,21 +369,27 @@ function ExpenseDetailStep({
   capCents,
   spentCents,
   initialTemplate,
+  initialSuggestion,
+  suggestionDescription,
   onBack,
 }: {
   category: keyof MonthCaps;
   capCents: number;
   spentCents: number;
   initialTemplate: ExpenseTemplate | null;
+  initialSuggestion: ExpenseSuggestion | null;
+  suggestionDescription: string;
   onBack: () => void;
 }) {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
+  const initialSubcategory =
+    initialTemplate?.subcategory ?? initialSuggestion?.subcategory ?? null;
   const [subcategory, setSubcategory] = useState<string | null>(() =>
-    initialTemplate &&
-    userProfile?.subcategories[category]?.includes(initialTemplate.subcategory)
-      ? initialTemplate.subcategory
+    initialSubcategory &&
+    userProfile?.subcategories[category]?.includes(initialSubcategory)
+      ? initialSubcategory
       : null,
   );
   const [paymentMethod, setPaymentMethod] = useState<string | null>(() =>
@@ -321,7 +430,9 @@ function ExpenseDetailStep({
       amount: initialTemplate?.amountCents
         ? (initialTemplate.amountCents / 100).toFixed(2)
         : "",
-      description: initialTemplate?.description ?? "",
+      description:
+        initialTemplate?.description ??
+        (initialSuggestion ? suggestionDescription.trim() : ""),
     },
   });
 
@@ -617,9 +728,10 @@ function ExpenseDetailStep({
         </div>
       </div>
 
-      {initialTemplate && (
+      {(initialTemplate || initialSuggestion) && (
         <div className="mt-4 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-800">
-          Plantilla aplicada. Revisa los datos y confirma el egreso.
+          {initialTemplate ? "Plantilla" : "Sugerencia"} aplicada. Revisa los
+          datos y confirma el egreso.
         </div>
       )}
 
