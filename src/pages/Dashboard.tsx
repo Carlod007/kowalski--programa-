@@ -161,33 +161,90 @@ function MonthSummary({
     useState(true);
   const [showMovementsModal, setShowMovementsModal] = useState(false);
   const [expenses, setExpenses] = useState<ExpenseTransaction[] | null>(null);
+  const [outflowSyncing, setOutflowSyncing] = useState(false);
 
   useEffect(() => {
+    let latestMonth: Month | null | undefined;
+    let latestExpenses: ExpenseTransaction[] | undefined;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+
+    function totalsMatch() {
+      if (!latestMonth || !latestExpenses) return true;
+      const totals = { necesidad: 0, ocio: 0 };
+      for (const expense of latestExpenses) {
+        if (expense.category === "necesidad" || expense.category === "ocio") {
+          totals[expense.category] += expense.amountCents;
+        }
+      }
+      return (
+        totals.necesidad === latestMonth.spentCents.necesidad &&
+        totals.ocio === latestMonth.spentCents.ocio
+      );
+    }
+
+    function publish(force = false) {
+      if (
+        disposed ||
+        latestMonth === undefined ||
+        latestExpenses === undefined
+      ) {
+        return;
+      }
+      if (!force && !totalsMatch()) {
+        setOutflowSyncing(true);
+        if (!fallbackTimer) {
+          fallbackTimer = setTimeout(() => {
+            fallbackTimer = null;
+            publish(true);
+          }, 3_000);
+        }
+        return;
+      }
+      if (fallbackTimer) {
+        clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+      setMonth(latestMonth);
+      setExpenses(latestExpenses);
+      setOutflowSyncing(false);
+      setLoading(false);
+    }
+
     const monthRef = doc(db, "users", userId, "months", monthId);
-    const unsubscribe = onSnapshot(
+    const monthUnsubscribe = onSnapshot(
       monthRef,
       (snap) => {
-        setMonth(snap.exists() ? (snap.data() as Month) : null);
-        setLoading(false);
+        latestMonth = snap.exists() ? (snap.data() as Month) : null;
+        publish();
       },
       (err) => {
         console.error("onSnapshot mes falló:", err);
-        setLoading(false);
+        latestMonth = null;
+        latestExpenses = [];
+        publish(true);
       },
     );
-    return () => unsubscribe();
-  }, [userId, monthId]);
-
-  useEffect(() => {
-    return getMonthExpenses(
+    const expensesUnsubscribe = getMonthExpenses(
       userId,
       monthId,
-      setExpenses,
+      (nextExpenses) => {
+        latestExpenses = nextExpenses;
+        publish();
+      },
       (err) => {
         console.error("No se pudo cargar el origen de los gastos:", err);
-        setExpenses([]);
+        latestExpenses = [];
+        publish(true);
       },
     );
+
+    return () => {
+      disposed = true;
+      monthUnsubscribe();
+      expensesUnsubscribe();
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+    };
   }, [userId, monthId]);
 
   useEffect(() => {
@@ -279,6 +336,7 @@ function MonthSummary({
                 initialSplit={initialSplit}
                 initialSplitDeterminable={initialSplitDeterminable}
                 expenses={expenses}
+                outflowSyncing={outflowSyncing}
               />
             ))}
             <SavingsRow
@@ -329,6 +387,7 @@ function CategoryRow({
   initialSplit,
   initialSplitDeterminable,
   expenses,
+  outflowSyncing,
 }: {
   category: keyof MonthCaps;
   month: Month;
@@ -340,6 +399,7 @@ function CategoryRow({
   initialSplit: Distribution | null;
   initialSplitDeterminable: boolean;
   expenses: ExpenseTransaction[] | null;
+  outflowSyncing: boolean;
 }) {
   const meta = CATEGORY_META[category];
   const cap = month.capsCents[category];
@@ -516,6 +576,16 @@ function CategoryRow({
               </div>
             )}
           </div>
+
+          {outflowSyncing && (
+            <p
+              role="status"
+              aria-live="polite"
+              className="mt-3 px-1 text-xs text-stone-400"
+            >
+              Actualizando desglose…
+            </p>
+          )}
 
           {sourceItems.length > 0 && (
             <div className="mt-3 px-1">

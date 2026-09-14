@@ -265,6 +265,11 @@ function ExpenseDetailStep({
     (s) => !essentialNeedNames.has(s),
   );
 
+  function clearFormFeedback() {
+    setPickError(null);
+    setSubmitError(null);
+  }
+
   function renderSubcategoryChips(items: string[]) {
     return (
       <div className="flex flex-wrap gap-2">
@@ -288,6 +293,7 @@ function ExpenseDetailStep({
   }
 
   function handleSelectSubcategory(sub: string) {
+    clearFormFeedback();
     if (subcategory === sub) {
       setSubcategory(null);
       if (category === "necesidad" && essentialNeeds.some((n) => n.name === sub)) {
@@ -552,6 +558,7 @@ function ExpenseDetailStep({
             <select
               value={selectedLoanId ?? ""}
               onChange={(event) => {
+                clearFormFeedback();
                 setSelectedLoanId(event.target.value || null);
                 if (event.target.value) setSelectedCreditCardId(null);
               }}
@@ -580,6 +587,7 @@ function ExpenseDetailStep({
             <select
               value={selectedCreditCardId ?? ""}
               onChange={(event) => {
+                clearFormFeedback();
                 setSelectedCreditCardId(event.target.value || null);
                 if (event.target.value) setSelectedLoanId(null);
               }}
@@ -622,7 +630,10 @@ function ExpenseDetailStep({
                 <WalletIcon className="h-4 w-4 text-stone-400" />
                 <select
                   value={paymentMethod ?? ""}
-                  onChange={(e) => setPaymentMethod(e.target.value || null)}
+                  onChange={(e) => {
+                    clearFormFeedback();
+                    setPaymentMethod(e.target.value || null);
+                  }}
                   className="w-full flex-1 appearance-none bg-transparent text-sm outline-none"
                 >
                   <option value="" disabled>
@@ -653,7 +664,7 @@ function ExpenseDetailStep({
             inputMode="decimal"
             step="0.01"
             placeholder="0.00"
-            {...register("amount")}
+            {...register("amount", { onChange: clearFormFeedback })}
             className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
           />
           {errors.amount && (
