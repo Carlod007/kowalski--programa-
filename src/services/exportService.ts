@@ -85,7 +85,6 @@ export async function buildHistoryCsv(
             monthLabel,
             loan.transactionDate,
             csvEscape(loan.lender ?? ""),
-            CATEGORY_META[loan.destinationCategory].label,
             centsToPlain(loan.amountCents),
           ].join(","),
         );
@@ -119,7 +118,7 @@ export async function buildHistoryCsv(
     ...incomeRows,
     "",
     "PRÉSTAMOS RECIBIDOS",
-    "Mes,Fecha,Banco o entidad,Categoría destino,Monto recibido",
+    "Mes,Fecha,Banco o entidad,Monto recibido",
     ...loanRows,
     "",
     "EGRESOS",

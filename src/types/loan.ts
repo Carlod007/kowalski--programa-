@@ -25,11 +25,12 @@ export type Loan = {
   importedExisting?: boolean;
   receivedDate: string;
   receivedMonthId: string;
+  /** Distribución interna inicial; la interfaz presenta un único fondo. */
   destinationCategory: LoanDestinationCategory;
   borrowedAvailableCents: number;
-  /** Saldo prestado disponible en cada categoría; el total se conserva arriba. */
+  /** Distribución interna para cierre mensual; no es una restricción de uso. */
   borrowedAvailableByCategory?: MonthCaps;
-  /** Cantidad de reasignaciones inmutables realizadas entre Necesidad y Ocio. */
+  /** Reasignaciones creadas por versiones anteriores, solo para limpieza segura. */
   fundMovementCount?: number;
   paidCents: number;
   installments: LoanInstallment[];
@@ -60,16 +61,3 @@ export type LoanPayment = {
   serverDate: Timestamp | null;
   localDate: string;
 };
-
-export type LoanFundMovement = {
-  userId: string;
-  loanId: string;
-  loanName: string;
-  origin: LoanDestinationCategory;
-  destination: LoanDestinationCategory;
-  amountCents: number;
-  transactionDate: string;
-  serverDate: Timestamp | null;
-};
-
-export type LoanFundMovementWithId = LoanFundMovement & { id: string };

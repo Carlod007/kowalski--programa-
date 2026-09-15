@@ -9,7 +9,7 @@ import {
   getLoanInstallmentStatus,
   getBorrowedAvailableByCategory,
   reverseLoanPayment,
-  reassignBorrowedBalance,
+  consumeBorrowedBalance,
 } from "./loans";
 
 describe("préstamos", () => {
@@ -115,15 +115,40 @@ describe("préstamos", () => {
     ).toEqual({ necesidad: 0, ocio: 30_000 });
   });
 
-  it("reasigna solo el saldo prestado y conserva el total", () => {
+  it("consume primero el saldo prestado ya asociado a la categoría", () => {
     expect(
-      reassignBorrowedBalance(
+      consumeBorrowedBalance(
         { necesidad: 50_000, ocio: 10_000 },
         "necesidad",
-        "ocio",
         15_000,
       ),
-    ).toEqual({ necesidad: 35_000, ocio: 25_000 });
+    ).toEqual({
+      available: { necesidad: 35_000, ocio: 10_000 },
+      transferredCents: 0,
+    });
+  });
+
+  it("toma automáticamente de la otra categoría cuando hace falta", () => {
+    expect(
+      consumeBorrowedBalance(
+        { necesidad: 50_000, ocio: 10_000 },
+        "ocio",
+        25_000,
+      ),
+    ).toEqual({
+      available: { necesidad: 35_000, ocio: 0 },
+      transferredCents: 15_000,
+    });
+  });
+
+  it("no permite consumir más que el fondo prestado total", () => {
+    expect(() =>
+      consumeBorrowedBalance(
+        { necesidad: 50_000, ocio: 10_000 },
+        "ocio",
+        60_001,
+      ),
+    ).toThrow("supera los fondos prestados disponibles");
   });
 
   it("permite cancelar tras reasignar si todo el dinero sigue disponible", () => {

@@ -25,23 +25,28 @@ export function canCancelUnusedLoan(loan: Loan): boolean {
   );
 }
 
-export function reassignBorrowedBalance(
+export function consumeBorrowedBalance(
   available: MonthCaps,
-  origin: keyof MonthCaps,
-  destination: keyof MonthCaps,
+  category: keyof MonthCaps,
   amountCents: number,
-): MonthCaps {
-  if (origin === destination) throw new Error("Las categorías deben ser distintas");
+): { available: MonthCaps; transferredCents: number } {
   if (!Number.isInteger(amountCents) || amountCents <= 0) {
     throw new Error("El monto debe ser mayor a 0");
   }
-  if (amountCents > available[origin]) {
+  if (amountCents > available.necesidad + available.ocio) {
     throw new Error("El monto supera los fondos prestados disponibles");
   }
+  const otherCategory = category === "necesidad" ? "ocio" : "necesidad";
+  const fromSelectedCategory = Math.min(available[category], amountCents);
+  const transferredCents = amountCents - fromSelectedCategory;
+
   return {
-    ...available,
-    [origin]: available[origin] - amountCents,
-    [destination]: available[destination] + amountCents,
+    available: {
+      ...available,
+      [category]: available[category] - fromSelectedCategory,
+      [otherCategory]: available[otherCategory] - transferredCents,
+    },
+    transferredCents,
   };
 }
 

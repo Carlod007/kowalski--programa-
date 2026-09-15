@@ -39,6 +39,9 @@ import { summarizeOutflows } from "@/utils/expenseClassification";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
 import CategoryIcon from "@/components/CategoryIcon";
+import MaskIcon from "@/components/MaskIcon";
+import loanIcon from "@/assets/icons/loan.svg";
+import creditCardIcon from "@/assets/icons/credit-card.svg";
 
 const CURRENT_MONTH_ID = getMonthId();
 
@@ -107,26 +110,6 @@ export default function Dashboard() {
         onPrev={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
         onNext={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
       />
-
-      {isViewingCurrentMonth && <LoanSummaryCard userId={user.uid} />}
-      {isViewingCurrentMonth && <CreditCardSummaryCard userId={user.uid} />}
-
-      {isViewingCurrentMonth && (
-        <div className="mt-6 flex gap-3 px-5">
-          <Link
-            to="/income/new"
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-100 py-4 font-medium text-emerald-700"
-          >
-            ↑ Ingreso
-          </Link>
-          <Link
-            to="/expense/new"
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-red-100 py-4 font-medium text-red-600"
-          >
-            ↓ Egreso
-          </Link>
-        </div>
-      )}
 
       <BottomNav />
     </div>
@@ -314,6 +297,38 @@ function MonthSummary({
         </div>
       </div>
 
+      {isCurrentMonth && (
+        <>
+          <div className="mt-4 flex gap-3 px-5">
+            <Link
+              to="/income/new"
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-100 py-4 font-medium text-emerald-700"
+            >
+              ↑ Ingreso
+            </Link>
+            <Link
+              to="/expense/new"
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-red-100 py-4 font-medium text-red-600"
+            >
+              ↓ Egreso
+            </Link>
+          </div>
+
+          <section className="mt-4 px-5" aria-labelledby="funds-to-pay-title">
+            <h2
+              id="funds-to-pay-title"
+              className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500"
+            >
+              Fondos para pagar
+            </h2>
+            <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
+              <LoanSummaryCard userId={userId} />
+              <CreditCardSummaryCard userId={userId} />
+            </div>
+          </section>
+        </>
+      )}
+
       <main className="mt-4 flex flex-col gap-3 px-5">
         {loading ? (
           <p className="py-8 text-center text-stone-400">Cargando...</p>
@@ -406,12 +421,11 @@ function CategoryRow({
   const spent = month.spentCents[category];
   const borrowedCap = month.borrowedCapsCents?.[category] ?? 0;
   const loanFundedSpent = month.loanFundedSpentCents?.[category] ?? 0;
-  const borrowedAvailable = Math.max(0, borrowedCap - loanFundedSpent);
   const ownedCap = cap - borrowedCap;
   const ownedSpent = spent - loanFundedSpent;
   const movableSurplus = ownedCap - ownedSpent;
   const pct = month.distribution[category];
-  const status = getCategoryStatus(cap, spent);
+  const status = getCategoryStatus(ownedCap, ownedSpent);
   const [showMove, setShowMove] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const infoRef = useRef<HTMLDivElement>(null);
@@ -556,9 +570,9 @@ function CategoryRow({
             <div>
               <p className="text-stone-400">Gastado</p>
               <p className="mt-0.5 font-medium text-stone-900">
-                {formatCents(spent)}
+                {formatCents(ownedSpent)}
               </p>
-              <p className="text-stone-400">de {formatCents(cap)}</p>
+              <p className="text-stone-400">de {formatCents(ownedCap)}</p>
             </div>
 
             {(capWasAdjusted || !initialSplitDeterminable) && (
@@ -616,12 +630,6 @@ function CategoryRow({
             </div>
           )}
 
-          {borrowedAvailable > 0 && (
-            <p className="mt-2 px-1 text-xs font-medium text-violet-600">
-              Prestado disponible: {formatCents(borrowedAvailable)}
-            </p>
-          )}
-
           {/* El botón solo se oculta cuando el panel real está abierto: si
               apareció el aviso de "sin excedente", sigue a la vista. */}
           {isCurrentMonth && !(showMove && hasSurplus) && (
@@ -651,7 +659,8 @@ function CategoryRow({
               <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
                 <p className="text-xs text-amber-800">
                   No te queda excedente propio en {meta.label} este mes. Los
-                  fondos prestados no se pueden mover entre categorías.
+                  fondos prestados no son excedente: se usan directamente al
+                  registrar un egreso en Necesidad u Ocio.
                 </p>
                 <button
                   type="button"
@@ -668,10 +677,10 @@ function CategoryRow({
       {showInfo && (
         <div className="absolute right-4 top-10 z-10 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
           {!initialSplitDeterminable
-            ? `Tu tope actual es ${formatCents(cap)}. No pudimos determinar si corresponde exactamente a tu ${pct}% inicial de este mes (datos incompletos).`
+            ? `Tu tope propio actual es ${formatCents(ownedCap)}. No pudimos determinar si corresponde exactamente a tu ${pct}% inicial de este mes (datos incompletos).`
             : capWasAdjusted
             ? `Tu disponible propio parte de un tope de ${formatCents(ownedCap)}. No es solo tu ${pct}% inicial: incluye ingresos recibidos con otro % o movimientos entre categorías.`
-            : `Tu tope propio es ${formatCents(ownedCap)}, según tu ${pct}% inicial.${borrowedCap > 0 ? ` Además, este mes entraron ${formatCents(borrowedCap)} de préstamos.` : ""}`}
+            : `Tu tope propio es ${formatCents(ownedCap)}, según tu ${pct}% inicial. Los fondos de préstamos se muestran por separado.`}
         </div>
       )}
     </div>
@@ -695,6 +704,10 @@ function LoanSummaryCard({ userId }: { userId: string }) {
     (sum, loan) => sum + getLoanOutstandingCents(loan),
     0,
   );
+  const availableFunds = loans.reduce(
+    (sum, loan) => sum + Math.max(0, loan.borrowedAvailableCents),
+    0,
+  );
   const pending = active
     .map((loan) => ({ loan, installment: getNextPendingInstallment(loan) }))
     .filter(
@@ -715,31 +728,36 @@ function LoanSummaryCard({ userId }: { userId: string }) {
   return (
     <Link
       to="/loans"
-      className="mx-5 mt-4 block rounded-2xl border border-violet-200 bg-white p-4"
+      className="block p-4"
     >
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-stone-900">Préstamos</p>
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-50 text-violet-600">
+          <MaskIcon src={loanIcon} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-stone-900">Préstamos</p>
+          {loans.length === 0 ? (
+            <p className="mt-1 text-xs text-stone-400">Sin préstamos registrados</p>
+          ) : (
+            <>
+              <p className="mt-1 text-xs text-stone-500">
+                <span className="font-medium text-violet-700">
+                  {formatCents(availableFunds)}
+                </span>{" "}
+                disponible · {formatCents(outstanding)} de deuda
+              </p>
+              <p className={overdue > 0 ? "mt-1 text-xs text-red-600" : "mt-1 text-xs text-stone-400"}>
+                {overdue > 0
+                  ? `${overdue} ${overdue === 1 ? "cuota vencida" : "cuotas vencidas"}`
+                  : next
+                    ? `Próxima: ${formatDateLabel(next.installment.dueDate)}`
+                    : "Sin cuotas pendientes"}
+              </p>
+            </>
+          )}
+        </div>
         <span className="text-xs font-medium text-violet-600">Ver →</span>
       </div>
-      {active.length === 0 ? (
-        <p className="mt-2 text-sm text-stone-400">Sin deuda pendiente</p>
-      ) : (
-        <div className="mt-2 flex items-end justify-between gap-3">
-          <div>
-            <p className="text-xl font-semibold text-violet-700">
-              {formatCents(outstanding)}
-            </p>
-            <p className="text-xs text-stone-400">deuda pendiente</p>
-          </div>
-          <p className={overdue > 0 ? "text-xs text-red-600" : "text-xs text-stone-500"}>
-            {overdue > 0
-              ? `${overdue} ${overdue === 1 ? "cuota vencida" : "cuotas vencidas"}`
-              : next
-                ? `Próxima: ${formatDateLabel(next.installment.dueDate)}`
-                : "Sin cuotas pendientes"}
-          </p>
-        </div>
-      )}
     </Link>
   );
 }
@@ -778,43 +796,42 @@ function CreditCardSummaryCard({ userId }: { userId: string }) {
   return (
     <Link
       to="/credit-cards"
-      className="mx-5 mt-4 block rounded-2xl border border-sky-200 bg-white p-4"
+      className="block border-t border-stone-200 p-4"
     >
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-stone-900">
-          Tarjetas de crédito
-        </p>
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sky-600">
+          <MaskIcon src={creditCardIcon} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-stone-900">
+            Tarjetas de crédito
+          </p>
+          {cards.length === 0 ? (
+            <p className="mt-1 text-xs text-stone-400">Sin tarjetas registradas</p>
+          ) : (
+            <>
+              <p className="mt-1 text-xs text-stone-500">
+                <span className="font-medium text-sky-700">
+                  {formatCents(totalAvailable)}
+                </span>{" "}
+                de línea · {formatCents(totalDebt)} de deuda
+              </p>
+              <p
+                className={`mt-1 text-xs ${
+                  overdueCount > 0 ? "text-red-600" : "text-stone-400"
+                }`}
+              >
+                {overdueCount > 0
+                  ? `${overdueCount} ${overdueCount === 1 ? "pago mínimo vencido" : "pagos mínimos vencidos"}`
+                  : nextStatement
+                    ? `Próximo vencimiento: ${formatDateLabel(nextStatement.statement.dueDate)}`
+                    : "Sin estados de cuenta pendientes"}
+              </p>
+            </>
+          )}
+        </div>
         <span className="text-xs font-medium text-sky-600">Ver →</span>
       </div>
-      {cards.length === 0 ? (
-        <p className="mt-2 text-sm text-stone-400">Sin tarjetas registradas</p>
-      ) : (
-        <div className="mt-2 grid grid-cols-2 gap-3">
-          <div>
-            <p className="text-lg font-semibold text-sky-700">
-              {formatCents(totalDebt)}
-            </p>
-            <p className="text-xs text-stone-400">deuda actual</p>
-          </div>
-          <div>
-            <p className="text-lg font-semibold text-stone-800">
-              {formatCents(totalAvailable)}
-            </p>
-            <p className="text-xs text-stone-400">línea disponible</p>
-          </div>
-          <p
-            className={`col-span-2 text-xs ${
-              overdueCount > 0 ? "text-red-600" : "text-stone-500"
-            }`}
-          >
-            {overdueCount > 0
-              ? `${overdueCount} ${overdueCount === 1 ? "pago mínimo vencido" : "pagos mínimos vencidos"}`
-              : nextStatement
-                ? `Próximo vencimiento: ${formatDateLabel(nextStatement.statement.dueDate)}`
-                : "Sin estados de cuenta pendientes"}
-          </p>
-        </div>
-      )}
     </Link>
   );
 }

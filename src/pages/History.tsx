@@ -34,7 +34,6 @@ import BottomNav from "@/components/BottomNav";
 import type { Month } from "@/types/month";
 import type {
   Category,
-  LoanReceiptTransaction,
   Transaction,
 } from "@/types/transaction";
 import BackButton from "@/components/BackButton";
@@ -425,7 +424,9 @@ function TransactionRow({
   const detail = isIncome
     ? tx.description
     : isLoanReceipt
-      ? `${tx.description === "Préstamo anterior incorporado" ? "Préstamo anterior incorporado" : "Préstamo recibido"} · ${CATEGORY_META[(tx as LoanReceiptTransaction).destinationCategory].label}`
+      ? tx.description === "Préstamo anterior incorporado"
+        ? "Préstamo anterior incorporado"
+        : "Préstamo recibido"
       : tx.fundedByLoanId
         ? `${CATEGORY_META[tx.category].label} · financiado con ${tx.fundedByLoanName ?? "préstamo"}${tx.description ? ` · ${tx.description}` : ""}`
         : tx.loanPaymentId

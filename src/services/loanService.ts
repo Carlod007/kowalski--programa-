@@ -21,14 +21,12 @@ import {
   generateFixedAmountInstallments,
   generateLoanInstallments,
   getBorrowedAvailableByCategory,
-  reassignBorrowedBalance,
+  consumeBorrowedBalance,
 } from "@/utils/loans";
 import type { Month } from "@/types/month";
 import type {
   Loan,
   LoanDestinationCategory,
-  LoanFundMovement,
-  LoanFundMovementWithId,
   LoanPayment,
   LoanPaymentSource,
   LoanWithId,
@@ -44,7 +42,8 @@ type CreateLoanCommon = {
   amountReceivedCents: number;
   receivedDate: string;
   importedExisting?: boolean;
-  destinationCategory: LoanDestinationCategory;
+  /** Conservado para compatibilidad; la interfaz nueva usa un fondo compartido. */
+  destinationCategory?: LoanDestinationCategory;
 };
 
 type CreateLoanInput = CreateLoanCommon &
@@ -90,29 +89,6 @@ export function watchLoans(
   );
 }
 
-export function watchLoanFundMovements(
-  userId: string,
-  loanId: string,
-  onData: (movements: LoanFundMovementWithId[]) => void,
-  onError?: (error: Error) => void,
-): Unsubscribe {
-  const movementsQuery = query(
-    collection(db, "users", userId, "loans", loanId, "fundMovements"),
-    orderBy("serverDate", "desc"),
-  );
-  return onSnapshot(
-    movementsQuery,
-    (snapshot) =>
-      onData(
-        snapshot.docs.map((item) => ({
-          ...(item.data() as LoanFundMovement),
-          id: item.id,
-        })),
-      ),
-    (error) => onError?.(error),
-  );
-}
-
 export async function createLoan(
   userId: string,
   input: CreateLoanInput,
@@ -130,6 +106,9 @@ export async function createLoan(
   const receivedMonthId = (
     input.importedExisting ? registrationDate : input.receivedDate
   ).slice(0, 7);
+  // La distribución interna sigue existiendo para conservar el cierre mensual
+  // y préstamos antiguos, pero el usuario consume un único fondo compartido.
+  const destinationCategory = input.destinationCategory ?? "necesidad";
   const monthRef = doc(db, "users", userId, "months", receivedMonthId);
   const loanRef = doc(collection(db, "users", userId, "loans"));
   const receiptRef = doc(
@@ -187,10 +166,10 @@ export async function createLoan(
       ...(input.importedExisting ? { importedExisting: true } : {}),
       receivedDate: input.receivedDate,
       receivedMonthId,
-      destinationCategory: input.destinationCategory,
+      destinationCategory,
       borrowedAvailableCents: input.amountReceivedCents,
       borrowedAvailableByCategory:
-        input.destinationCategory === "necesidad"
+        destinationCategory === "necesidad"
           ? { necesidad: input.amountReceivedCents, ocio: 0 }
           : { necesidad: 0, ocio: input.amountReceivedCents },
       paidCents: 0,
@@ -204,7 +183,7 @@ export async function createLoan(
       type: "loan",
       loanId: loanRef.id,
       ...(input.lender ? { lender: input.lender } : {}),
-      destinationCategory: input.destinationCategory,
+      destinationCategory,
       amountCents: input.amountReceivedCents,
       transactionDate: input.importedExisting
         ? registrationDate
@@ -219,10 +198,10 @@ export async function createLoan(
     transaction.set(loanRef, loan);
     transaction.set(receiptRef, receipt);
     transaction.update(monthRef, {
-      [`capsCents.${input.destinationCategory}`]: increment(
+      [`capsCents.${destinationCategory}`]: increment(
         input.amountReceivedCents,
       ),
-      [`borrowedCapsCents.${input.destinationCategory}`]: increment(
+      [`borrowedCapsCents.${destinationCategory}`]: increment(
         input.amountReceivedCents,
       ),
     });
@@ -333,12 +312,16 @@ export async function registerLoanFundedExpense(
     const month = monthSnapshot.data() as Month;
     if (month.closed) throw new Error("No se puede modificar un mes cerrado");
     const availableByCategory = getBorrowedAvailableByCategory(loan);
-    if (
-      input.amountCents <= 0 ||
-      input.amountCents > availableByCategory[input.category]
-    ) {
+    if (input.amountCents <= 0 || input.amountCents > loan.borrowedAvailableCents) {
       throw new Error("El monto supera los fondos disponibles del préstamo");
     }
+    const consumed = consumeBorrowedBalance(
+      availableByCategory,
+      input.category,
+      input.amountCents,
+    );
+    const otherCategory: LoanDestinationCategory =
+      input.category === "necesidad" ? "ocio" : "necesidad";
 
     const loanName = loan.lender?.trim() || "Préstamo";
     const expense: WithFieldValue<ExpenseTransaction> = {
@@ -360,85 +343,20 @@ export async function registerLoanFundedExpense(
     transaction.update(monthRef, {
       [`spentCents.${input.category}`]: increment(input.amountCents),
       [`loanFundedSpentCents.${input.category}`]: increment(input.amountCents),
+      [`capsCents.${input.category}`]: increment(consumed.transferredCents),
+      [`capsCents.${otherCategory}`]: increment(-consumed.transferredCents),
+      [`borrowedCapsCents.${input.category}`]: increment(
+        consumed.transferredCents,
+      ),
+      [`borrowedCapsCents.${otherCategory}`]: increment(
+        -consumed.transferredCents,
+      ),
     });
     transaction.update(loanRef, {
       borrowedAvailableCents: increment(-input.amountCents),
-      borrowedAvailableByCategory: {
-        ...availableByCategory,
-        [input.category]:
-          availableByCategory[input.category] - input.amountCents,
-      },
+      borrowedAvailableByCategory: consumed.available,
       updatedAt: serverTimestamp(),
     });
-  });
-}
-
-export async function reassignLoanFunds(
-  userId: string,
-  monthId: string,
-  loanId: string,
-  input: {
-    origin: LoanDestinationCategory;
-    destination: LoanDestinationCategory;
-    amountCents: number;
-  },
-): Promise<void> {
-  if (input.origin === input.destination) {
-    throw new Error("El origen y el destino deben ser distintos");
-  }
-  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
-    throw new Error("El monto debe ser mayor a 0");
-  }
-
-  const loanRef = doc(db, "users", userId, "loans", loanId);
-  const monthRef = doc(db, "users", userId, "months", monthId);
-  const movementRef = doc(collection(loanRef, "fundMovements"));
-
-  await runTransaction(db, async (transaction) => {
-    const [loanSnapshot, monthSnapshot] = await Promise.all([
-      transaction.get(loanRef),
-      transaction.get(monthRef),
-    ]);
-    if (!loanSnapshot.exists()) throw new Error("El préstamo ya no existe");
-    if (!monthSnapshot.exists()) throw new Error("El mes no existe");
-    const loan = loanSnapshot.data() as Loan;
-    const month = monthSnapshot.data() as Month;
-    if (month.closed) throw new Error("No se puede modificar un mes cerrado");
-
-    const availableByCategory = getBorrowedAvailableByCategory(loan);
-    if (input.amountCents > availableByCategory[input.origin]) {
-      throw new Error("El monto supera los fondos prestados disponibles");
-    }
-    const nextAvailable = reassignBorrowedBalance(
-      availableByCategory,
-      input.origin,
-      input.destination,
-      input.amountCents,
-    );
-    const loanName = loan.lender?.trim() || "Préstamo";
-    const movement: WithFieldValue<LoanFundMovement> = {
-      userId,
-      loanId,
-      loanName,
-      origin: input.origin,
-      destination: input.destination,
-      amountCents: input.amountCents,
-      transactionDate: toDateInputValue(),
-      serverDate: serverTimestamp(),
-    };
-
-    transaction.update(loanRef, {
-      borrowedAvailableByCategory: nextAvailable,
-      fundMovementCount: increment(1),
-      updatedAt: serverTimestamp(),
-    });
-    transaction.update(monthRef, {
-      [`capsCents.${input.origin}`]: increment(-input.amountCents),
-      [`capsCents.${input.destination}`]: increment(input.amountCents),
-      [`borrowedCapsCents.${input.origin}`]: increment(-input.amountCents),
-      [`borrowedCapsCents.${input.destination}`]: increment(input.amountCents),
-    });
-    transaction.set(movementRef, movement);
   });
 }
 

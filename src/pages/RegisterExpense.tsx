@@ -44,7 +44,6 @@ import {
   getGoalProgress,
   wasPurchased,
 } from "@/utils/savings";
-import { getBorrowedAvailableByCategory } from "@/utils/loans";
 import {
   getAvailableCreditCents,
   getCreditCardDisplayName,
@@ -209,11 +208,17 @@ export default function RegisterExpense() {
   }
 
   if (step === "detail" && category) {
+    const ownedCapCents =
+      (month?.capsCents[category] ?? 0) -
+      (month?.borrowedCapsCents?.[category] ?? 0);
+    const ownedSpentCents =
+      (month?.spentCents[category] ?? 0) -
+      (month?.loanFundedSpentCents?.[category] ?? 0);
     return (
       <ExpenseDetailStep
         category={category}
-        capCents={month?.capsCents[category] ?? 0}
-        spentCents={month?.spentCents[category] ?? 0}
+        capCents={ownedCapCents}
+        spentCents={ownedSpentCents}
         initialTemplate={selectedTemplate}
         initialSuggestion={suggestionPrefill}
         suggestionDescription={suggestionText}
@@ -330,8 +335,14 @@ export default function RegisterExpense() {
           <CategorySelectCard
             key={cat}
             category={cat}
-            capCents={month?.capsCents[cat] ?? 0}
-            spentCents={month?.spentCents[cat] ?? 0}
+            capCents={
+              (month?.capsCents[cat] ?? 0) -
+              (month?.borrowedCapsCents?.[cat] ?? 0)
+            }
+            spentCents={
+              (month?.spentCents[cat] ?? 0) -
+              (month?.loanFundedSpentCents?.[cat] ?? 0)
+            }
             selected={category === cat}
             onSelect={(selectedCat) => {
               if (selectedCat === "necesidad" || selectedCat === "ocio") {
@@ -432,10 +443,7 @@ function ExpenseDetailStep({
   const essentialNeeds = userProfile?.essentialNeeds ?? [];
   const meta = CATEGORY_META[category];
   const status = getCategoryStatus(capCents, spentCents);
-  const availableLoans = loans.filter(
-    (loan) =>
-      getBorrowedAvailableByCategory(loan)[category] > 0,
-  );
+  const availableLoans = loans.filter((loan) => loan.borrowedAvailableCents > 0);
   const selectedLoan =
     availableLoans.find((loan) => loan.id === selectedLoanId) ?? null;
   const selectedCreditCard =
@@ -660,14 +668,14 @@ function ExpenseDetailStep({
     const amountCents = Math.round(parseFloat(values.amount) * 100);
     if (
       selectedLoan &&
-      amountCents > getBorrowedAvailableByCategory(selectedLoan)[category]
+      amountCents > selectedLoan.borrowedAvailableCents
     ) {
       setPickError("El monto supera los fondos disponibles del préstamo");
       return;
     }
     setPickError(null);
 
-    if (status.isEmpty) {
+    if (status.isEmpty && !selectedLoan) {
       setPendingValues(values);
       setShowEmptyCapWarning(true);
       return;
@@ -849,7 +857,7 @@ function ExpenseDetailStep({
               {availableLoans.map((loan) => (
                 <option key={loan.id} value={loan.id}>
                   {loan.lender?.trim() || "Préstamo"} ·{" "}
-                  {formatCents(getBorrowedAvailableByCategory(loan)[category])}{" "}
+                  {formatCents(loan.borrowedAvailableCents)}{" "}
                   disponible
                 </option>
               ))}

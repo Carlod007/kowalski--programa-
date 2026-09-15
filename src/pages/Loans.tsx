@@ -11,16 +11,13 @@ import { checkAndCloseMonth } from "@/services/monthService";
 import {
   cancelUnusedLoan,
   createLoan,
-  reassignLoanFunds,
   recordLoanPayment,
-  watchLoanFundMovements,
   watchLoans,
 } from "@/services/loanService";
 import {
   addMonthsToDate,
   allocateLoanPayment,
   canCancelUnusedLoan,
-  getBorrowedAvailableByCategory,
   getLoanInstallmentStatus,
   getLoanOutstandingCents,
   getNextPendingInstallment,
@@ -29,13 +26,9 @@ import { formatCents } from "@/utils/currency";
 import {
   formatDateLabel,
   formatMonthLabel,
-  getMonthId,
   toDateInputValue,
 } from "@/utils/date";
-import { CATEGORY_META } from "@/utils/category";
 import type {
-  LoanDestinationCategory,
-  LoanFundMovementWithId,
   LoanPaymentSource,
   LoanScheduleType,
   LoanWithId,
@@ -188,8 +181,6 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
   const [installmentAmount, setInstallmentAmount] = useState("");
   const [scheduleType, setScheduleType] =
     useState<LoanScheduleType>("fixed-known");
-  const [category, setCategory] =
-    useState<LoanDestinationCategory>("necesidad");
   const [count, setCount] = useState("1");
   const [firstDueDate, setFirstDueDate] = useState(today);
   const [manualInstallments, setManualInstallments] = useState(() => [
@@ -259,7 +250,6 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
         amountReceivedCents,
         receivedDate,
         importedExisting,
-        destinationCategory: category,
       };
       if (scheduleType === "fixed-known") {
         await createLoan(userId, {
@@ -364,19 +354,6 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
           <option value="custom">
             Cuotas variables — cronograma personalizado
           </option>
-        </select>
-      </label>
-      <label className="text-sm text-stone-600">
-        Categoría donde entra
-        <select
-          value={category}
-          onChange={(event) =>
-            setCategory(event.target.value as LoanDestinationCategory)
-          }
-          className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
-        >
-          <option value="necesidad">Necesidad</option>
-          <option value="ocio">Ocio</option>
         </select>
       </label>
       {scheduleType === "fixed-known" && (
@@ -484,7 +461,8 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
       <p className="text-xs text-stone-400">
         Fecha de recepción: {formatDateLabel(receivedDate)}. {importedExisting
           ? "Se incorporará al mes actual sin crear ni reabrir meses anteriores. "
-          : ""}El préstamo no cuenta como ingreso ni altera tus porcentajes.
+          : ""}El préstamo queda disponible para gastos de Necesidad u Ocio,
+        no cuenta como ingreso ni altera tus porcentajes.
       </p>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button
@@ -557,7 +535,7 @@ function LoanCard({
   paymentMethods: { id: string; name: string }[];
 }) {
   const [openPanel, setOpenPanel] = useState<
-    "schedule" | "payment" | "reassign" | null
+    "schedule" | "payment" | null
   >(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -568,9 +546,8 @@ function LoanCard({
       ? Math.min(100, (loan.paidCents / loan.totalToRepayCents) * 100)
       : 0;
   const canCancel = canCancelUnusedLoan(loan);
-  const availableByCategory = getBorrowedAvailableByCategory(loan);
 
-  function togglePanel(panel: "schedule" | "payment" | "reassign") {
+  function togglePanel(panel: "schedule" | "payment") {
     setConfirmCancel(false);
     setOpenPanel((current) => (current === panel ? null : panel));
   }
@@ -593,7 +570,7 @@ function LoanCard({
             {loan.lender?.trim() || "Préstamo"}
           </p>
           <p className="text-xs text-stone-400">
-            Entrada inicial: {CATEGORY_META[loan.destinationCategory].label} · recibido {formatDateLabel(loan.receivedDate)}
+            Recibido {formatDateLabel(loan.receivedDate)}
           </p>
         </div>
         <span className="rounded-full bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700">
@@ -614,11 +591,8 @@ function LoanCard({
         <p className="text-stone-500">
           Intereses y cargos: <span className="font-medium text-stone-800">{formatCents(loan.totalToRepayCents - loan.amountReceivedCents)}</span>
         </p>
-        <p className="text-stone-500">
-          Prestado en Necesidad: <span className="font-medium text-stone-800">{formatCents(availableByCategory.necesidad)}</span>
-        </p>
-        <p className="text-stone-500">
-          Prestado en Ocio: <span className="font-medium text-stone-800">{formatCents(availableByCategory.ocio)}</span>
+        <p className="col-span-2 text-stone-500">
+          Fondo prestado disponible: <span className="font-medium text-violet-700">{formatCents(loan.borrowedAvailableCents)}</span>
         </p>
         <p className="text-stone-500">
           Próximo: <span className="font-medium text-stone-800">{next ? formatDateLabel(next.dueDate) : "—"}</span>
@@ -644,24 +618,7 @@ function LoanCard({
         )}
       </div>
 
-      {loan.borrowedAvailableCents > 0 && (
-        <button
-          type="button"
-          onClick={() => togglePanel("reassign")}
-          className="mt-2 w-full rounded-lg border border-violet-300 py-2 text-xs font-medium text-violet-700"
-        >
-          Reasignar fondos del préstamo
-        </button>
-      )}
-
       {openPanel === "schedule" && <InstallmentList loan={loan} />}
-      {openPanel === "reassign" && (
-        <ReassignFundsForm
-          userId={userId}
-          loan={loan}
-          onDone={() => setOpenPanel(null)}
-        />
-      )}
       {openPanel === "payment" && next && (
         <PaymentForm
           userId={userId}
@@ -695,132 +652,7 @@ function LoanCard({
         </div>
       )}
       {actionError && <p className="mt-2 text-xs text-red-600">{actionError}</p>}
-      {(loan.fundMovementCount ?? 0) > 0 && (
-        <LoanFundMovementList userId={userId} loanId={loan.id} />
-      )}
     </article>
-  );
-}
-
-function ReassignFundsForm({
-  userId,
-  loan,
-  onDone,
-}: {
-  userId: string;
-  loan: LoanWithId;
-  onDone: () => void;
-}) {
-  const available = getBorrowedAvailableByCategory(loan);
-  const defaultOrigin =
-    available.necesidad > 0 ? "necesidad" : "ocio";
-  const [origin, setOrigin] =
-    useState<LoanDestinationCategory>(defaultOrigin);
-  const [amount, setAmount] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const destination: LoanDestinationCategory =
-    origin === "necesidad" ? "ocio" : "necesidad";
-  const amountCents = Math.round(Number(amount) * 100);
-  const exceeds = amountCents > available[origin];
-
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      await checkAndCloseMonth(userId);
-      await reassignLoanFunds(userId, getMonthId(), loan.id, {
-        origin,
-        destination,
-        amountCents,
-      });
-      onDone();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "No se pudo reasignar");
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className="mt-3 flex flex-col gap-3 rounded-xl bg-violet-50 p-3"
-    >
-      <p className="text-sm font-medium text-violet-900">
-        Reasignar solo dinero prestado
-      </p>
-      <label className="text-sm text-stone-600">
-        Desde
-        <select
-          value={origin}
-          onChange={(event) =>
-            setOrigin(event.target.value as LoanDestinationCategory)
-          }
-          className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2"
-        >
-          <option value="necesidad" disabled={available.necesidad === 0}>
-            Necesidad · {formatCents(available.necesidad)}
-          </option>
-          <option value="ocio" disabled={available.ocio === 0}>
-            Ocio · {formatCents(available.ocio)}
-          </option>
-        </select>
-      </label>
-      <MoneyInput label="Monto" value={amount} onChange={setAmount} />
-      <p className="text-xs text-violet-800">
-        Pasará a {CATEGORY_META[destination].label}. Seguirá siendo dinero
-        prestado y nunca se enviará a Ahorro.
-      </p>
-      {exceeds && (
-        <p className="text-xs text-red-600">
-          Supera el saldo prestado disponible en {CATEGORY_META[origin].label}.
-        </p>
-      )}
-      {error && <p className="text-xs text-red-600">{error}</p>}
-      <button
-        type="submit"
-        disabled={saving || amountCents <= 0 || exceeds}
-        className="rounded-lg bg-violet-600 py-2 text-sm font-medium text-white disabled:opacity-50"
-      >
-        {saving ? "Moviendo..." : "Confirmar reasignación"}
-      </button>
-    </form>
-  );
-}
-
-function LoanFundMovementList({
-  userId,
-  loanId,
-}: {
-  userId: string;
-  loanId: string;
-}) {
-  const [movements, setMovements] = useState<LoanFundMovementWithId[]>([]);
-
-  useEffect(
-    () =>
-      watchLoanFundMovements(userId, loanId, setMovements, (error) => {
-        console.error("watchLoanFundMovements falló:", error);
-      }),
-    [loanId, userId],
-  );
-
-  if (movements.length === 0) return null;
-  return (
-    <div className="mt-3 border-t border-stone-100 pt-3">
-      <p className="text-xs font-medium text-stone-500">Reasignaciones</p>
-      <div className="mt-2 flex flex-col gap-1">
-        {movements.slice(0, 5).map((movement) => (
-          <p key={movement.id} className="text-xs text-stone-500">
-            {formatDateLabel(movement.transactionDate)} ·{" "}
-            {CATEGORY_META[movement.origin].label} →{" "}
-            {CATEGORY_META[movement.destination].label} ·{" "}
-            {formatCents(movement.amountCents)}
-          </p>
-        ))}
-      </div>
-    </div>
   );
 }
 
