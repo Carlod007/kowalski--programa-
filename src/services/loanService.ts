@@ -12,6 +12,7 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { validateTransactionTiming } from "@/utils/transactionTiming";
 import { getUnassignedCents } from "@/utils/savings";
 import { toDateInputValue } from "@/utils/date";
 import {
@@ -295,6 +296,7 @@ export async function registerLoanFundedExpense(
     tags?: string[];
   },
 ): Promise<void> {
+  validateTransactionTiming(monthId, input.date);
   const loanRef = doc(db, "users", userId, "loans", input.loanId);
   const monthRef = doc(db, "users", userId, "months", monthId);
   const txRef = doc(
@@ -310,6 +312,7 @@ export async function registerLoanFundedExpense(
     if (!monthSnapshot.exists()) throw new Error("El mes no existe");
     const loan = loanSnapshot.data() as Loan;
     const month = monthSnapshot.data() as Month;
+    if (input.date < loan.receivedDate) throw new Error("El gasto no puede ser anterior a la recepción del préstamo.");
     if (month.closed) throw new Error("No se puede modificar un mes cerrado");
     const availableByCategory = getBorrowedAvailableByCategory(loan);
     if (input.amountCents <= 0 || input.amountCents > loan.borrowedAvailableCents) {

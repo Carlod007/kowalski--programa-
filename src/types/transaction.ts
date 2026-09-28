@@ -13,6 +13,8 @@ export type TransactionBase = {
   serverDate: Timestamp | null;
   localDate: string;
   transactionDate: string;
+  /** Campo legado: se conserva al leer datos anteriores; no se escribe en registros nuevos. */
+  transactionTime?: string;
   description?: string;
   amountCents: number;
 };

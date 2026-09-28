@@ -37,6 +37,16 @@ export function toDateInputValue(date: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+export function formatDayMonth(dateValue: string): string {
+  const [, month, day] = dateValue.split("-");
+  return `${day}/${month}`;
+}
+
+/** Hora local en formato de 24 horas, sin depender del ciclo del navegador. */
+export function formatTime24(date: Date): string {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 const WEEKDAYS = [
   "Domingo",
   "Lunes",

@@ -302,20 +302,19 @@ function CreditCardCard({
         </span>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
         <p className="text-stone-500">
           Línea: <span className="font-medium text-stone-800">{formatCents(card.creditLimitCents)}</span>
         </p>
         <p className="text-stone-500">
           Disponible: <span className="font-medium text-stone-800">{formatCents(Math.max(0, availableCents))}</span>
         </p>
+        {availableCents < 0 && (
+          <p className="text-stone-500">
+            Exceso: <span className="font-medium text-stone-800">{formatCents(-availableCents)}</span>
+          </p>
+        )}
       </div>
-
-      {availableCents < 0 && (
-        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
-          Aviso: la deuda supera la línea registrada por {formatCents(-availableCents)}.
-        </p>
-      )}
 
       {active ? (
         <div className="mt-3 rounded-xl bg-stone-50 p-3 text-xs">

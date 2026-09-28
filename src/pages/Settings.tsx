@@ -1019,7 +1019,7 @@ export default function Settings() {
             className="flex w-full items-center justify-between px-4 py-3"
           >
             <span className="text-sm text-stone-900">
-              Presupuestos por subcategoría
+              Objetivos mensuales por subcategoría
             </span>
             <span className="text-sm text-stone-400">›</span>
           </Link>

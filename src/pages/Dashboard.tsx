@@ -9,7 +9,7 @@ import { watchLoans } from "@/services/loanService";
 import { watchCreditCards } from "@/services/creditCardService";
 import { getMonthExpenses } from "@/services/analyticsService";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
-import { getAssignableCents } from "@/utils/savings";
+import { getAssignableCents, getUnassignedCents } from "@/utils/savings";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
@@ -39,6 +39,7 @@ import { summarizeOutflows } from "@/utils/expenseClassification";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
 import CategoryIcon from "@/components/CategoryIcon";
+import { getMonthlySavingsNet } from "@/utils/monthlySavings";
 import MaskIcon from "@/components/MaskIcon";
 import loanIcon from "@/assets/icons/loan.svg";
 import creditCardIcon from "@/assets/icons/credit-card.svg";
@@ -105,6 +106,10 @@ export default function Dashboard() {
         canGoForward={canGoForward}
         isCurrentMonth={isViewingCurrentMonth}
         savingsTotalCents={userProfile?.savingsTotalCents ?? 0}
+        accumulatedCents={userProfile?.savingsTotalCents ?? null}
+        unassignedCents={userProfile
+          ? getUnassignedCents(userProfile.savingsTotalCents, userProfile.savingsGoals ?? [])
+          : null}
         assignableCents={assignableCents}
         essentialNeedsTotalCents={essentialNeedsTotalCents}
         onPrev={() => setViewedMonthId((id) => shiftMonthId(id, -1))}
@@ -122,6 +127,8 @@ function MonthSummary({
   canGoForward,
   isCurrentMonth,
   savingsTotalCents,
+  accumulatedCents,
+  unassignedCents,
   assignableCents,
   essentialNeedsTotalCents,
   onPrev,
@@ -132,6 +139,8 @@ function MonthSummary({
   canGoForward: boolean;
   isCurrentMonth: boolean;
   savingsTotalCents: number;
+  accumulatedCents: number | null;
+  unassignedCents: number | null;
   assignableCents: number;
   essentialNeedsTotalCents: number;
   onPrev: () => void;
@@ -148,7 +157,7 @@ function MonthSummary({
 
   useEffect(() => {
     let latestMonth: Month | null | undefined;
-    let latestExpenses: ExpenseTransaction[] | undefined;
+    let latestExpenses: ExpenseTransaction[] | null | undefined;
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
 
@@ -217,7 +226,7 @@ function MonthSummary({
       },
       (err) => {
         console.error("No se pudo cargar el origen de los gastos:", err);
-        latestExpenses = [];
+        latestExpenses = null;
         publish(true);
       },
     );
@@ -240,6 +249,7 @@ function MonthSummary({
 
   const {
     movements,
+    movementsReady,
     netContributionCents,
     ahorroActualPct,
     isAhorroActualDeterminable,
@@ -360,7 +370,10 @@ function MonthSummary({
               isCurrentMonth={isCurrentMonth}
               capsCents={month.capsCents}
               savingsTotalCents={savingsTotalCents}
+              accumulatedCents={accumulatedCents}
+              unassignedCents={unassignedCents}
               assignableCents={assignableCents}
+              monthlyNetCents={getMonthlySavingsNet(month, expenses, movementsReady ? movements : null)}
               contributedThisMonth={month.ahorroContributedCents}
               percentage={month.distribution.ahorro}
               netContributionCents={netContributionCents}
@@ -1025,8 +1038,11 @@ function SavingsRow({
   isCurrentMonth,
   capsCents,
   savingsTotalCents,
+  accumulatedCents,
+  unassignedCents,
   assignableCents,
   contributedThisMonth,
+  monthlyNetCents,
   percentage,
   netContributionCents,
   ahorroActualPct,
@@ -1037,8 +1053,11 @@ function SavingsRow({
   isCurrentMonth: boolean;
   capsCents: MonthCaps;
   savingsTotalCents: number;
+  accumulatedCents: number | null;
+  unassignedCents: number | null;
   assignableCents: number;
   contributedThisMonth: number;
+  monthlyNetCents: number | null;
   percentage: number;
   netContributionCents: number;
   ahorroActualPct: string | null;
@@ -1077,11 +1096,11 @@ function SavingsRow({
           <p className="text-sm font-medium text-stone-900">{meta.label}</p>
         </div>
         <div className="flex items-center gap-1">
-          <p className="text-xs text-stone-400">Acumulado</p>
+          <p className="text-xs text-stone-400">{formatMonthLabel(monthId)}</p>
           <button
             type="button"
             onClick={() => setShowInfo((v) => !v)}
-            aria-label="Qué es el acumulado"
+            aria-label="Qué es el ahorro neto mensual"
             className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-200 text-[10px] text-stone-500"
           >
             ?
@@ -1089,9 +1108,10 @@ function SavingsRow({
         </div>
       </div>
 
-      <p className="mt-3 text-center text-2xl font-semibold text-teal-700">
-        {formatCents(savingsTotalCents)}
+      <p className={`mt-3 text-center text-2xl font-semibold ${monthlyNetCents !== null && monthlyNetCents < 0 ? "text-red-600" : "text-teal-700"}`}>
+        {monthlyNetCents === null ? "No determinable" : formatCents(monthlyNetCents)}
       </p>
+      <p className="text-center text-xs text-stone-500">Ahorro neto del mes</p>
 
       <div className="mt-3 grid grid-cols-3 gap-3 rounded-xl bg-stone-50 p-3 text-xs">
         <div>
@@ -1118,8 +1138,20 @@ function SavingsRow({
         </div>
       </div>
 
-      {/* El botón solo se oculta cuando el panel real está abierto: si
-          apareció el aviso de "sin plata libre", sigue a la vista. */}
+      <div className="mt-3 rounded-xl border border-stone-200 p-3">
+        <p className="text-xs text-stone-500">Ahorro acumulado total · a hoy</p>
+        <p className="mt-1 text-lg font-semibold text-teal-700">
+          {accumulatedCents === null ? "No determinable" : formatCents(accumulatedCents)}
+        </p>
+        <p className="mt-1 text-xs text-stone-400">
+          {unassignedCents === null
+            ? "Sin asignar a metas: No determinable"
+            : unassignedCents < 0
+              ? `Sobreasignado: ${formatCents(-unassignedCents)} por liberar`
+              : `Sin asignar a metas: ${formatCents(unassignedCents)}`}
+        </p>
+      </div>
+      {/* Las acciones utilizan el acumulado disponible, no el flujo mensual. */}
       <div className="mt-2 flex flex-col items-start gap-2 text-xs font-medium text-teal-600">
         {isCurrentMonth && !(showMove && hasAssignable) && (
           <button type="button" onClick={() => setShowMove(true)}>
@@ -1169,10 +1201,10 @@ function SavingsRow({
 
       {showInfo && (
         <div className="absolute bottom-full left-4 mb-2 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
-          El acumulado nunca se resetea - cada mes se suma más, y solo baja
-          cuando compras una meta. "Aportado este mes" es lo que entró este
-          mes (reparto inicial + lo que hayas movido aquí), no tu crecimiento
-          neto: si sacaste dinero de Ahorro, no se resta de ahí.
+          El neto suma lo aportado este mes y resta compras, retiros, pagos
+          desde Ahorro y transferencias a otras categorías. En meses cerrados
+          incluye el excedente de Ocio del cierre. Puede ser negativo si usaste
+          ahorro anterior. El acumulado total conserva el dinero de todos los meses.
         </div>
       )}
     </div>

@@ -16,6 +16,7 @@ export function getMonthMovements(
   userId: string,
   monthId: string,
   onData: (movements: MovementWithId[]) => void,
+  onError?: (error: Error) => void,
 ): Unsubscribe {
   const ref = collection(db, "users", userId, "months", monthId, "movements");
   const q = query(ref, orderBy("serverDate", "desc"));
@@ -25,7 +26,7 @@ export function getMonthMovements(
       (d) => ({ ...(d.data() as Movement), _id: d.id }) as MovementWithId,
     );
     onData(movements);
-  });
+  }, (error) => onError?.(error));
 }
 
 /**

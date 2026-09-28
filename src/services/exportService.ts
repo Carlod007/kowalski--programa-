@@ -7,8 +7,9 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { formatMonthLabel } from "@/utils/date";
+import { formatMonthLabel, formatTime24, toDateInputValue } from "@/utils/date";
 import { CATEGORY_META } from "@/utils/category";
+import { compareRecordedTiming, getRecordedDate } from "@/utils/transactionTiming";
 import type {
   ExpenseTransaction,
   IncomeTransaction,
@@ -65,14 +66,23 @@ export async function buildHistoryCsv(
     );
     const txSnap = await getDocs(txRef);
 
-    for (const txDoc of txSnap.docs) {
-      const tx = txDoc.data() as Transaction;
+    const ordered = txSnap.docs.map((item) => ({ id: item.id, tx: item.data() as Transaction }))
+      .sort((a, b) => compareRecordedTiming(a.tx, b.tx) || a.id.localeCompare(b.id));
+    for (const { tx } of ordered) {
+      const recordedDate = getRecordedDate(tx);
+      const recordedDay = recordedDate ? toDateInputValue(recordedDate) : "";
+      const recordedTime = recordedDate ? formatTime24(recordedDate) : "";
+      const declaredDate = recordedDay && tx.transactionDate === recordedDay
+        ? ""
+        : tx.transactionDate;
       if (tx.type === "income") {
         const income = tx as IncomeTransaction;
         incomeRows.push(
           [
             monthLabel,
-            income.transactionDate,
+            declaredDate,
+            recordedDay,
+            recordedTime,
             csvEscape(income.source),
             csvEscape(income.description ?? ""),
             centsToPlain(income.amountCents),
@@ -83,7 +93,9 @@ export async function buildHistoryCsv(
         loanRows.push(
           [
             monthLabel,
-            loan.transactionDate,
+            declaredDate,
+            recordedDay,
+            recordedTime,
             csvEscape(loan.lender ?? ""),
             centsToPlain(loan.amountCents),
           ].join(","),
@@ -98,7 +110,9 @@ export async function buildHistoryCsv(
         expenseRows.push(
           [
             monthLabel,
-            expense.transactionDate,
+            declaredDate,
+            recordedDay,
+            recordedTime,
             CATEGORY_META[expense.category].label,
             csvEscape(expense.subcategory),
             csvEscape(expense.description ?? ""),
@@ -114,15 +128,15 @@ export async function buildHistoryCsv(
 
   const lines = [
     "INGRESOS",
-    "Mes,Fecha,Fuente,Descripción,Monto",
+    "Mes,Fecha de operación (si distinta),Fecha de registro (local),Hora de registro (local, 24 h),Fuente,Descripción,Monto",
     ...incomeRows,
     "",
     "PRÉSTAMOS RECIBIDOS",
-    "Mes,Fecha,Banco o entidad,Monto recibido",
+    "Mes,Fecha de operación (si distinta),Fecha de registro (local),Hora de registro (local, 24 h),Banco o entidad,Monto recibido",
     ...loanRows,
     "",
     "EGRESOS",
-    "Mes,Fecha,Categoría,Subcategoría,Descripción,Etiquetas,Método de pago,Relación con préstamo,Monto",
+    "Mes,Fecha de operación (si distinta),Fecha de registro (local),Hora de registro (local, 24 h),Categoría,Subcategoría,Descripción,Etiquetas,Método de pago,Relación con préstamo,Monto",
     ...expenseRows,
   ];
 

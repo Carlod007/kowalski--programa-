@@ -8,6 +8,7 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { validateTransactionTiming } from "@/utils/transactionTiming";
 import { calculateProportionalSplit } from "@/utils/distribution";
 import {
   getBorrowedAvailableByCategory,
@@ -535,6 +536,7 @@ export async function withdrawFromFund(
     date: string;
   },
 ): Promise<void> {
+  validateTransactionTiming(monthId, input.date);
   if (input.amountCents <= 0) {
     throw new Error("El monto debe ser mayor a 0");
   }
@@ -625,6 +627,7 @@ export async function purchaseGoalExpense(
     allowAutoAssign?: boolean;
   },
 ): Promise<void> {
+  validateTransactionTiming(monthId, input.date);
   const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
   const txRef = doc(
@@ -700,7 +703,9 @@ export async function purchaseGoalExpense(
               ...g,
               allocatedCents: remainingAllocated,
               purchaseCount: getPurchaseCount(g) + 1,
-              lastPurchasedAt: input.date,
+              lastPurchasedAt: goal.lastPurchasedAt && goal.lastPurchasedAt > input.date
+                ? goal.lastPurchasedAt
+                : input.date,
             }
           : g,
       ),

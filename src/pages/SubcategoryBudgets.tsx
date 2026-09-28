@@ -36,7 +36,7 @@ export default function SubcategoryBudgets() {
         if (!value) continue;
         const amount = Number(value);
         if (!Number.isFinite(amount) || amount <= 0) {
-          setError("Todos los límites deben ser mayores a cero o quedar vacíos");
+          setError("Todos los objetivos deben ser mayores a cero o quedar vacíos");
           return;
         }
         budgets.push({
@@ -58,7 +58,7 @@ export default function SubcategoryBudgets() {
       setError(
         err instanceof Error
           ? err.message
-          : "No se pudieron guardar los presupuestos",
+          : "No se pudieron guardar los objetivos mensuales",
       );
     } finally {
       setSaving(false);
@@ -71,18 +71,18 @@ export default function SubcategoryBudgets() {
         <BackButton to="/settings" />
         <div className="mt-4">
           <h1 className="text-xl font-semibold text-stone-900">
-            Presupuestos por subcategoría
+            Objetivos mensuales por subcategoría
           </h1>
           <p className="text-sm text-stone-500">
-            Límites mensuales informativos y opcionales.
+            Opcionales para seguir tus hábitos de gasto.
           </p>
         </div>
       </header>
 
       <main className="px-5">
         <div className="mt-6 rounded-2xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-800">
-          No cambia tus porcentajes, topes ni saldos. Un gasto nunca será
-          bloqueado por superar estos límites.
+          Estos objetivos no cambian tus porcentajes, topes ni saldos. Un gasto
+          nunca será bloqueado por superarlos.
         </div>
 
         {!hasSubcategories ? (
@@ -116,7 +116,7 @@ export default function SubcategoryBudgets() {
                             inputMode="decimal"
                             min="0.01"
                             step="0.01"
-                            aria-label={`Límite de ${subcategory}`}
+                            aria-label={`Objetivo mensual de ${subcategory}`}
                             value={draft[key] ?? ""}
                             onChange={(event) => {
                               setSaved(false);
@@ -126,7 +126,7 @@ export default function SubcategoryBudgets() {
                                 [key]: event.target.value,
                               }));
                             }}
-                            placeholder="Sin límite"
+                            placeholder="Sin objetivo"
                             className="w-28 rounded-lg border border-stone-300 px-2 py-1.5 text-right text-stone-900 outline-none"
                           />
                         </span>
@@ -142,7 +142,7 @@ export default function SubcategoryBudgets() {
         {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
         {saved && (
           <p role="status" className="mt-4 text-sm text-emerald-700">
-            Presupuestos guardados correctamente.
+            Objetivos mensuales guardados correctamente.
           </p>
         )}
         {hasSubcategories && (
@@ -152,7 +152,7 @@ export default function SubcategoryBudgets() {
             disabled={saving}
             className="mt-6 w-full rounded-xl bg-stone-900 py-3 text-sm font-medium text-white disabled:opacity-50"
           >
-            {saving ? "Guardando…" : "Guardar presupuestos"}
+            {saving ? "Guardando…" : "Guardar objetivos"}
           </button>
         )}
       </main>

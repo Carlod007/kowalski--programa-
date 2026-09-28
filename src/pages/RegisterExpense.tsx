@@ -53,6 +53,7 @@ import { getMonthExpenses } from "@/services/analyticsService";
 import {
   getSubcategoryBudgetStatus,
   getSubcategoryConsumptionCents,
+  getSubcategoryObjectiveCopy,
 } from "@/utils/subcategoryBudgets";
 import {
   normalizeExpenseText,
@@ -67,11 +68,13 @@ import type { ExpenseTransaction } from "@/types/transaction";
 import type { LoanWithId } from "@/types/loan";
 import type { CreditCardWithId } from "@/types/creditCard";
 import BackButton from "@/components/BackButton";
+import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
+import { validateTransactionTiming } from "@/utils/transactionTiming";
 
 type Step = "category" | "detail" | "goal";
 
 const detailSchema = z.object({
-  date: z.string().min(1, "Selecciona una fecha"),
+  date: z.string(),
   amount: z
     .string()
     .min(1, "Ingresa un monto")
@@ -416,8 +419,6 @@ function ExpenseDetailStep({
     null,
   );
 
-  const today = toDateInputValue();
-
   const {
     register,
     handleSubmit,
@@ -427,7 +428,7 @@ function ExpenseDetailStep({
   } = useForm<DetailFormValues>({
     resolver: zodResolver(detailSchema),
     defaultValues: {
-      date: today,
+      date: "",
       amount: initialTemplate?.amountCents
         ? (initialTemplate.amountCents / 100).toFixed(2)
         : "",
@@ -448,6 +449,7 @@ function ExpenseDetailStep({
     availableLoans.find((loan) => loan.id === selectedLoanId) ?? null;
   const selectedCreditCard =
     creditCards.find((card) => card.id === selectedCreditCardId) ?? null;
+  const watchedDate = useWatch({ control, name: "date" });
   const watchedAmount = useWatch({ control, name: "amount" });
   const enteredAmountCents = Math.round(
     (parseFloat(watchedAmount) || 0) * 100,
@@ -467,6 +469,14 @@ function ExpenseDetailStep({
         subcategoryBudget.monthlyLimitCents,
         subcategorySpentCents,
         enteredAmountCents,
+      )
+    : null;
+  const subcategoryObjectiveCopy = subcategoryBudget && subcategoryBudgetStatus
+    ? getSubcategoryObjectiveCopy(
+        subcategoryBudget.subcategory,
+        subcategoryBudget.monthlyLimitCents,
+        subcategoryBudgetStatus,
+        watchedAmount.trim().length > 0,
       )
     : null;
 
@@ -556,6 +566,14 @@ function ExpenseDetailStep({
 
     const amountCents = Math.round(parseFloat(values.amount) * 100);
     const monthId = getMonthId();
+    const transactionDate = values.date || toDateInputValue();
+    try {
+      validateTransactionTiming(monthId, transactionDate);
+    } catch (error) {
+      setSubmitError((error as Error).message);
+      setSaving(false);
+      return;
+    }
     const description = values.description?.trim();
     const tags = normalizeExpenseTags(values.tags ?? "");
 
@@ -572,7 +590,7 @@ function ExpenseDetailStep({
           subcategory,
           paymentMethod,
           amountCents,
-          date: values.date,
+          date: transactionDate,
           description,
           tags,
         });
@@ -596,7 +614,7 @@ function ExpenseDetailStep({
           category,
           subcategory,
           amountCents,
-          date: values.date,
+          date: transactionDate,
           description,
           tags,
         });
@@ -630,7 +648,7 @@ function ExpenseDetailStep({
       subcategory,
       paymentMethod,
       amountCents,
-      transactionDate: values.date,
+      transactionDate,
       serverDate: serverTimestamp(),
       localDate: new Date().toISOString(),
       ...(description ? { description } : {}),
@@ -736,12 +754,8 @@ function ExpenseDetailStep({
         className="mt-6 flex flex-col gap-5"
       >
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-stone-700">Fecha</label>
-          <div className="flex items-center gap-2 rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
-            <CalendarIcon />
-            {formatDateLabel(today)}
-          </div>
-          <input type="hidden" value={today} {...register("date")} />
+          <TransactionDateTimeFields date={watchedDate}
+            onDateChange={(value) => setValue("date", value, { shouldValidate: true })} />
           {errors.date && (
             <p className="text-xs text-red-600">{errors.date.message}</p>
           )}
@@ -785,54 +799,14 @@ function ExpenseDetailStep({
           )}
         </div>
 
-        {subcategoryBudget && subcategoryBudgetStatus && (
-          <div
-            className={`rounded-2xl border p-4 ${
-              subcategoryBudgetStatus.level === "exceeded"
-                ? "border-red-200 bg-red-50"
-                : subcategoryBudgetStatus.level === "near"
-                  ? "border-amber-200 bg-amber-50"
-                  : "border-stone-200 bg-white"
-            }`}
-          >
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="font-medium text-stone-700">
-                Presupuesto de {subcategoryBudget.subcategory}
-              </span>
-              <span className="text-stone-500">
-                {formatCents(subcategoryBudgetStatus.projectedCents)} de{" "}
-                {formatCents(subcategoryBudget.monthlyLimitCents)}
-              </span>
-            </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
-              <div
-                className={`h-full rounded-full ${
-                  subcategoryBudgetStatus.level === "exceeded"
-                    ? "bg-red-500"
-                    : subcategoryBudgetStatus.level === "near"
-                      ? "bg-amber-500"
-                      : CATEGORY_META[category].bar
-                }`}
-                style={{
-                  width: `${Math.min(100, subcategoryBudgetStatus.percentage)}%`,
-                }}
-              />
-            </div>
-            <p
-              className={`mt-2 text-xs ${
-                subcategoryBudgetStatus.level === "exceeded"
-                  ? "font-medium text-red-700"
-                  : subcategoryBudgetStatus.level === "near"
-                    ? "font-medium text-amber-700"
-                    : "text-stone-500"
-              }`}
-            >
-              {subcategoryBudgetStatus.level === "exceeded"
-                ? `Superarías el límite por ${formatCents(Math.max(0, -subcategoryBudgetStatus.remainingCents))}. Puedes registrar el gasto igual.`
-                : subcategoryBudgetStatus.level === "near"
-                  ? `Llegarías al ${subcategoryBudgetStatus.percentage}% del límite. El aviso no bloquea el gasto.`
-                  : `${formatCents(subcategoryBudgetStatus.remainingCents)} disponibles después de este gasto.`}
-            </p>
+        {subcategoryObjectiveCopy && (
+          <div className="border-l-2 border-amber-300 pl-3 text-xs text-amber-800">
+            <p>{subcategoryObjectiveCopy.primary}</p>
+            {subcategoryObjectiveCopy.showClarification && (
+              <p className="mt-1 text-stone-500">
+                Es un objetivo informativo: no bloquea el registro ni modifica tu saldo de {CATEGORY_META[category].label}.
+              </p>
+            )}
           </div>
         )}
 
@@ -893,9 +867,9 @@ function ExpenseDetailStep({
             </select>
             {selectedCreditCard && projectedCardAvailableCents < 0 && (
               <p className="text-xs font-medium text-amber-700">
-                Aviso: esta compra superará la línea registrada por{" "}
-                {formatCents(-projectedCardAvailableCents)}. Podrás guardarla de
-                todas formas.
+                {enteredAmountCents > 0
+                  ? `Aviso: tras esta compra, la deuda superará la línea por ${formatCents(-projectedCardAvailableCents)}. Puedes registrar el gasto.`
+                  : `La deuda ya supera la línea por ${formatCents(-projectedCardAvailableCents)}.`}
               </p>
             )}
           </div>
@@ -1071,24 +1045,6 @@ function ChevronDownIcon({ className = "h-3.5 w-3.5" }: { className?: string }) 
   );
 }
 
-function CalendarIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-4 w-4 text-stone-400"
-    >
-      <rect x="3" y="5" width="18" height="16" rx="2" />
-      <path d="M3 9h18" />
-      <path d="M8 3v4M16 3v4" />
-    </svg>
-  );
-}
-
 function GoalChipGroup({
   title,
   goals,
@@ -1225,7 +1181,7 @@ function GoalPurchaseStep({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const today = toDateInputValue();
+  const [date, setDate] = useState("");
   const allGoals = userProfile?.savingsGoals ?? [];
   const fundGoals = allGoals.filter((g) => getGoalKind(g) === "fondo");
   const purchaseGoals = allGoals.filter((g) => getGoalKind(g) === "compra");
@@ -1290,14 +1246,14 @@ function GoalPurchaseStep({
           amountCents: withdrawCents,
           paymentMethod,
           description: description.trim() || undefined,
-          date: today,
+          date: date || toDateInputValue(),
         });
       } else {
         await purchaseGoalExpense(user.uid, getMonthId(), {
           goalId: selectedGoal.id,
           paymentMethod,
           description: description.trim() || undefined,
-          date: today,
+          date: date || toDateInputValue(),
           allowAutoAssign: needsAutoAssign,
         });
       }
@@ -1327,10 +1283,7 @@ function GoalPurchaseStep({
 
       <div className="mt-6 flex flex-col gap-5">
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-stone-700">Fecha</label>
-          <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900">
-            {formatDateLabel(today)}
-          </div>
+          <TransactionDateTimeFields date={date} onDateChange={setDate} />
         </div>
 
         <div className="flex flex-col gap-2">

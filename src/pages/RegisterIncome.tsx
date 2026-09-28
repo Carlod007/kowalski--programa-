@@ -12,10 +12,12 @@ import {
   type UpdateData,
   type WithFieldValue,
 } from "firebase/firestore";
-import { Calendar, User, ChevronDown, FileText, Save } from "lucide-react";
+import { User, ChevronDown, FileText, Save } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { getMonthId, toDateInputValue, formatDateLabel } from "@/utils/date";
+import { getMonthId, toDateInputValue } from "@/utils/date";
+import { validateTransactionTiming } from "@/utils/transactionTiming";
+import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
 import { calculateDistribution } from "@/utils/distribution";
 import { doc as firestoreDoc, getDoc } from "firebase/firestore";
 import { formatCents } from "@/utils/currency";
@@ -30,7 +32,7 @@ const incomeSchema = z.object({
   // La fuente no se valida acá porque un aporte directo no lleva ninguna.
   // La exigencia real está en onSubmit, según el modo.
   source: z.string(),
-  date: z.string().min(1, "Selecciona una fecha"),
+  date: z.string(),
   amount: z
     .string()
     .min(1, "Ingresa un monto")
@@ -50,8 +52,6 @@ export default function RegisterIncome() {
   const [isDirectSavings, setIsDirectSavings] = useState(false);
   const [monthDistribution, setMonthDistribution] =
     useState<Distribution | null>(null);
-
-  const today = toDateInputValue();
 
   useEffect(() => {
     if (!user) return;
@@ -75,11 +75,12 @@ export default function RegisterIncome() {
     formState: { errors, isSubmitting },
   } = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeSchema),
-    defaultValues: { source: "", date: today, amount: "", description: "" },
+    defaultValues: { source: "", date: "", amount: "", description: "" },
   });
 
   const sources = userProfile?.sources ?? [];
   const fixedIncomes = userProfile?.fixedIncomes ?? [];
+  const watchedDate = useWatch({ control, name: "date" });
   const watchedAmount = useWatch({ control, name: "amount" });
   const watchedSource = useWatch({ control, name: "source" });
 
@@ -122,6 +123,13 @@ export default function RegisterIncome() {
 
     const amountCents = Math.round(parseFloat(values.amount) * 100);
     const monthId = getMonthId();
+    const transactionDate = values.date || toDateInputValue();
+    try {
+      validateTransactionTiming(monthId, transactionDate);
+    } catch (error) {
+      setSubmitError((error as Error).message);
+      return;
+    }
     const description = values.description?.trim();
     const selectedSource = sources.find((s) => s.id === values.source);
 
@@ -139,7 +147,7 @@ export default function RegisterIncome() {
       const tx: WithFieldValue<IncomeTransaction> = {
         type: "income",
         source: DIRECT_SAVINGS_LABEL,
-        transactionDate: values.date,
+        transactionDate,
         amountCents,
         distribution: { necesidad: 0, ocio: 0, ahorro: amountCents },
         isDirectSavings: true,
@@ -165,7 +173,7 @@ export default function RegisterIncome() {
         type: "income",
         source: selectedSource?.name ?? "",
         sourceId: values.source,
-        transactionDate: values.date,
+        transactionDate,
         amountCents,
         distribution,
         serverDate: serverTimestamp(),
@@ -234,16 +242,8 @@ export default function RegisterIncome() {
         className="mt-6 flex flex-col gap-4"
       >
         <div className="rounded-2xl border border-stone-200 bg-white p-4">
-          <label className="text-sm font-semibold text-stone-900">Fecha</label>
-          <div className="mt-2 flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-emerald-600">
-              <Calendar size={18} />
-            </span>
-            <span className="flex-1 text-sm text-stone-900">
-              {formatDateLabel(today)}
-            </span>
-          </div>
-          <input type="hidden" value={today} {...register("date")} />
+          <TransactionDateTimeFields date={watchedDate}
+            onDateChange={(value) => setValue("date", value, { shouldValidate: true })} />
           {errors.date && (
             <p className="mt-1 text-xs text-red-600">{errors.date.message}</p>
           )}

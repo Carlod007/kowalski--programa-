@@ -7,6 +7,7 @@ import {
 
 export type AhorroBreakdown = {
   movements: MovementWithId[];
+  movementsReady: boolean;
   initialSplitAhorroCents: number;
   isInitialSplitDeterminable: boolean;
   movedToAhorroCents: number;
@@ -32,12 +33,16 @@ export function useAhorroBreakdown(
   directSavingsCents: number,
 ): AhorroBreakdown {
   const [movements, setMovements] = useState<MovementWithId[]>([]);
+  const [loadedMonth, setLoadedMonth] = useState<string | null>(null);
   const [initialSplitAhorroCents, setInitialSplitAhorroCents] = useState(0);
   const [isInitialSplitDeterminable, setIsInitialSplitDeterminable] =
     useState(true);
 
   useEffect(() => {
-    const unsubMovements = getMonthMovements(userId, monthId, setMovements);
+    const unsubMovements = getMonthMovements(userId, monthId, (items) => {
+      setMovements(items);
+      setLoadedMonth(`${userId}/${monthId}`);
+    }, () => setLoadedMonth(null));
     const unsubInitialSplit = getMonthInitialSplit(
       userId,
       monthId,
@@ -91,6 +96,7 @@ export function useAhorroBreakdown(
 
   return {
     movements,
+    movementsReady: loadedMonth === `${userId}/${monthId}`,
     initialSplitAhorroCents,
     isInitialSplitDeterminable,
     movedToAhorroCents,

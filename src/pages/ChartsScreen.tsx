@@ -554,7 +554,7 @@ function MonthAnalytics({
           <section className="mx-5 mt-6">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-sm font-medium text-stone-500">
-                Presupuestos por subcategoría
+                Objetivos mensuales por subcategoría
               </h2>
               <Link
                 to="/subcategory-budgets"
@@ -588,11 +588,9 @@ function MonthAnalytics({
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
                     <div
                       className={`h-full rounded-full ${
-                        item.status.level === "exceeded"
-                          ? "bg-red-500"
-                          : item.status.level === "near"
-                            ? "bg-amber-500"
-                            : CATEGORY_META[item.category].bar
+                        item.status.level === "ok"
+                          ? CATEGORY_META[item.category].bar
+                          : "bg-amber-500"
                       }`}
                       style={{
                         width: `${Math.min(100, item.status.percentage)}%`,
@@ -601,18 +599,16 @@ function MonthAnalytics({
                   </div>
                   <p
                     className={`mt-2 text-xs ${
-                      item.status.level === "exceeded"
-                        ? "font-medium text-red-600"
-                        : item.status.level === "near"
-                          ? "font-medium text-amber-700"
-                          : "text-stone-400"
+                      item.status.level === "ok"
+                        ? "text-stone-400"
+                        : "font-medium text-amber-700"
                     }`}
                   >
-                    {item.status.level === "exceeded"
-                      ? `Excedido por ${formatCents(-item.status.remainingCents)}`
-                      : item.status.level === "near"
-                        ? `${item.status.percentage}% utilizado`
-                        : `${formatCents(item.status.remainingCents)} disponible`}
+                    {item.status.remainingCents < 0
+                      ? `Objetivo superado por ${formatCents(-item.status.remainingCents)}`
+                      : item.status.remainingCents === 0
+                        ? "Objetivo alcanzado"
+                        : `Faltan ${formatCents(item.status.remainingCents)} para el objetivo mensual`}
                   </p>
                 </div>
               ))}

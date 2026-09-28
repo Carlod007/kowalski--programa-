@@ -4,8 +4,6 @@ import {
   collection,
   doc,
   onSnapshot,
-  query,
-  orderBy,
 } from "firebase/firestore";
 import {
   Calendar,
@@ -20,6 +18,8 @@ import {
   getMonthId,
   shiftMonthId,
   formatMonthLabel,
+  formatDayMonth,
+  formatTime24,
   toDateInputValue,
 } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
@@ -37,6 +37,9 @@ import type {
   Transaction,
 } from "@/types/transaction";
 import BackButton from "@/components/BackButton";
+import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
+import { updateTransactionTiming } from "@/services/transactionTimingService";
+import { canEditTransactionTiming, compareRecordedTiming, getRecordedDate } from "@/utils/transactionTiming";
 import {
   getAvailableExpenseTags,
   hasExpenseTag,
@@ -79,6 +82,7 @@ export default function History() {
 
   const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
   const [month, setMonth] = useState<Month | null>(null);
+  const [loadedMonthId, setLoadedMonthId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<TxWithId[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
@@ -87,6 +91,7 @@ export default function History() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [timingTx, setTimingTx] = useState<TxWithId | null>(null);
 
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -96,37 +101,28 @@ export default function History() {
     if (!user) return;
 
     const monthRef = doc(db, "users", user.uid, "months", viewedMonthId);
-    const txQuery = query(
-      collection(
-        db,
-        "users",
-        user.uid,
-        "months",
-        viewedMonthId,
-        "transactions",
-      ),
-      orderBy("transactionDate", "desc"),
-      orderBy("serverDate", "desc"),
-    );
+    const txRef = collection(db, "users", user.uid, "months", viewedMonthId, "transactions");
 
     const unsubMonth = onSnapshot(
       monthRef,
       (snap) => {
         setMonth(snap.exists() ? (snap.data() as Month) : null);
+        setLoadedMonthId(viewedMonthId);
         setLoading(false);
       },
       (err) => {
         console.error("onSnapshot mes falló:", err);
+        setLoadedMonthId(null);
         setLoading(false);
       },
     );
 
-    const unsubTx = onSnapshot(txQuery, (snap) => {
+    const unsubTx = onSnapshot(txRef, (snap) => {
       const txs = snap.docs.map((d) => ({
         ...(d.data() as Transaction),
         _id: d.id,
       }));
-      setTransactions(txs);
+      setTransactions(txs.sort((a, b) => compareRecordedTiming(b, a) || a._id.localeCompare(b._id)));
     });
 
     return () => {
@@ -328,7 +324,9 @@ export default function History() {
               <div className="flex flex-col gap-2">
                 {group.items.map((tx) => {
                   const isDeleting = deletingId === tx._id;
-                  const isOpen = !isClosed;
+                  const isOpen = loadedMonthId === viewedMonthId
+                    && viewedMonthId === getMonthId()
+                    && month?.closed === false;
 
                   if (isDeleting) {
                     return (
@@ -370,6 +368,7 @@ export default function History() {
                       onToggleMenu={() =>
                         setOpenMenuId(openMenuId === tx._id ? null : tx._id)
                       }
+                      onEditTiming={() => { setOpenMenuId(null); setTimingTx(tx); }}
                       onEdit={() =>
                         navigate(`/history/edit/${viewedMonthId}/${tx._id}`)
                       }
@@ -387,6 +386,11 @@ export default function History() {
         )}
       </main>
 
+      {timingTx && user && loadedMonthId === viewedMonthId
+        && viewedMonthId === getMonthId() && month?.closed === false && (
+        <TimingEditor key={timingTx._id} tx={timingTx} userId={user.uid}
+          monthId={viewedMonthId} onClose={() => setTimingTx(null)} />
+      )}
       <BottomNav />
     </div>
   );
@@ -397,6 +401,7 @@ function TransactionRow({
   isOpen,
   isMenuOpen,
   onToggleMenu,
+  onEditTiming,
   onEdit,
   onDelete,
   menuRef,
@@ -406,6 +411,7 @@ function TransactionRow({
   isMenuOpen: boolean;
   onToggleMenu: () => void;
   onEdit: () => void;
+  onEditTiming: () => void;
   onDelete: () => void;
   menuRef: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -439,6 +445,9 @@ function TransactionRow({
             ? `${CATEGORY_META[tx.category].label} - ${tx.description}`
             : CATEGORY_META[tx.category].label;
   const isPositive = isIncome || isLoanReceipt;
+  const recorded = getRecordedDate(tx);
+  const recordedDay = recorded ? toDateInputValue(recorded) : null;
+  const isPastDated = recordedDay === null || tx.transactionDate !== recordedDay;
 
   return (
     <div className="relative rounded-2xl border border-stone-200 bg-white p-4">
@@ -458,6 +467,16 @@ function TransactionRow({
             {name}
           </p>
           {detail && <p className="mt-0.5 text-xs text-stone-400">{detail}</p>}
+          {isPastDated && (
+            <p className="mt-1 text-sm font-medium text-stone-800">
+              Operación: {formatDayMonth(tx.transactionDate)}
+            </p>
+          )}
+          <p className={`mt-0.5 text-xs ${isPastDated ? "text-stone-400" : "text-stone-500"}`}>
+            {recorded && recordedDay
+              ? `Registrado el ${formatDayMonth(recordedDay)} ${formatTime24(recorded)}`
+              : "Momento de registro no disponible"}
+          </p>
           {tx.type === "expense" && (
             <p className="mt-0.5 text-xs text-stone-400">{tx.paymentMethod}</p>
           )}
@@ -499,6 +518,12 @@ function TransactionRow({
                 </button>
                 {isMenuOpen && (
                   <div className="absolute right-0 top-8 z-10 w-36 rounded-xl border border-stone-200 bg-white py-1 shadow-lg">
+                    {canEditTransactionTiming(tx) && (
+                      <button type="button" onClick={onEditTiming}
+                        className="w-full px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50">
+                        Fecha
+                      </button>
+                    )}
                     {canEdit && (
                       <button
                         type="button"
@@ -526,6 +551,48 @@ function TransactionRow({
   );
 }
 
+function TimingEditor({ tx, userId, monthId, onClose }: {
+  tx: TxWithId;
+  userId: string;
+  monthId: string;
+  onClose: () => void;
+}) {
+  const [date, setDate] = useState(tx.transactionDate);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await updateTransactionTiming(userId, monthId, tx._id, date);
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "No se pudo corregir la fecha.");
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-5">
+      <form onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="timing-title"
+        className="w-full max-w-md rounded-2xl bg-white p-5 shadow-lg">
+        <h2 id="timing-title" className="mb-4 text-lg font-semibold text-stone-900">Corregir fecha</h2>
+        <TransactionDateTimeFields date={date} onDateChange={setDate} editing />
+        <p className="mt-3 text-xs text-stone-500">El monto, los saldos y la fecha original de registro se conservan.</p>
+        {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+        <div className="mt-4 flex gap-3">
+          <button type="button" disabled={saving} onClick={onClose}
+            className="flex-1 rounded-xl border border-stone-300 py-2 text-sm text-stone-700">Cancelar</button>
+          <button type="submit" disabled={saving}
+            className="flex-1 rounded-xl bg-emerald-600 py-2 text-sm font-medium text-white disabled:opacity-50">
+            {saving ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function groupByDate(transactions: TxWithId[]): {
   label: string;
   items: TxWithId[];
@@ -538,7 +605,8 @@ function groupByDate(transactions: TxWithId[]): {
   const map = new Map<string, TxWithId[]>();
 
   for (const tx of transactions) {
-    const d = tx.transactionDate;
+    const recorded = getRecordedDate(tx);
+    const d = recorded ? toDateInputValue(recorded) : tx.transactionDate;
     if (!map.has(d)) map.set(d, []);
     map.get(d)!.push(tx);
   }

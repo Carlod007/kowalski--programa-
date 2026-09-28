@@ -13,6 +13,7 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { validateTransactionTiming } from "@/utils/transactionTiming";
 import type { Month } from "@/types/month";
 import type { ExpenseTransaction } from "@/types/transaction";
 import type {
@@ -171,6 +172,7 @@ export async function registerCreditCardPurchase(
     throw new Error("El monto debe ser mayor a 0");
   }
   assertDate(input.date, "fecha de compra");
+  validateTransactionTiming(monthId, input.date);
   const cardRef = doc(db, "users", userId, "creditCards", input.cardId);
   const monthRef = doc(db, "users", userId, "months", monthId);
   const txRef = doc(
@@ -189,6 +191,9 @@ export async function registerCreditCardPurchase(
     }
 
     const card = cardSnapshot.data() as CreditCard;
+    if (card.lastStatementClosingDate && input.date <= card.lastStatementClosingDate) {
+      throw new Error("La fecha pertenece a un estado de cuenta ya confirmado.");
+    }
     const cardName = getCreditCardDisplayName(card);
     const expense: WithFieldValue<ExpenseTransaction> = {
       type: "expense",
