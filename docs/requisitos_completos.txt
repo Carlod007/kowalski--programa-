@@ -1,0 +1,114 @@
+================================================================================
+          KOWALSKI PWA - DOCUMENTACIÓN CONSOLIDADA DE REQUISITOS
+================================================================================
+
+--------------------------------------------------------------------------------
+1. REGLAS DE NEGOCIO CORE (METODOLOGÍA 70/20/10)
+--------------------------------------------------------------------------------
+* CATEGORÍAS: Necesidad (70%), Ocio (10%), Ahorro (20%) [valores por defecto].
+* DISTRIBUCIÓN INMEDIATA: Cada ingreso registrado se divide en tiempo real según los porcentajes del perfil, sumándose a los límites (capsCents).
+* CENTAVOS ENTEROS (INTEGER CENTS): Todos los cálculos y persistencia de dinero se manejan como enteros (S/ 10.50 -> 1050). Evita errores de redondeo IEEE 754.
+* SOBREGUARDO / SOBREPRESUPUESTO: Permitido. Si el gasto supera el disponible, el saldo queda negativo y la UI muestra alerta visual (rojo). No se bloquea.
+* SALDOS AL CIERRE: Los saldos negativos se perdonan (mes nuevo inicia en cero). El saldo positivo (remanente) se decide en el cierre:
+  - Opción A: Mover a Ahorro del nuevo mes (se suma a capsCents.ahorro sin transacción).
+  - Opción B: Ingreso extra (se crea transacción automática en el mes nuevo).
+* HISTORIAL INMUTABLE: Los meses cerrados (closed: true) son de SOLO LECTURA. Las subcategorías se guardan embebidas como string al momento de la transacción.
+
+--------------------------------------------------------------------------------
+2. ARQUITECTURA DE DATOS (ESTRUCTURA FIRESTORE)
+--------------------------------------------------------------------------------
+users / {userId}
+  ├── name: string
+  ├── email: string
+  ├── onboardingCompleted: boolean
+  ├── lastClosedMonth: string | null ("YYYY-MM")
+  ├── distribution: { necesidad: number, ocio: number, ahorro: number }
+  ├── sources: Array<{ id: string, name: string }>
+  ├── subcategories: Record<string, string[]>
+  ├── paymentMethods: Array<{ id: string, name: string, type: 'cash' | 'digital' }>
+  └── closingNotification: { day: number, time: string }
+
+users / {userId} / months / {YYYY-MM}
+  ├── totalIncomeCents: number
+  ├── incomeCount: number
+  ├── closed: boolean
+  ├── distribution: { necesidad: number, ocio: number, ahorro: number }
+  ├── capsCents: { necesidad: number, ocio: number, ahorro: number }
+  ├── spentCents: { necesidad: number, ocio: number, ahorro: number }
+  ├── createdAt: Timestamp | null
+  └── remainder: { destination: 'ahorro' | 'next_month' | 'forgiven', amountCents: number }
+
+users / {userId} / months / {YYYY-MM} / transactions / {txId}
+  ├── type: "income" | "expense"
+  ├── amountCents: number
+  ├── description?: string
+  ├── transactionDate: string ("YYYY-MM-DD")
+  ├── localDate: string (ISO de ordenación visual offline)
+  ├── serverDate: Timestamp | null
+  * Si type === "income":
+  ├── source: string
+  └── distribution: { necesidad: number, ocio: number, ahorro: number }
+  * Si type === "expense":
+  ├── category: "necesidad" | "ocio" | "ahorro"
+  ├── subcategory: string
+  └── paymentMethod: string
+
+--------------------------------------------------------------------------------
+3. ADENDA DE CIERRE DE MES / REMANENTE (FASE 3)
+--------------------------------------------------------------------------------
+* FÓRMULA DEL REMANENTE (NETA): 
+  netCents = prevMonth.totalIncomeCents - (spentCents.necesidad + spentCents.ocio + spentCents.ahorro)
+  - Un déficit en una categoría compensa un superávit en otra (cálculo neto).
+  - Invariante obligatoria: capsCents siempre suma exacto totalIncomeCents (Ahorro absorbe residuo). Comentar en código.
+
+* MonthRemainder ACTUALIZADO:
+  export type MonthRemainder = {
+    destination: "ahorro" | "next_month" | "forgiven";
+    amountCents: number;
+  };
+
+* CONDICIONAL DE DECISIÓN A/B:
+  - Solo se ofrece opción A (ahorro) o B (ingreso extra) si netCents > 0.
+  - Si netCents <= 0, se perdona el saldo negativo en silencio y el servidor escribe automáticamente:
+    { destination: "forgiven", amountCents: netCents }
+
+* CAMBIO DE DISTRIBUCIÓN EN CIERRE: Double write atómico en la misma transacción:
+  - Modifica userProfile.distribution (default permanente).
+  - Modifica newMonth.distribution (snapshot del mes).
+  * Si hay cambio de distribución + destino "next_month", el split del remanente usa la distribución NUEVA.
+
+* IDEMPOTENCIA Y DISPARO DE PANTALLA:
+  - Guard: prevMonth.remainder !== undefined indica que el remanente ya fue resuelto. El campo actúa como flag.
+  - Disparo: El Dashboard valida independientemente si:
+    userProfile.lastClosedMonth apunta a un mes con closed === true && remainder === undefined.
+    Si se cumple, redirige inmediatamente a la pantalla de cierre.
+
+--------------------------------------------------------------------------------
+4. ESPECIFICACIÓN TÉCNICA: resolveMonthRemainder
+--------------------------------------------------------------------------------
+Firma de la función en src/services/monthService.ts:
+resolveMonthRemainder(
+  userId: string, 
+  prevMonthId: string, 
+  newMonthId: string, 
+  decision: { remainderDestination: "ahorro" | "next_month", newDistribution?: Distribution }
+): Promise<void>
+
+Pasos en la transacción:
+1. Leer prevMonthRef, userRef, newMonthRef.
+2. Guard: Si prevMonth.remainder !== undefined -> Salir.
+3. Calcular netCents.
+4. Definir distributionFinal = decision.newDistribution ?? newMonth.distribution.
+5. Si existe decision.newDistribution:
+   - update(userRef, { distribution: decision.newDistribution })
+   - update(newMonthRef, { distribution: decision.newDistribution })
+6. Si netCents > 0:
+   - Si es "ahorro": increment(netCents) en 'capsCents.ahorro' del newMonthRef.
+   - Si es "next_month":
+     * split = calculateDistribution(netCents, distributionFinal)
+     * set() nueva transacción de ingreso en el mes nuevo.
+     * update(newMonthRef) incrementando totalIncomeCents, incomeCount (+1) y distribuyendo el split en capsCents.
+   - Escribir en prevMonthRef el remainder con su destination y amountCents.
+7. Si netCents <= 0:
+   - Escribir en prevMonthRef { remainder: { destination: "forgiven", amountCents: netCents } }.
+================================================================================
