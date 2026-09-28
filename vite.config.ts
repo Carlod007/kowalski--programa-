@@ -17,6 +17,14 @@ export default defineConfig({
         // detecta de forma confiable.
         skipWaiting: false,
         clientsClaim: false,
+        globIgnores: ["**/historyXlsxService-*.js"],
+        runtimeCaching: [
+          {
+            urlPattern: /\/assets\/historyXlsxService-[^/]+\.js$/,
+            handler: "CacheFirst",
+            options: { cacheName: "history-xlsx-module", expiration: { maxEntries: 1 } },
+          },
+        ],
       },
       includeAssets: ["icon-192.png", "apple-touch-icon.png"],
       manifest: {

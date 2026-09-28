@@ -40,89 +40,45 @@ export async function buildHistoryCsv(
   fromMonthId: string,
   toMonthId: string,
 ): Promise<string> {
-  const monthsRef = collection(db, "users", userId, "months");
-  const q = query(
-    monthsRef,
-    where(documentId(), ">=", fromMonthId),
-    where(documentId(), "<=", toMonthId),
-    orderBy(documentId()),
-  );
-  const monthDocs = await getDocs(q);
+  const history = await getHistoryTransactions(userId, fromMonthId, toMonthId);
 
   const incomeRows: string[] = [];
   const loanRows: string[] = [];
   const expenseRows: string[] = [];
 
-  for (const monthDoc of monthDocs.docs) {
-    const monthId = monthDoc.id;
+  for (const { monthId, tx } of history) {
     const monthLabel = formatMonthLabel(monthId);
-    const txRef = collection(
-      db,
-      "users",
-      userId,
-      "months",
-      monthId,
-      "transactions",
-    );
-    const txSnap = await getDocs(txRef);
-
-    const ordered = txSnap.docs.map((item) => ({ id: item.id, tx: item.data() as Transaction }))
-      .sort((a, b) => compareRecordedTiming(a.tx, b.tx) || a.id.localeCompare(b.id));
-    for (const { tx } of ordered) {
-      const recordedDate = getRecordedDate(tx);
-      const recordedDay = recordedDate ? toDateInputValue(recordedDate) : "";
-      const recordedTime = recordedDate ? formatTime24(recordedDate) : "";
-      const declaredDate = recordedDay && tx.transactionDate === recordedDay
-        ? ""
-        : tx.transactionDate;
-      if (tx.type === "income") {
-        const income = tx as IncomeTransaction;
-        incomeRows.push(
-          [
-            monthLabel,
-            declaredDate,
-            recordedDay,
-            recordedTime,
-            csvEscape(income.source),
-            csvEscape(income.description ?? ""),
-            centsToPlain(income.amountCents),
-          ].join(","),
-        );
-      } else if (tx.type === "loan") {
-        const loan = tx as LoanReceiptTransaction;
-        loanRows.push(
-          [
-            monthLabel,
-            declaredDate,
-            recordedDay,
-            recordedTime,
-            csvEscape(loan.lender ?? ""),
-            centsToPlain(loan.amountCents),
-          ].join(","),
-        );
-      } else {
-        const expense = tx as ExpenseTransaction;
-        const loanRelation = expense.fundedByLoanId
-          ? `Financiado con ${expense.fundedByLoanName ?? "préstamo"}`
-          : expense.loanPaymentId
-            ? "Pago de préstamo"
-            : "";
-        expenseRows.push(
-          [
-            monthLabel,
-            declaredDate,
-            recordedDay,
-            recordedTime,
-            CATEGORY_META[expense.category].label,
-            csvEscape(expense.subcategory),
-            csvEscape(expense.description ?? ""),
-            csvEscape((expense.tags ?? []).join(" | ")),
-            csvEscape(expense.paymentMethod),
-            csvEscape(loanRelation),
-            centsToPlain(expense.amountCents),
-          ].join(","),
-        );
-      }
+    const recordedDate = getRecordedDate(tx);
+    const recordedDay = recordedDate ? toDateInputValue(recordedDate) : "";
+    const recordedTime = recordedDate ? formatTime24(recordedDate) : "";
+    const declaredDate = recordedDay && tx.transactionDate === recordedDay
+      ? ""
+      : tx.transactionDate;
+    if (tx.type === "income") {
+      const income = tx as IncomeTransaction;
+      incomeRows.push(
+        [monthLabel, declaredDate, recordedDay, recordedTime,
+          csvEscape(income.source), csvEscape(income.description ?? ""),
+          centsToPlain(income.amountCents)].join(","),
+      );
+    } else if (tx.type === "loan") {
+      const loan = tx as LoanReceiptTransaction;
+      loanRows.push(
+        [monthLabel, declaredDate, recordedDay, recordedTime,
+          csvEscape(loan.lender ?? ""), centsToPlain(loan.amountCents)].join(","),
+      );
+    } else {
+      const expense = tx as ExpenseTransaction;
+      const loanRelation = expense.fundedByLoanId
+        ? `Financiado con ${expense.fundedByLoanName ?? "préstamo"}`
+        : expense.loanPaymentId ? "Pago de préstamo" : "";
+      expenseRows.push(
+        [monthLabel, declaredDate, recordedDay, recordedTime,
+          CATEGORY_META[expense.category].label, csvEscape(expense.subcategory),
+          csvEscape(expense.description ?? ""), csvEscape((expense.tags ?? []).join(" | ")),
+          csvEscape(expense.paymentMethod), csvEscape(loanRelation),
+          centsToPlain(expense.amountCents)].join(","),
+      );
     }
   }
 
@@ -141,6 +97,41 @@ export async function buildHistoryCsv(
   ];
 
   return lines.join("\n");
+}
+
+export async function getHistoryTransactions(
+  userId: string,
+  fromMonthId: string,
+  toMonthId: string,
+): Promise<{ monthId: string; tx: Transaction }[]> {
+  const monthsRef = collection(db, "users", userId, "months");
+  const q = query(
+    monthsRef,
+    where(documentId(), ">=", fromMonthId),
+    where(documentId(), "<=", toMonthId),
+    orderBy(documentId()),
+  );
+  const monthDocs = await getDocs(q);
+
+  const history: { monthId: string; tx: Transaction }[] = [];
+
+  for (const monthDoc of monthDocs.docs) {
+    const monthId = monthDoc.id;
+    const txRef = collection(
+      db,
+      "users",
+      userId,
+      "months",
+      monthId,
+      "transactions",
+    );
+    const txSnap = await getDocs(txRef);
+
+    const ordered = txSnap.docs.map((item) => ({ id: item.id, tx: item.data() as Transaction }))
+      .sort((a, b) => compareRecordedTiming(a.tx, b.tx) || a.id.localeCompare(b.id));
+    history.push(...ordered.map(({ tx }) => ({ monthId, tx })));
+  }
+  return history;
 }
 
 export function downloadCsv(csvContent: string, filename: string): void {

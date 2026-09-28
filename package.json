@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
+    "exceljs": "4.4.0",
     "firebase": "^12.15.0",
     "lucide-react": "^1.28.0",
     "react": "^19.2.6",

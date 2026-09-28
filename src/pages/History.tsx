@@ -214,7 +214,6 @@ export default function History() {
       {user && showExport && (
         <ExportPanel
           userId={user.uid}
-          currentMonthId={viewedMonthId}
           onClose={() => setShowExport(false)}
         />
       )}
@@ -631,11 +630,9 @@ function groupByDate(transactions: TxWithId[]): {
 
 function ExportPanel({
   userId,
-  currentMonthId,
   onClose,
 }: {
   userId: string;
-  currentMonthId: string;
   onClose: () => void;
 }) {
   const [months, setMonths] = useState<string[]>([]);
@@ -661,13 +658,20 @@ function ExportPanel({
     };
   }, [userId]);
 
-  async function handleExport() {
+  async function handleExport(format: "xlsx" | "csv") {
     if (!fromMonth || !toMonth) return;
     setExporting(true);
     setError(null);
     try {
-      const csv = await buildHistoryCsv(userId, fromMonth, toMonth);
-      downloadCsv(csv, `kowalski_${fromMonth}_a_${toMonth}.csv`);
+      if (format === "xlsx") {
+        const { exportHistoryXlsx, downloadXlsx } = await import("@/services/historyXlsxService");
+        const xlsx = await exportHistoryXlsx(userId, fromMonth, toMonth);
+        const period = fromMonth === toMonth ? fromMonth : `${fromMonth}-a-${toMonth}`;
+        downloadXlsx(xlsx, `kowalski-historial-${period}.xlsx`);
+      } else {
+        const csv = await buildHistoryCsv(userId, fromMonth, toMonth);
+        downloadCsv(csv, `kowalski_${fromMonth}_a_${toMonth}.csv`);
+      }
       onClose();
     } catch (err) {
       console.error("Error al exportar:", err);
@@ -718,7 +722,7 @@ function ExportPanel({
             </div>
           ) : (
             <p className="mt-2 text-xs text-stone-400">
-              Solo hay un mes disponible: {formatMonthLabel(currentMonthId)}
+              Solo hay un mes disponible: {formatMonthLabel(fromMonth)}
             </p>
           )}
 
@@ -729,22 +733,30 @@ function ExportPanel({
           )}
           {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
 
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => handleExport("xlsx")}
+              disabled={exporting || rangeInvalid || !fromMonth || !toMonth}
+              className="w-full rounded-lg bg-emerald-700 px-3 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {exporting ? "Generando..." : "Exportar Excel (.xlsx)"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport("csv")}
+              disabled={exporting || rangeInvalid || !fromMonth || !toMonth}
+              className="w-full rounded-lg border border-stone-300 px-3 py-2.5 text-sm font-medium text-stone-700 disabled:opacity-50"
+            >
+              Exportar CSV
+            </button>
             <button
               type="button"
               onClick={onClose}
               disabled={exporting}
-              className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600"
+              className="w-full py-1 text-sm text-stone-500 disabled:opacity-50"
             >
               Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={handleExport}
-              disabled={exporting || rangeInvalid}
-              className="flex-1 rounded-lg bg-stone-900 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {exporting ? "Generando..." : "Descargar CSV"}
             </button>
           </div>
         </>
