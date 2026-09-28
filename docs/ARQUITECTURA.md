@@ -46,7 +46,7 @@ centavos**, nunca como decimales.
 
 ```bash
 npm run dev      # desarrollo
-npm test         # pruebas (43, una vez)
+npm test         # pruebas una vez
 npm run test:watch
 npm run lint
 npm run build    # tsc -b && vite build
@@ -66,7 +66,7 @@ src/
   store/         authStore (Zustand)
   types/         Modelos de datos
   utils/         Funciones puras (cálculo, formato)
-docs/            Este documento (ignorado por git)
+docs/            Documentación del proyecto
 scripts/         Migraciones puntuales (Node + firebase-admin)
 ```
 
@@ -110,12 +110,19 @@ migrationBackups/{...}                       Respaldos de migraciones
   savingsGoals: SavingsGoal[]
   fixedIncomes?: { id, name, monthlyAmountCents }[]
   essentialNeeds?: { id, name, monthlyAmountCents }[]
+  subcategoryBudgets?: { category, subcategory, monthlyLimitCents }[]
 }
 ```
 
 `fixedIncomes` y `essentialNeeds` son **declaraciones**, no dinero real. Sirven
 para calcular el porcentaje mínimo recomendado de Necesidad y para autocompletar
 montos en los formularios.
+
+`subcategoryBudgets` guarda objetivos mensuales opcionales para subcategorías
+de Necesidad y Ocio. Se compara cada objetivo con el consumo de esa
+subcategoría, incluido el financiado con préstamo o tarjeta, sin contar de
+nuevo pagos de deuda. Los avisos son informativos: no modifican porcentajes,
+topes ni saldos y no bloquean el registro.
 
 ### `SavingsGoal`
 
@@ -164,6 +171,14 @@ siempre los helpers de `utils/savings.ts`.
 ```
 
 ### `transactions/{txId}`
+
+`transactionDate` es el día declarado (`YYYY-MM-DD`): hoy por defecto o un día
+pasado del mes actual. `localDate` y `serverDate` registran el momento real de
+creación. Ya no se solicita ni se escribe una hora declarada en operaciones
+nuevas; `transactionTime` solo puede persistir en registros antiguos y no se
+usa para mostrar otra hora ni para ordenar. El Historial permite corregir el
+día declarado en operaciones admitidas del mes actual abierto, sin cambiar el
+momento de registro.
 
 ```ts
 // Ingreso
@@ -484,6 +499,7 @@ de `App.tsx`.
 | `/loans` | Loans | Préstamos, cuotas, vencimientos y pagos confirmados |
 | `/close-month/:monthId?` | CloseMonth | Resumen del cierre. **Solo informa, no ejecuta** |
 | `/settings` | Settings | Perfil, reparto, fuentes, subcategorías, metas, métodos |
+| `/subcategory-budgets` | SubcategoryBudgets | Objetivos mensuales informativos por subcategoría |
 | `/admin` | AdminOnboarding | Reeditar el perfil. Restringido por `VITE_ADMIN_UID` |
 
 **Reparto de responsabilidades entre pantallas de ahorro** (para no duplicar):
@@ -512,6 +528,12 @@ usó.
 - **`months`**: no se pueden borrar. El reparto solo cambia si `incomeCount ==
   0`. Un mes cerrado solo admite escribir `remainder`, y una sola vez.
 - **`transactions`**: crear, editar y borrar solo si el mes no está cerrado.
+- **Pendiente conocido en `months` y `transactions`**: las reglas actuales son
+  más permisivas que la convención de esta guía. En `months`, la creación no
+  valida forma, tipos ni montos. En `transactions`, la creación no valida forma,
+  tipos, montos ni fechas; la actualización tampoco conserva explícitamente la
+  identidad y los campos inmutables ni limita los campos mutables. El control
+  por propietario y la excepción de eliminación de datos siguen vigentes.
 - **`loans`**: crear y actualizar con montos enteros, fechas y categorías
   válidas. Solo se elimina si nunca se usó ni pagó y el mes sigue abierto.
 - **`loans/{loanId}/payments`**: crear pagos positivos en meses abiertos; no se
@@ -531,7 +553,7 @@ solo puede tocar sus propios datos.
 
 ## 8. Pruebas
 
-52 pruebas en `src/utils/*.test.ts`, sobre **funciones puras** (sin Firebase):
+Hay pruebas de funciones puras en `src/utils/*.test.ts`, entre ellas:
 
 - `distribution.test.ts` — reparto, mínimo recomendado, reescalado proporcional
 - `savings.test.ts` — asignado, sin asignar, sobreasignado, fondo vs compra,
@@ -546,8 +568,12 @@ Las más valiosas son los bucles que verifican que la suma del reparto dé
 exactamente el monto original para miles de valores: ese es el invariante que
 garantiza que no se pierde ni se inventa un centavo.
 
-**Sin cubrir todavía:** los servicios que escriben en Firestore. Requiere el
-emulador de Firebase; es una fase aparte y más pesada.
+También hay pruebas en `src/services/`: `exportService.test.ts` y
+`transactionTimingService.test.ts`, además de
+`accountDataService.integration.test.ts`. Esta última se ejecuta con los
+emuladores de Authentication y Firestore cuando
+`RUN_FIREBASE_EMULATOR_TESTS=true`. Esto no implica cobertura completa de los
+servicios ni de todas las reglas.
 
 ---
 
@@ -616,10 +642,10 @@ Diseño a imitar en futuras migraciones:
 ### Funcionalidad pendiente
 
 - **Monitoreo de errores** (Sentry) — media hora de trabajo, alto valor
-- **Borrar cuenta** — requiere Cloud Functions para borrado en cascada, y eso
-  exige el plan Blaze. Las reglas actuales impiden a propósito que el navegador
-  borre historiales
-- **Pruebas con emulador** para los servicios
+- **Ampliar las pruebas de servicios y reglas con emuladores**; ya existe una
+  prueba de integración del flujo de eliminación de datos.
+- **Endurecer las reglas de `months` y `transactions`** según la convención de
+  creación y actualización descrita en `AGENTS.md`.
 - `closingNotification` se guarda en el perfil pero no se usa
 
 ### Límites de la plataforma

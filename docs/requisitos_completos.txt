@@ -3,13 +3,13 @@
 ================================================================================
 
 --------------------------------------------------------------------------------
-1. REGLAS DE NEGOCIO CORE (METODOLOGÍA 70/20/10)
+1. REGLAS DE NEGOCIO CORE (ANTECEDENTE; DISTRIBUCIÓN ACTUAL 50/30/20)
 --------------------------------------------------------------------------------
-* CATEGORÍAS: Necesidad (70%), Ocio (10%), Ahorro (20%) [valores por defecto].
+* CATEGORÍAS: Necesidad (50%), Ocio (30%), Ahorro (20%) [valores por defecto actuales en el código; configurables].
 * DISTRIBUCIÓN INMEDIATA: Cada ingreso registrado se divide en tiempo real según los porcentajes del perfil, sumándose a los límites (capsCents).
 * CENTAVOS ENTEROS (INTEGER CENTS): Todos los cálculos y persistencia de dinero se manejan como enteros (S/ 10.50 -> 1050). Evita errores de redondeo IEEE 754.
 * SOBREGUARDO / SOBREPRESUPUESTO: Permitido. Si el gasto supera el disponible, el saldo queda negativo y la UI muestra alerta visual (rojo). No se bloquea.
-* SALDOS AL CIERRE: Los saldos negativos se perdonan (mes nuevo inicia en cero). El saldo positivo (remanente) se decide en el cierre:
+* SALDOS AL CIERRE (PROPUESTA HISTÓRICA NO IMPLEMENTADA): Los saldos negativos se perdonan (mes nuevo inicia en cero). El saldo positivo (remanente) se decide en el cierre:
   - Opción A: Mover a Ahorro del nuevo mes (se suma a capsCents.ahorro sin transacción).
   - Opción B: Ingreso extra (se crea transacción automática en el mes nuevo).
 * HISTORIAL INMUTABLE: Los meses cerrados (closed: true) son de SOLO LECTURA. Las subcategorías se guardan embebidas como string al momento de la transacción.
@@ -56,6 +56,12 @@ users / {userId} / months / {YYYY-MM} / transactions / {txId}
 --------------------------------------------------------------------------------
 3. ADENDA DE CIERRE DE MES / REMANENTE (FASE 3)
 --------------------------------------------------------------------------------
+PROPUESTA HISTÓRICA NO IMPLEMENTADA: no existe la decisión A/B ni la función
+resolveMonthRemainder. El cierre actual se ejecuta automáticamente desde
+checkAndCloseMonth: transfiere el excedente propio de Ocio al ahorro acumulado
+y conserva el excedente de Necesidad para el mes siguiente. Las reglas y la
+firma que siguen describen el diseño propuesto, no el comportamiento actual.
+
 * FÓRMULA DEL REMANENTE (NETA): 
   netCents = prevMonth.totalIncomeCents - (spentCents.necesidad + spentCents.ocio + spentCents.ahorro)
   - Un déficit en una categoría compensa un superávit en otra (cálculo neto).
