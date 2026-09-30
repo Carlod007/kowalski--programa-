@@ -16,7 +16,49 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /users/{userId} {
-      allow read, create, update: if isOwner(userId);
+      function currentMarker(monthId) {
+        let parts = monthId.split('-');
+        let low = request.time - duration.value(3, 'd');
+        let high = request.time + duration.value(3, 'd');
+        let key = int(parts[0]) * 12 + int(parts[1]);
+        return key >= low.year() * 12 + low.month()
+          && key <= high.year() * 12 + high.month();
+      }
+      function validPreviousClosure(previousId) {
+        let path = /databases/$(database)/documents/users/$(userId)/months/$(previousId);
+        let previous = get(path).data;
+        let after = getAfter(path).data;
+        let ownedCap = previous.capsCents.ocio - previous.get('borrowedCapsCents', {}).get('ocio', 0);
+        let ownedSpent = previous.spentCents.ocio - previous.get('loanFundedSpentCents', {}).get('ocio', 0);
+        let remainder = (ownedCap > 0 ? ownedCap : 0) - (ownedSpent > 0 ? ownedSpent : 0);
+        return previous.closed == false && after.closed == true
+          && after.remainder is map && after.remainder.keys().hasOnly(['ocioToAhorroCents'])
+          && after.remainder.ocioToAhorroCents is int && after.remainder.ocioToAhorroCents >= 0
+          && after.remainder.ocioToAhorroCents == (remainder > 0 ? remainder : 0);
+      }
+      function previousMonthProcessed(previousId) {
+        let path = /databases/$(database)/documents/users/$(userId)/months/$(previousId);
+        return !exists(path) || get(path).data.closed == true || validPreviousClosure(previousId);
+      }
+      function validLastClosedMonth(data) {
+        let previousId = resource.data.get('lastClosedMonth', null);
+        let nextId = data.get('lastClosedMonth', null);
+        let cleaning = resource.data.get('dataDeletionMode', '') in ['reset', 'delete-account'];
+        // Unchanged legacy fields and all other profile fields stay outside this validation.
+        return !data.diff(resource.data).affectedKeys().hasAny(['lastClosedMonth'])
+          || (data.keys().hasAll(['lastClosedMonth'])
+            && (nextId == null
+              ? cleaning
+              : (!cleaning && nextId is string && nextId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+                && currentMarker(nextId)
+                && (previousId == null || (previousId is string
+                  && previousId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$') && nextId > previousId))
+                && existsAfter(/databases/$(database)/documents/users/$(userId)/months/$(nextId))
+                && (previousId == null || previousMonthProcessed(previousId)))));
+      }
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && request.resource.data.lastClosedMonth == null;
+      allow update: if isOwner(userId) && validLastClosedMonth(request.resource.data);
       allow delete: if isOwner(userId)
                     && resource.data.get('dataDeletionMode', '') == 'delete-account';
     }
