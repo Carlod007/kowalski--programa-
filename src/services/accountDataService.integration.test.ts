@@ -77,7 +77,6 @@ async function seedCompleteUser(userId: string, email: string): Promise<void> {
     distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
     subcategories: { necesidad: ["Salud"], ocio: ["Salidas"] },
     paymentMethods: [{ id: "cash", name: "Efectivo", type: "cash" }],
-    closingNotification: { day: 1, time: "18:00" },
     onboardingCompleted: true,
     lastClosedMonth: "2026-08",
     savingsTotalCents: 50_000,

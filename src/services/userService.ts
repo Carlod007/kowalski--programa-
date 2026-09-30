@@ -15,7 +15,6 @@ export function buildInitialUserProfile(
       ocio: [],
     },
     paymentMethods: [],
-    closingNotification: { day: 1, time: "18:00" },
     onboardingCompleted: false,
     lastClosedMonth: null,
     savingsTotalCents: 0,

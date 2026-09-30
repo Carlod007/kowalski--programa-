@@ -12,11 +12,6 @@ export type PaymentMethod = {
   type: "cash" | "digital";
 };
 
-export type ClosingNotification = {
-  day: number;
-  time: string;
-};
-
 /**
  * "compra" (por defecto): adquisiciones materiales o digitales. Solo se pueden
  * usar cuando la meta juntó su objetivo completo, y se gastan de una sola vez.
@@ -86,7 +81,6 @@ export type User = {
   distribution: Distribution;
   subcategories: Record<"necesidad" | "ocio", string[]>;
   paymentMethods: PaymentMethod[];
-  closingNotification: ClosingNotification;
   onboardingCompleted: boolean;
   lastClosedMonth: string | null;
   savingsTotalCents: number;
