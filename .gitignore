@@ -28,3 +28,5 @@ dist-ssr
 # Credenciales de Firebase Admin (scripts/ locales, nunca al repo)
 serviceAccountKey*.json
 *-firebase-adminsdk-*.json
+# Respaldos locales de reglas de Firestore
+firestore.rules.backup-*.txt
