@@ -21,6 +21,17 @@ Kowalski es una PWA de finanzas personales en soles peruanos basada en un presup
 - **Reglas endurecidas, aún no desplegadas a producción:** `firestore.rules` valida estrictamente la creación de `months` y `transactions` y limita las actualizaciones a los campos que cambian, conservando los campos legacy que no se modifican. Las fechas tienen una tolerancia de 3 días respecto a la hora del servidor, sin zona horaria fija. Las reglas se probaron con 143 pruebas de emulador y con la app completa en local contra emulador: los flujos normales no presentaron errores de permisos y una escritura manipulada fue rechazada.
 - **Reglas pendientes:** aplicar el mismo endurecimiento a `users`, `loans` y `creditCards`.
 
+## Riesgos financieros aceptados, pendientes de una tarea aparte
+
+Estas limitaciones corresponden a las reglas, no a las operaciones normales de los servicios, que escriben sus documentos relacionados de forma atómica. La autorización por `uid` sigue vigente: el riesgo es la manipulación de los datos propios mediante escrituras directas. No interpretar la validación local de forma como garantía de correspondencia financiera.
+
+- **Préstamos:** `paidCents` y `borrowedAvailableCents` siguen modificables directamente dentro de sus límites actuales, sin demostrar un pago, gasto financiado o reversión real.
+- **Cuotas de préstamos:** en creaciones o cambios de `installments` se valida únicamente que sea una lista de 1–360 elementos; las actualizaciones conservan la longitud existente. No se validan los campos/tipos de cada elemento ni su correspondencia con pagos reales o asignaciones. Firestore Rules no permite recorrer la lista y comprobar las 360 cuotas dentro del límite de expresiones. La estructura interna y la protección financiera completa requieren revisar el modelo en una tarea aparte. Los datos legacy que no cambian se conservan.
+- **Recepción y cancelación de préstamos:** las reglas del préstamo no exigen por sí mismas la contrapartida completa en Historial y topes del mes.
+- **Tarjetas:** `currentDebtCents` sigue modificable directamente como entero no negativo, sin demostrar compra, intereses, pago o reversión.
+- **Estado activo de tarjeta:** la validación local de `activeStatement` y `lastStatementClosingDate` comprueba forma y tipos; no exige correspondencia con el documento real de `statements` ni acredita la transición de estado.
+- **Estados de cuenta y pagos:** las reglas no garantizan por sí mismas todos los ajustes de deuda, historial y mes relacionados con crear, pagar o cancelar un estado de cuenta, o crear/borrar un pago. `statements.paidCents` también carece de validación contra un pago real. Los servicios sí aplican sus ajustes; queda pendiente impedir que una escritura directa los omita.
+
 ## Decisiones de diseño acordadas
 
 - **Objetivos mensuales por subcategoría:** es el término visible para los límites opcionales e informativos; suman consumo propio, con préstamo y con tarjeta, sin volver a contar pagos de deuda. Alertan sin bloquear ni cambiar porcentajes, topes o saldos.

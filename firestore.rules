@@ -434,6 +434,7 @@ service cloud.firestore {
                     && request.resource.data.receivedMonthId is string
                     && request.resource.data.installments is list
                     && request.resource.data.installments.size() > 0
+                    && request.resource.data.installments.size() <= 360
                     && request.resource.data.createdAt == request.time
                     && request.resource.data.updatedAt == request.time;
       allow update: if request.auth != null
@@ -464,8 +465,11 @@ service cloud.firestore {
                     && request.resource.data.paidCents <= resource.data.totalToRepayCents
                     && request.resource.data.fundMovementCount is int
                     && request.resource.data.fundMovementCount >= 0
-                    && request.resource.data.installments is list
-                    && request.resource.data.installments.size() == resource.data.installments.size()
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['installments'])
+                      || (request.resource.data.installments is list
+                        && request.resource.data.installments.size() > 0
+                        && request.resource.data.installments.size() <= 360
+                        && request.resource.data.installments.size() == resource.data.installments.size()))
                     && request.resource.data.updatedAt == request.time;
       allow delete: if isDeletingUserData(userId)
                     || (
@@ -502,19 +506,8 @@ service cloud.firestore {
       }
       match /fundMovements/{movementId} {
         allow read: if request.auth != null && request.auth.uid == userId;
-        allow create: if request.auth != null
-                      && request.auth.uid == userId
-                      && !isDeletingUserData(userId)
-                      && request.resource.data.userId == userId
-                      && request.resource.data.loanId == loanId
-                      && request.resource.data.origin in ['necesidad', 'ocio']
-                      && request.resource.data.destination in ['necesidad', 'ocio']
-                      && request.resource.data.origin != request.resource.data.destination
-                      && request.resource.data.amountCents is int
-                      && request.resource.data.amountCents > 0
-                      && request.resource.data.transactionDate is string
-                      && request.resource.data.transactionDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-                      && request.resource.data.serverDate == request.time;
+        // Legacy records remain readable/removable; current services create none.
+        allow create: if false;
         allow update: if false;
         allow delete: if isDeletingUserData(userId)
                       || (
@@ -530,6 +523,31 @@ service cloud.firestore {
       }
     }
     match /users/{userId}/creditCards/{cardId} {
+      function statementDate(value) {
+        return value is string
+          && value.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+      }
+      function statementSummary(value) {
+        return value is map
+          && value.keys().hasOnly(['id', 'closingDate', 'dueDate', 'statementBalanceCents',
+            'minimumPaymentCents', 'totalPaymentCents', 'paidCents'])
+          && value.id is string && value.id.size() > 0 && value.id.size() <= 200
+          && statementDate(value.closingDate) && statementDate(value.dueDate)
+          && value.statementBalanceCents is int && value.statementBalanceCents > 0
+          && value.minimumPaymentCents is int && value.minimumPaymentCents >= 0
+          && value.totalPaymentCents is int && value.totalPaymentCents > 0
+          && value.minimumPaymentCents <= value.totalPaymentCents
+          && value.paidCents is int && value.paidCents >= 0
+          && value.paidCents <= value.totalPaymentCents;
+      }
+      function statementFields(data, changed) {
+        // Validate only changed fields on update, preserving untouched legacy data.
+        // Both optional fields may be removed when the latest statement is cancelled.
+        return (!changed.hasAny(['activeStatement']) || !('activeStatement' in data)
+            || statementSummary(data.activeStatement))
+          && (!changed.hasAny(['lastStatementClosingDate']) || !('lastStatementClosingDate' in data)
+            || statementDate(data.lastStatementClosingDate));
+      }
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
                     && request.auth.uid == userId
@@ -550,6 +568,7 @@ service cloud.firestore {
                     && request.resource.data.dueDay is int
                     && request.resource.data.dueDay >= 1
                     && request.resource.data.dueDay <= 31
+                    && statementFields(request.resource.data, request.resource.data.keys().toSet())
                     && request.resource.data.createdAt == request.time
                     && request.resource.data.updatedAt == request.time;
       allow update: if request.auth != null
@@ -564,6 +583,7 @@ service cloud.firestore {
                     && request.resource.data.createdAt == resource.data.createdAt
                     && request.resource.data.currentDebtCents is int
                     && request.resource.data.currentDebtCents >= 0
+                    && statementFields(request.resource.data, request.resource.data.diff(resource.data).affectedKeys())
                     && request.resource.data.updatedAt == request.time;
       allow delete: if isDeletingUserData(userId)
                     || (

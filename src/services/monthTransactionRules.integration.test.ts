@@ -257,7 +257,11 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     await seedMonth(); await seed(cardPath, card()); const batch = writeBatch(db);
     batch.set(txRef, cardExpense({ creditCardStatementId: 'statement', creditCardChargeKind: 'interest-fees' }));
     batch.set(doc(db, `${cardPath}/statements/statement`), statement());
-    batch.update(doc(db, cardPath), { currentDebtCents: 1101, activeStatement: { id: 'statement' }, updatedAt: serverTimestamp() });
+    // Match the complete summary written by confirmCreditCardStatement.
+    batch.update(doc(db, cardPath), { currentDebtCents: 1101, activeStatement: {
+      id: 'statement', closingDate: date, dueDate: date, statementBalanceCents: 1101,
+      minimumPaymentCents: 100, totalPaymentCents: 1101, paidCents: 0,
+    }, updatedAt: serverTimestamp() });
     await batch.commit();
   });
   it.each([
