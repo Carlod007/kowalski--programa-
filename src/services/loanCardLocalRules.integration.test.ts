@@ -86,6 +86,22 @@ async function deny(operation: Promise<unknown>) {
   await expect(operation).rejects.toMatchObject({ code: 'permission-denied' });
   await expect(operation).rejects.not.toThrow(/maximum of 1000|maximum.*calls/i);
 }
+function receipt() {
+  return { type: 'loan', loanId: 'loan', amountCents: 1000, destinationCategory: 'necesidad',
+    transactionDate: date, localDate: new Date().toISOString(), serverDate: serverTimestamp() };
+}
+async function createLoanFixture(extra: DocumentData = {}) {
+  // Keep installment tests focused on shape, with the now-required atomic receipt/caps.
+  const batch = writeBatch(db);
+  batch.set(loanRef, loan(extra));
+  batch.set(doc(db, `${monthPath}/transactions/receipt`), receipt());
+  batch.update(doc(db, monthPath), { 'capsCents.necesidad': 2000, 'borrowedCapsCents.necesidad': 2000 });
+  await batch.commit();
+}
+async function seedStatement(value = summary()) {
+  await seed(`${cardPath}/statements/${value.id}`, { ...value, userId: 'owner', cardId: 'card',
+    cardName: 'Visa QA', interestChargesCents: 0, recordedMonthId: monthId, createdAt: serverTimestamp() });
+}
 
 describe.skipIf(!enabled)('loans y creditCards: validación local en emulador', () => {
   beforeAll(async () => {
@@ -140,7 +156,10 @@ describe.skipIf(!enabled)('loans y creditCards: validación local en emulador', 
   });
   it('permite borrar movimiento antiguo al cancelar el préstamo sin usos', async () => {
     await seed(loanPath, loan({ fundMovementCount: 1 })); await seed(movementPath, movement());
+    await seed(`${monthPath}/transactions/receipt`, receipt());
     const batch = writeBatch(db); batch.delete(movementRef); batch.delete(loanRef);
+    batch.delete(doc(db, `${monthPath}/transactions/receipt`));
+    batch.update(doc(db, monthPath), { 'capsCents.necesidad': 0, 'borrowedCapsCents.necesidad': 0 });
     await batch.commit(); expect((await getDoc(movementRef)).exists()).toBe(false);
   });
   it.each([
@@ -158,10 +177,10 @@ describe.skipIf(!enabled)('loans y creditCards: validación local en emulador', 
   });
 
   it.each([1, 360])('crea préstamo con %i cuotas', async (count) => {
-    await setDoc(loanRef, loan({ installments: installments(count) }));
+    await createLoanFixture({ installments: installments(count) });
   });
   it.each([[], installments(361), {}, 'cuotas', null])('rechaza installments inválido en creación: %j', async (value) => {
-    await deny(setDoc(loanRef, loan({ installments: value })));
+    await deny(createLoanFixture({ installments: value }));
   });
   it.each([1, 360])('permite modificar una lista válida de %i cuotas sin cambiar longitud', async (count) => {
     const values = installments(count); await seed(loanPath, loan({ installments: values }));
@@ -182,7 +201,7 @@ describe.skipIf(!enabled)('loans y creditCards: validación local en emulador', 
     await updateDoc(loanRef, { paidCents: 1, updatedAt: serverTimestamp() });
   });
   it('documenta riesgo residual: no valida los campos internos de una cuota', async () => {
-    await setDoc(loanRef, loan({ installments: [{ sinEstructuraValidada: true }] }));
+    await createLoanFixture({ installments: [{ sinEstructuraValidada: true }] });
   });
 
   const invalidSummaries: [string, unknown][] = [
@@ -207,26 +226,35 @@ describe.skipIf(!enabled)('loans y creditCards: validación local en emulador', 
   // Remove missing fields rather than passing undefined to the Firestore SDK.
   delete (invalidSummaries.at(-1)![1] as DocumentData).totalPaymentCents;
   it.each(invalidSummaries)('rechaza activeStatement en creación: %s', async (_label, value) => {
-    await deny(setDoc(cardRef, card({ activeStatement: value })));
+    await seedStatement();
+    await deny(setDoc(cardRef, card({ activeStatement: value, lastStatementClosingDate: '2026-09-20' })));
   });
   it.each(invalidSummaries)('rechaza activeStatement en actualización: %s', async (_label, value) => {
     await seed(cardPath, card());
-    await deny(updateDoc(cardRef, { activeStatement: value, updatedAt: serverTimestamp() }));
+    await seedStatement();
+    await deny(updateDoc(cardRef, { activeStatement: value, lastStatementClosingDate: '2026-09-20', updatedAt: serverTimestamp() }));
   });
   it('permite crear tarjeta sin campos opcionales', async () => { await setDoc(cardRef, card()); });
   it('permite un resumen completo y fechas bien formadas en creación', async () => {
+    await seedStatement();
     await setDoc(cardRef, card({ activeStatement: summary(), lastStatementClosingDate: '2026-09-20' }));
   });
   it('permite actualización y eliminación de ambos campos opcionales', async () => {
     await seed(cardPath, card());
+    await seedStatement();
     await updateDoc(cardRef, { activeStatement: summary(), lastStatementClosingDate: '2026-09-20', updatedAt: serverTimestamp() });
     await updateDoc(cardRef, { activeStatement: deleteField(), lastStatementClosingDate: deleteField(), updatedAt: serverTimestamp() });
     expect((await getDoc(cardRef)).data()).not.toHaveProperty('activeStatement');
   });
   it('permite pagar parcialmente o completar el resumen sin exigir pago real (pendiente)', async () => {
-    await seed(cardPath, card({ activeStatement: summary() }));
-    await updateDoc(cardRef, { 'activeStatement.paidCents': 500, updatedAt: serverTimestamp() });
-    await updateDoc(cardRef, { 'activeStatement.paidCents': 1000, updatedAt: serverTimestamp() });
+    await seedStatement();
+    await seed(cardPath, card({ activeStatement: summary(), lastStatementClosingDate: '2026-09-20' }));
+    for (const paidCents of [500, 1000]) {
+      const batch = writeBatch(db);
+      batch.update(cardRef, { 'activeStatement.paidCents': paidCents, updatedAt: serverTimestamp() });
+      batch.update(doc(db, `${cardPath}/statements/statement`), { paidCents });
+      await batch.commit();
+    }
   });
   it.each([null, 1, '', '2026-9-20', '2026-00-20', '2026-13-20', '2026-09-00', '2026-09-32'])('rechaza fecha de último corte en creación: %j', async (value) => {
     await deny(setDoc(cardRef, card({ lastStatementClosingDate: value })));
@@ -236,6 +264,7 @@ describe.skipIf(!enabled)('loans y creditCards: validación local en emulador', 
     await deny(updateDoc(cardRef, { lastStatementClosingDate: value, updatedAt: serverTimestamp() }));
   });
   it('permite restaurar un corte anterior sin imponer monotonía', async () => {
+    await seedStatement(summary({ id: 'previous', closingDate: '2026-08-20' }));
     await seed(cardPath, card({ activeStatement: summary(), lastStatementClosingDate: '2026-09-20' }));
     await updateDoc(cardRef, { activeStatement: summary({ id: 'previous', closingDate: '2026-08-20' }), lastStatementClosingDate: '2026-08-20', updatedAt: serverTimestamp() });
   });
@@ -244,13 +273,14 @@ describe.skipIf(!enabled)('loans y creditCards: validación local en emulador', 
     await updateDoc(cardRef, { currentDebtCents: 100, updatedAt: serverTimestamp() });
     await deny(updateDoc(cardRef, { activeStatement: 1, updatedAt: serverTimestamp() }));
   });
-  it('permite eliminar solo un campo opcional sin imponer correspondencia', async () => {
+  it('rechaza eliminar solo un campo opcional por romper correspondencia', async () => {
     await seed(cardPath, card({ activeStatement: summary(), lastStatementClosingDate: '2026-09-20' }));
-    await updateDoc(cardRef, { activeStatement: deleteField(), updatedAt: serverTimestamp() });
+    await deny(updateDoc(cardRef, { activeStatement: deleteField(), updatedAt: serverTimestamp() }));
   });
-  it('no impone límite de deuda igual a la línea ni correspondencia con statement', async () => {
+  it('permite deuda mayor a la línea pero rechaza un statement inexistente', async () => {
     await seed(cardPath, card());
-    await updateDoc(cardRef, { currentDebtCents: 2000, activeStatement: summary(), lastStatementClosingDate: '2026-09-20', updatedAt: serverTimestamp() });
+    await updateDoc(cardRef, { currentDebtCents: 2000, updatedAt: serverTimestamp() });
+    await deny(updateDoc(cardRef, { activeStatement: summary(), lastStatementClosingDate: '2026-09-20', updatedAt: serverTimestamp() }));
     expect((await admin.doc(`${cardPath}/statements/statement`).get()).exists).toBe(false);
   });
   it('conserva autorización por uid para préstamos y tarjetas', async () => {

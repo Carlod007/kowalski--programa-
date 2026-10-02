@@ -261,7 +261,7 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     batch.update(doc(db, cardPath), { currentDebtCents: 1101, activeStatement: {
       id: 'statement', closingDate: date, dueDate: date, statementBalanceCents: 1101,
       minimumPaymentCents: 100, totalPaymentCents: 1101, paidCents: 0,
-    }, updatedAt: serverTimestamp() });
+    }, lastStatementClosingDate: date, updatedAt: serverTimestamp() });
     await batch.commit();
   });
   it.each([
@@ -386,8 +386,10 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     batch.update(doc(db, loanPath), { paidCents: 0, updatedAt: serverTimestamp() }); await batch.commit();
   });
   it('cancela recibo solo al cancelar el préstamo sin uso', async () => {
-    await seedMonth(); await seed(loanPath, loan()); await seed(txPath, receipt()); await deny(deleteDoc(txRef));
-    const batch = writeBatch(db); batch.delete(txRef); batch.delete(doc(db, loanPath)); await batch.commit();
+    await seedMonth({ capsCents: { necesidad: 1000, ocio: 0 }, borrowedCapsCents: { necesidad: 1000, ocio: 0 } });
+    await seed(loanPath, loan()); await seed(txPath, receipt()); await deny(deleteDoc(txRef));
+    const batch = writeBatch(db); batch.delete(txRef); batch.delete(doc(db, loanPath));
+    batch.update(monthRef, { capsCents: zero, borrowedCapsCents: zero }); await batch.commit();
   });
   it('revierte intereses mediante el estado activo sin pagos y la deuda', async () => {
     await seedMonth(); await seed(cardPath, card({ activeStatement: { id: 'statement' } }));
