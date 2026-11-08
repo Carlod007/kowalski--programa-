@@ -4,12 +4,15 @@ import {
   getMonthInitialSplit,
   type MovementWithId,
 } from "@/services/movementService";
+import { isMixedInitialSplit } from "@/utils/distribution";
+import type { Distribution, IncomeTransaction } from "@/types/transaction";
 
 export type AhorroBreakdown = {
   movements: MovementWithId[];
   movementsReady: boolean;
   initialSplitAhorroCents: number;
   isInitialSplitDeterminable: boolean;
+  isMixedSplit: boolean;
   movedToAhorroCents: number;
   movedOutOfAhorroCents: number;
   untrackedCents: number;
@@ -31,24 +34,34 @@ export function useAhorroBreakdown(
   ahorroContributedCents: number,
   totalIncomeCents: number,
   directSavingsCents: number,
+  monthDistribution?: Distribution,
 ): AhorroBreakdown {
   const [movements, setMovements] = useState<MovementWithId[]>([]);
   const [loadedMonth, setLoadedMonth] = useState<string | null>(null);
   const [initialSplitAhorroCents, setInitialSplitAhorroCents] = useState(0);
   const [isInitialSplitDeterminable, setIsInitialSplitDeterminable] =
     useState(true);
+  const [distributedIncomes, setDistributedIncomes] = useState<
+    IncomeTransaction[]
+  >([]);
 
   useEffect(() => {
-    const unsubMovements = getMonthMovements(userId, monthId, (items) => {
-      setMovements(items);
-      setLoadedMonth(`${userId}/${monthId}`);
-    }, () => setLoadedMonth(null));
+    const unsubMovements = getMonthMovements(
+      userId,
+      monthId,
+      (items) => {
+        setMovements(items);
+        setLoadedMonth(`${userId}/${monthId}`);
+      },
+      () => setLoadedMonth(null),
+    );
     const unsubInitialSplit = getMonthInitialSplit(
       userId,
       monthId,
-      (split) => {
+      (split, incomes) => {
         setInitialSplitAhorroCents(split?.ahorro ?? 0);
         setIsInitialSplitDeterminable(split !== null);
+        setDistributedIncomes(incomes ?? []);
       },
     );
     return () => {
@@ -56,6 +69,12 @@ export function useAhorroBreakdown(
       unsubInitialSplit();
     };
   }, [userId, monthId]);
+
+  const isMixedSplit = Boolean(
+    monthDistribution &&
+      isInitialSplitDeterminable &&
+      isMixedInitialSplit(distributedIncomes, monthDistribution),
+  );
 
   const movedToAhorroCents = movements
     .filter((m) => m.destination === "ahorro")
@@ -99,6 +118,7 @@ export function useAhorroBreakdown(
     movementsReady: loadedMonth === `${userId}/${monthId}`,
     initialSplitAhorroCents,
     isInitialSplitDeterminable,
+    isMixedSplit,
     movedToAhorroCents,
     movedOutOfAhorroCents,
     untrackedCents,

@@ -6,7 +6,6 @@ import { useAuthStore } from "@/store/authStore";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
-import { calculateDistribution } from "@/utils/distribution";
 import type { Month } from "@/types/month";
 import BackButton from "@/components/BackButton";
 
@@ -25,7 +24,9 @@ export default function Movements() {
     <div className="min-h-dvh bg-stone-50 px-5 pt-8 pb-10">
       <div>
         <BackButton to="/dashboard" />
-        <h1 className="mt-4 text-xl font-semibold text-stone-900">Movimientos</h1>
+        <h1 className="mt-4 text-xl font-semibold text-stone-900">
+          Movimientos
+        </h1>
       </div>
 
       <div className="mt-5 flex items-center justify-center">
@@ -100,6 +101,7 @@ function MovementsContent({
   const {
     initialSplitAhorroCents,
     isInitialSplitDeterminable,
+    isMixedSplit,
     movedToAhorroCents,
     movedOutOfAhorroCents,
     untrackedCents,
@@ -113,14 +115,11 @@ function MovementsContent({
     month?.ahorroContributedCents ?? 0,
     month?.totalIncomeCents ?? 0,
     month?.directSavingsCents ?? 0,
+    month?.distribution,
   );
 
   const directSavingsCents = month?.directSavingsCents ?? 0;
-
   const ahorroContributedCents = month?.ahorroContributedCents ?? 0;
-  const pureAhorroCap = month
-    ? calculateDistribution(month.totalIncomeCents, month.distribution).ahorro
-    : 0;
 
   return (
     <>
@@ -141,7 +140,11 @@ function MovementsContent({
             </p>
             <div className="mt-3 flex flex-col gap-1 border-t border-stone-100 pt-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-stone-600">Del reparto inicial</span>
+                <span className="text-stone-600">
+                  {isMixedSplit
+                    ? "Reparto inicial (mixto)"
+                    : "Del reparto inicial"}
+                </span>
                 <span className="font-medium text-stone-900">
                   {isInitialSplitDeterminable
                     ? formatCents(initialSplitAhorroCents)
@@ -185,10 +188,15 @@ function MovementsContent({
             </p>
             <div className="mt-3 flex flex-col gap-1 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-stone-600">Reparto inicial</span>
+                <span className="text-stone-600">
+                  {isMixedSplit ? "Reparto inicial (mixto)" : "Reparto inicial"}
+                </span>
                 <span className="font-medium text-stone-900">
-                  {month.distribution.ahorro}% ·{" "}
-                  {formatCents(pureAhorroCap)}
+                  {!isInitialSplitDeterminable
+                    ? "No determinable"
+                    : isMixedSplit
+                      ? formatCents(initialSplitAhorroCents)
+                      : `${month.distribution.ahorro}% · ${formatCents(initialSplitAhorroCents)}`}
                 </span>
               </div>
               <div className="flex items-center justify-between">

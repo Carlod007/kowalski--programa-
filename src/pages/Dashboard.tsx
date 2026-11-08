@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import { moveSurplus } from "@/services/monthService";
 import { checkAndRememberMonthClosing } from "@/services/monthClosingNoticeService";
 import AutomaticMonthClosingSummary from "@/components/AutomaticMonthClosingSummary";
+import DistributionMismatchBanner from "@/components/DistributionMismatchBanner";
 import { getMonthInitialSplit } from "@/services/movementService";
 import { watchLoans } from "@/services/loanService";
 import { watchCreditCards } from "@/services/creditCardService";
@@ -109,6 +110,7 @@ export default function Dashboard() {
         monthId={viewedMonthId}
         canGoForward={canGoForward}
         isCurrentMonth={isViewingCurrentMonth}
+        profileDistribution={userProfile?.distribution}
         savingsTotalCents={userProfile?.savingsTotalCents ?? 0}
         accumulatedCents={userProfile?.savingsTotalCents ?? null}
         unassignedCents={userProfile
@@ -130,6 +132,7 @@ function MonthSummary({
   monthId,
   canGoForward,
   isCurrentMonth,
+  profileDistribution,
   savingsTotalCents,
   accumulatedCents,
   unassignedCents,
@@ -142,6 +145,7 @@ function MonthSummary({
   monthId: string;
   canGoForward: boolean;
   isCurrentMonth: boolean;
+  profileDistribution?: Distribution;
   savingsTotalCents: number;
   accumulatedCents: number | null;
   unassignedCents: number | null;
@@ -254,6 +258,9 @@ function MonthSummary({
   const {
     movements,
     movementsReady,
+    initialSplitAhorroCents,
+    isInitialSplitDeterminable,
+    isMixedSplit,
     netContributionCents,
     ahorroActualPct,
     isAhorroActualDeterminable,
@@ -263,10 +270,19 @@ function MonthSummary({
     month?.ahorroContributedCents ?? 0,
     month?.totalIncomeCents ?? 0,
     month?.directSavingsCents ?? 0,
+    month?.distribution,
   );
 
   return (
     <>
+      {isCurrentMonth && month && (
+        <DistributionMismatchBanner
+          monthDistribution={month.distribution}
+          profileDistribution={profileDistribution}
+          className="mx-5 mt-4"
+        />
+      )}
+
       <div className="mx-5 mt-4 rounded-3xl bg-emerald-600 p-5 text-white">
         <p className="text-sm text-emerald-50">Ingreso total del mes</p>
         <p className="mt-1 text-3xl font-semibold">
@@ -364,6 +380,7 @@ function MonthSummary({
                 essentialNeedsTotalCents={essentialNeedsTotalCents}
                 initialSplit={initialSplit}
                 initialSplitDeterminable={initialSplitDeterminable}
+                isMixedSplit={isMixedSplit}
                 expenses={expenses}
                 outflowSyncing={outflowSyncing}
               />
@@ -380,6 +397,9 @@ function MonthSummary({
               monthlyNetCents={getMonthlySavingsNet(month, expenses, movementsReady ? movements : null)}
               contributedThisMonth={month.ahorroContributedCents}
               percentage={month.distribution.ahorro}
+              initialSplitAhorroCents={initialSplitAhorroCents}
+              isInitialSplitDeterminable={isInitialSplitDeterminable}
+              isMixedSplit={isMixedSplit}
               netContributionCents={netContributionCents}
               ahorroActualPct={ahorroActualPct}
               isAhorroActualDeterminable={isAhorroActualDeterminable}
@@ -418,6 +438,7 @@ function CategoryRow({
   essentialNeedsTotalCents,
   initialSplit,
   initialSplitDeterminable,
+  isMixedSplit,
   expenses,
   outflowSyncing,
 }: {
@@ -430,6 +451,7 @@ function CategoryRow({
   essentialNeedsTotalCents: number;
   initialSplit: Distribution | null;
   initialSplitDeterminable: boolean;
+  isMixedSplit: boolean;
   expenses: ExpenseTransaction[] | null;
   outflowSyncing: boolean;
 }) {
@@ -540,7 +562,11 @@ function CategoryRow({
         </div>
         <div className="flex items-center gap-1">
           <p className="text-xs text-stone-400">
-            {capWasAdjusted ? `${pct}% inicial` : `${pct}%`}
+            {isMixedSplit
+              ? "Reparto inicial (mixto)"
+              : capWasAdjusted
+                ? `${pct}% inicial`
+                : `${pct}%`}
           </p>
           <button
             type="button"
@@ -579,7 +605,7 @@ function CategoryRow({
 
           <div
             className={`mt-3 grid gap-3 rounded-xl bg-stone-50 p-3 text-xs ${
-              capWasAdjusted || !initialSplitDeterminable
+              capWasAdjusted || isMixedSplit || !initialSplitDeterminable
                 ? "grid-cols-2"
                 : "grid-cols-1"
             }`}
@@ -592,16 +618,18 @@ function CategoryRow({
               <p className="text-stone-400">de {formatCents(ownedCap)}</p>
             </div>
 
-            {(capWasAdjusted || !initialSplitDeterminable) && (
+            {(capWasAdjusted || isMixedSplit || !initialSplitDeterminable) && (
               <div>
                 <p className="text-stone-400">Actual</p>
                 <p className="mt-0.5 font-medium text-stone-900">
                   {actualPct}%
                 </p>
                 <p className="text-stone-400">
-                  Inicial:{" "}
+                  {isMixedSplit ? "Reparto inicial (mixto):" : "Inicial:"}{" "}
                   {initialSplitDeterminable
-                    ? `${formatCents(realInitialCap ?? 0)} (${pct}%)`
+                    ? isMixedSplit
+                      ? formatCents(realInitialCap ?? 0)
+                      : `${formatCents(realInitialCap ?? 0)} (${pct}%)`
                     : "No determinable"}
                 </p>
               </div>
@@ -1048,6 +1076,9 @@ function SavingsRow({
   contributedThisMonth,
   monthlyNetCents,
   percentage,
+  initialSplitAhorroCents,
+  isInitialSplitDeterminable,
+  isMixedSplit,
   netContributionCents,
   ahorroActualPct,
   isAhorroActualDeterminable,
@@ -1063,6 +1094,9 @@ function SavingsRow({
   contributedThisMonth: number;
   monthlyNetCents: number | null;
   percentage: number;
+  initialSplitAhorroCents: number;
+  isInitialSplitDeterminable: boolean;
+  isMixedSplit: boolean;
   netContributionCents: number;
   ahorroActualPct: string | null;
   isAhorroActualDeterminable: boolean;
@@ -1119,8 +1153,16 @@ function SavingsRow({
 
       <div className="mt-3 grid grid-cols-3 gap-3 rounded-xl bg-stone-50 p-3 text-xs">
         <div>
-          <p className="text-stone-400">Reparto inicial</p>
-          <p className="mt-0.5 font-medium text-stone-900">{percentage}%</p>
+          <p className="text-stone-400">
+            {isMixedSplit ? "Reparto inicial (mixto)" : "Reparto inicial"}
+          </p>
+          <p className="mt-0.5 font-medium text-stone-900">
+            {!isInitialSplitDeterminable
+              ? "No determinable"
+              : isMixedSplit
+                ? formatCents(initialSplitAhorroCents)
+                : `${percentage}%`}
+          </p>
         </div>
         <div>
           <p className="text-stone-400">Aportado este mes</p>

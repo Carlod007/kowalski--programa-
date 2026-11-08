@@ -10,6 +10,10 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getMonthId, toDateInputValue } from "@/utils/date";
+import {
+  distributionsEqual,
+  isValidDistributionPercentage,
+} from "@/utils/distribution";
 import { rememberMonthClosing } from "@/utils/monthClosingNotices";
 import { getUnassignedCents } from "@/utils/savings";
 import { getMonthRemainders } from "@/utils/monthRemainders";
@@ -17,6 +21,16 @@ import type { Month, MonthCaps } from "@/types/month";
 import type { Distribution } from "@/types/transaction";
 import type { User } from "@/types/user";
 import type { Movement } from "@/types/movement";
+
+export type DistributionUpdateScope = "next_income" | "next_month";
+
+export function hasDistributedIncomes(
+  month: Pick<Month, "distributedIncomeCount" | "totalIncomeCents">,
+): boolean {
+  return (
+    (month.distributedIncomeCount ?? (month.totalIncomeCents > 0 ? 1 : 0)) > 0
+  );
+}
 
 function buildEmptyMonth(distribution: Distribution): WithFieldValue<Month> {
   return {
@@ -28,17 +42,16 @@ function buildEmptyMonth(distribution: Distribution): WithFieldValue<Month> {
     loanFundedSpentCents: { necesidad: 0, ocio: 0 },
     ahorroContributedCents: 0,
     incomeCount: 0,
+    distributedIncomeCount: 0,
     closed: false,
     createdAt: serverTimestamp(),
   };
 }
 
 /**
- * El mes congela su distribución para que los topes ya repartidos no cambien
- * a mitad de camino. Pero mientras no haya ningún ingreso no hay nada
- * repartido que proteger, y un mes congelado con un valor que el usuario ya
- * cambió muestra un porcentaje distinto al de Ajustes. En ese caso se
- * sincroniza.
+ * El mes congela su distribución automática cuando ya hay ingresos repartidos
+ * por porcentajes (los aportes directos a Ahorro no congelan los %). Mientras
+ * no haya ingresos repartidos, si el perfil cambió se sincroniza el mes.
  */
 function syncDistributionIfUnused(
   transaction: Transaction,
@@ -46,13 +59,8 @@ function syncDistributionIfUnused(
   month: Month,
   profileDistribution: Distribution,
 ): void {
-  if (month.incomeCount !== 0) return;
-  const current = month.distribution;
-  if (
-    current.necesidad === profileDistribution.necesidad &&
-    current.ocio === profileDistribution.ocio &&
-    current.ahorro === profileDistribution.ahorro
-  ) {
+  if (hasDistributedIncomes(month)) return;
+  if (distributionsEqual(month.distribution, profileDistribution)) {
     return;
   }
   transaction.update(monthRef, { distribution: profileDistribution });
@@ -86,10 +94,9 @@ async function applyMonthCloseAndEnsure(
       );
       return {
         closedMonthId: null,
-        month:
-          currentMonth.incomeCount === 0
-            ? { ...currentMonth, distribution: userProfile.distribution }
-            : currentMonth,
+        month: !hasDistributedIncomes(currentMonth)
+          ? { ...currentMonth, distribution: userProfile.distribution }
+          : currentMonth,
       };
     }
     const newMonth = buildEmptyMonth(userProfile.distribution);
@@ -187,10 +194,9 @@ async function applyMonthCloseAndEnsure(
     );
     resolvedMonth = {
       ...existingMonth,
-      distribution:
-        existingMonth.incomeCount === 0
-          ? userProfile.distribution
-          : existingMonth.distribution,
+      distribution: !hasDistributedIncomes(existingMonth)
+        ? userProfile.distribution
+        : existingMonth.distribution,
       capsCents: {
         necesidad:
           existingMonth.capsCents.necesidad + inheritedNecesidadCents,
@@ -251,12 +257,11 @@ export async function ensureCurrentMonth(
 export async function updateDistributionNow(
   userId: string,
   newDistribution: Distribution,
+  scope: DistributionUpdateScope = "next_income",
 ): Promise<void> {
-  const sum =
-    newDistribution.necesidad + newDistribution.ocio + newDistribution.ahorro;
-  if (sum !== 100) {
+  if (!isValidDistributionPercentage(newDistribution)) {
     throw new Error(
-      `updateDistributionNow: la distribución debe sumar 100, recibido ${sum}`,
+      "updateDistributionNow: la distribución debe tener enteros entre 0 y 100 que sumen 100",
     );
   }
 
@@ -279,13 +284,19 @@ export async function updateDistributionNow(
       );
     }
 
+    const month = monthSnap.data() as Month;
     transaction.update(userRef, { distribution: newDistribution });
-    syncDistributionIfUnused(
-      transaction,
-      monthRef,
-      monthSnap.data() as Month,
-      newDistribution,
-    );
+
+    const shouldUpdateMonth =
+      !month.closed &&
+      (!hasDistributedIncomes(month) || scope === "next_income");
+
+    if (
+      shouldUpdateMonth &&
+      !distributionsEqual(month.distribution, newDistribution)
+    ) {
+      transaction.update(monthRef, { distribution: newDistribution });
+    }
   });
 }
 

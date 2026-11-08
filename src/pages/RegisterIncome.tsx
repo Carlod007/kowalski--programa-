@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { User, ChevronDown, FileText, Save } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { ensureCurrentMonth } from "@/services/monthService";
@@ -10,6 +10,7 @@ import { registerIncome } from "@/services/transactionService";
 import { getMonthId, toDateInputValue } from "@/utils/date";
 import { validateTransactionTiming } from "@/utils/transactionTiming";
 import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
+import DistributionMismatchBanner from "@/components/DistributionMismatchBanner";
 import { calculateDistribution } from "@/utils/distribution";
 import { formatCents } from "@/utils/currency";
 import type { Distribution } from "@/types/transaction";
@@ -165,13 +166,23 @@ export default function RegisterIncome() {
         Ingresa los detalles de tu ingreso.
       </p>
 
+      <DistributionMismatchBanner
+        monthDistribution={monthDistribution}
+        profileDistribution={userProfile?.distribution}
+        className="mt-4"
+      />
+
       <form
         onSubmit={handleSubmit(onSubmit)}
         className="mt-6 flex flex-col gap-4"
       >
         <div className="rounded-2xl border border-stone-200 bg-white p-4">
-          <TransactionDateTimeFields date={watchedDate}
-            onDateChange={(value) => setValue("date", value, { shouldValidate: true })} />
+          <TransactionDateTimeFields
+            date={watchedDate}
+            onDateChange={(value) =>
+              setValue("date", value, { shouldValidate: true })
+            }
+          />
           {errors.date && (
             <p className="mt-1 text-xs text-red-600">{errors.date.message}</p>
           )}
@@ -201,43 +212,57 @@ export default function RegisterIncome() {
               </span>
             </span>
           </label>
+          {isDirectSavings && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <p>
+                Úsalo solo para dinero nuevo que aún no registraste (regalo,
+                venta). Para pasar dinero ya cobrado a Ahorro usa{" "}
+                <Link to="/dashboard" className="font-semibold underline">
+                  «Mover excedente»
+                </Link>
+                .
+              </p>
+            </div>
+          )}
         </div>
 
         {!isDirectSavings && (
-        <div className="rounded-2xl border border-stone-200 bg-white p-4">
-          <label
-            htmlFor="source"
-            className="text-sm font-semibold text-stone-900"
-          >
-            Fuente
-          </label>
-          <div className="relative mt-2 flex items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-              <User size={18} />
-            </span>
-            <select
-              id="source"
-              {...register("source", {
-                onChange: (e) => handleSourceChange(e.target.value),
-              })}
-              className="flex-1 appearance-none bg-transparent text-sm text-stone-900 outline-none"
+          <div className="rounded-2xl border border-stone-200 bg-white p-4">
+            <label
+              htmlFor="source"
+              className="text-sm font-semibold text-stone-900"
             >
-              <option value="">Selecciona una fuente</option>
-              {sources.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={18}
-              className="pointer-events-none text-stone-400"
-            />
+              Fuente
+            </label>
+            <div className="relative mt-2 flex items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                <User size={18} />
+              </span>
+              <select
+                id="source"
+                {...register("source", {
+                  onChange: (e) => handleSourceChange(e.target.value),
+                })}
+                className="flex-1 appearance-none bg-transparent text-sm text-stone-900 outline-none"
+              >
+                <option value="">Selecciona una fuente</option>
+                {sources.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={18}
+                className="pointer-events-none text-stone-400"
+              />
+            </div>
+            {errors.source && (
+              <p className="mt-1 text-xs text-red-600">
+                {errors.source.message}
+              </p>
+            )}
           </div>
-          {errors.source && (
-            <p className="mt-1 text-xs text-red-600">{errors.source.message}</p>
-          )}
-        </div>
         )}
 
         <div className="rounded-2xl border border-stone-200 bg-white p-4">

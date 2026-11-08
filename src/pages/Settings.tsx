@@ -1,14 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { doc, onSnapshot } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { updateUserProfile } from "@/services/userService";
 import StepIncomeSources from "@/pages/onboarding/StepIncomeSources";
 import Step2Distribution from "@/pages/onboarding/Step2Distribution";
 import Step3Subcategories from "@/pages/onboarding/Step3Subcategories";
 import Step4PaymentMethods from "@/pages/onboarding/Step4PaymentMethods";
-import { updateDistributionNow } from "@/services/monthService";
-import { getMinimumNecesidadRecommendation } from "@/utils/distribution";
+import {
+  ensureCurrentMonth,
+  hasDistributedIncomes,
+  updateDistributionNow,
+  type DistributionUpdateScope,
+} from "@/services/monthService";
+import {
+  formatDistributionShort,
+  getMinimumNecesidadRecommendation,
+  isValidDistributionPercentage,
+} from "@/utils/distribution";
+import type { Month } from "@/types/month";
 import type {
   Source,
   PaymentMethod,
@@ -20,10 +31,11 @@ import type {
 import type { Distribution } from "@/types/transaction";
 import { formatCents } from "@/utils/currency";
 import { getGoalAllocated, getGoalKind, wasPurchased } from "@/utils/savings";
-import { formatDateLabel } from "@/utils/date";
+import { formatDateLabel, getMonthId } from "@/utils/date";
 import { saveGoalDefinitions } from "@/services/savingsGoalService";
 import BackButton from "@/components/BackButton";
 import DataDangerZone from "@/components/DataDangerZone";
+import DistributionMismatchBanner from "@/components/DistributionMismatchBanner";
 import { Link } from "react-router-dom";
 import {
   getResolvedTheme,
@@ -192,13 +204,35 @@ function DistributionSection() {
   const [acknowledgedDeficitKey, setAcknowledgedDeficitKey] = useState<
     string | null
   >(null);
-
+  const [currentMonth, setCurrentMonth] = useState<Month | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [selectedScope, setSelectedScope] =
+    useState<DistributionUpdateScope>("next_income");
+
+  const currentUserId = user?.uid ?? null;
+  const currentMonthId = getMonthId();
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    void ensureCurrentMonth(currentUserId).catch((err) => {
+      console.error("Error al asegurar mes actual:", err);
+    });
+    const monthRef = doc(db, "users", currentUserId, "months", currentMonthId);
+    const unsub = onSnapshot(monthRef, (snap) => {
+      if (snap.exists()) {
+        setCurrentMonth(snap.data() as Month);
+      }
+    });
+    return unsub;
+  }, [currentUserId, currentMonthId]);
 
   if (!user || !userProfile) return null;
 
   const currentUser = user;
   const currentProfile = userProfile;
+  const monthHasDistributed = currentMonth
+    ? hasDistributedIncomes(currentMonth)
+    : false;
 
   const fixedIncomesTotalCents = (currentProfile.fixedIncomes ?? []).reduce(
     (sum, i) => sum + i.monthlyAmountCents,
@@ -233,9 +267,8 @@ function DistributionSection() {
 
   function handleSave() {
     if (!draft) return;
-    const sum = draft.necesidad + draft.ocio + draft.ahorro;
-    if (sum !== 100) {
-      setError("Los porcentajes deben sumar 100%");
+    if (!isValidDistributionPercentage(draft)) {
+      setError("Los porcentajes deben ser enteros entre 0 y 100 y sumar 100%");
       return;
     }
     if (hasDeficit && !deficitAcknowledged) {
@@ -253,15 +286,20 @@ function DistributionSection() {
       return;
     }
     setError(null);
+    if (!monthHasDistributed) {
+      void confirmSave("next_income");
+      return;
+    }
+    setSelectedScope("next_income");
     setShowConfirm(true);
   }
 
-  async function confirmSave() {
+  async function confirmSave(scope: DistributionUpdateScope = selectedScope) {
     if (!draft) return;
     setShowConfirm(false);
     setSaving(true);
     try {
-      await updateDistributionNow(currentUser.uid, draft);
+      await updateDistributionNow(currentUser.uid, draft, scope);
       setUserProfile({ ...currentProfile, distribution: draft });
       setDraft(null);
       setExpanded(false);
@@ -278,18 +316,30 @@ function DistributionSection() {
   return (
     <div>
       {!expanded ? (
-        <button
-          type="button"
-          onClick={handleExpand}
-          className="flex w-full items-center justify-between px-4 py-3"
-        >
-          <span className="text-sm text-stone-900">Distribución</span>
-          <span className="text-sm text-stone-400">
-            {necesidad}/{ocio}/{ahorro}
-          </span>
-        </button>
+        <div>
+          <button
+            type="button"
+            onClick={handleExpand}
+            className="flex w-full items-center justify-between px-4 py-3"
+          >
+            <span className="text-sm text-stone-900">Distribución</span>
+            <span className="text-sm text-stone-400">
+              {necesidad}/{ocio}/{ahorro}
+            </span>
+          </button>
+          <DistributionMismatchBanner
+            monthDistribution={currentMonth?.distribution}
+            profileDistribution={currentProfile.distribution}
+            className="mx-4 mb-3"
+          />
+        </div>
       ) : (
         <div className="p-4">
+          <DistributionMismatchBanner
+            monthDistribution={currentMonth?.distribution}
+            profileDistribution={currentProfile.distribution}
+            className="mb-3"
+          />
           <Step2Distribution
             data={draft!}
             onChange={setDraft}
@@ -351,14 +401,61 @@ function DistributionSection() {
         </div>
       )}
 
-      {showConfirm && (
+      {showConfirm && draft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5">
-            <p className="text-sm text-stone-900">
-              Si todavía no has registrado ingresos este mes, el nuevo reparto
-              se aplica de inmediato. Si ya los registraste, este mes conserva
-              su reparto y el nuevo empieza el mes siguiente.
+            <p className="text-sm font-semibold text-stone-900">
+              ¿Cuándo aplicar el nuevo reparto (
+              {formatDistributionShort(draft)})?
             </p>
+            <p className="mt-1 text-xs text-stone-500">
+              Ya tienes ingresos repartidos este mes. Los ingresos anteriores
+              conservan su reparto original.
+            </p>
+            <div className="mt-3 space-y-2">
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-stone-200 p-3 text-sm text-stone-800">
+                <input
+                  type="radio"
+                  name="distribution-scope"
+                  value="next_income"
+                  checked={selectedScope === "next_income"}
+                  onChange={() => setSelectedScope("next_income")}
+                  className="mt-0.5 text-teal-600"
+                />
+                <div>
+                  <p className="font-medium text-stone-900">
+                    Desde el próximo ingreso de este mes (recomendado)
+                  </p>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    Los próximos ingresos de este mes usarán{" "}
+                    {formatDistributionShort(draft)}.
+                  </p>
+                </div>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-stone-200 p-3 text-sm text-stone-800">
+                <input
+                  type="radio"
+                  name="distribution-scope"
+                  value="next_month"
+                  checked={selectedScope === "next_month"}
+                  onChange={() => setSelectedScope("next_month")}
+                  className="mt-0.5 text-teal-600"
+                />
+                <div>
+                  <p className="font-medium text-stone-900">
+                    Desde el próximo mes
+                  </p>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    Este mes sigue con{" "}
+                    {currentMonth
+                      ? formatDistributionShort(currentMonth.distribution)
+                      : formatDistributionShort(currentProfile.distribution)}{" "}
+                    y el próximo mes iniciará con{" "}
+                    {formatDistributionShort(draft)}.
+                  </p>
+                </div>
+              </label>
+            </div>
             <div className="mt-4 flex gap-2">
               <button
                 type="button"
@@ -369,7 +466,7 @@ function DistributionSection() {
               </button>
               <button
                 type="button"
-                onClick={confirmSave}
+                onClick={() => void confirmSave(selectedScope)}
                 className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white"
               >
                 Confirmar

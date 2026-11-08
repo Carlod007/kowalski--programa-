@@ -1,4 +1,42 @@
-import type { Distribution } from "../types/transaction";
+import type { Distribution, IncomeTransaction } from "../types/transaction";
+
+export function isValidDistributionPercentage(
+  value: unknown,
+): value is Distribution {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate);
+  if (
+    keys.length !== 3 ||
+    !keys.includes("necesidad") ||
+    !keys.includes("ocio") ||
+    !keys.includes("ahorro")
+  ) {
+    return false;
+  }
+  const parts = [candidate.necesidad, candidate.ocio, candidate.ahorro];
+  if (
+    !parts.every(
+      (n): n is number =>
+        typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 100,
+    )
+  ) {
+    return false;
+  }
+  return parts[0] + parts[1] + parts[2] === 100;
+}
+
+export function distributionsEqual(a: Distribution, b: Distribution): boolean {
+  return (
+    a.necesidad === b.necesidad &&
+    a.ocio === b.ocio &&
+    a.ahorro === b.ahorro
+  );
+}
+
+export function formatDistributionShort(distribution: Distribution): string {
+  return `${distribution.necesidad}/${distribution.ocio}/${distribution.ahorro}`;
+}
 
 export function calculateDistribution(
   incomeCents: number,
@@ -9,6 +47,23 @@ export function calculateDistribution(
   const ahorro = incomeCents - necesidad - ocio;
 
   return { necesidad, ocio, ahorro };
+}
+
+export function isMixedInitialSplit(
+  incomes: ReadonlyArray<
+    Pick<IncomeTransaction, "amountCents" | "distribution" | "isDirectSavings">
+  >,
+  monthDistribution: Distribution,
+): boolean {
+  const distributed = incomes.filter((tx) => !tx.isDirectSavings);
+  if (distributed.length === 0) return false;
+  return distributed.some(
+    (tx) =>
+      !distributionsEqual(
+        tx.distribution,
+        calculateDistribution(tx.amountCents, monthDistribution),
+      ),
+  );
 }
 
 export function calculateMinimumNecesidadPercentage(

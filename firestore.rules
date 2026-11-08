@@ -12,6 +12,16 @@ service cloud.firestore {
                 in ['reset', 'delete-account'];
     }
 
+    function nonnegative(value) {
+      return value is int && value >= 0;
+    }
+
+    function percentage(value) {
+      return value is map && value.keys().hasOnly(['necesidad', 'ocio', 'ahorro'])
+        && nonnegative(value.necesidad) && nonnegative(value.ocio) && nonnegative(value.ahorro)
+        && value.necesidad + value.ocio + value.ahorro == 100;
+    }
+
     function positivePart(value) {
       return value > 0 ? value : 0;
     }
@@ -117,28 +127,28 @@ service cloud.firestore {
             : !data.diff(resource.data).affectedKeys().hasAny(['savingsTotalCents']))
           || (data.savingsTotalCents is int && data.savingsTotalCents >= 0);
       }
+      function validDistribution(data, creating) {
+        return (creating
+            ? !('distribution' in data)
+            : !data.diff(resource.data).affectedKeys().hasAny(['distribution']))
+          || percentage(data.distribution);
+      }
       allow read: if isOwner(userId);
       allow create: if isOwner(userId)
                     && request.resource.data.lastClosedMonth == null
-                    && validSavingsTotal(request.resource.data, true);
+                    && validSavingsTotal(request.resource.data, true)
+                    && validDistribution(request.resource.data, true);
       allow update: if isOwner(userId)
                     && validLastClosedMonth(request.resource.data)
-                    && validSavingsTotal(request.resource.data, false);
+                    && validSavingsTotal(request.resource.data, false)
+                    && validDistribution(request.resource.data, false);
       allow delete: if isOwner(userId)
                     && resource.data.get('dataDeletionMode', '') == 'delete-account';
     }
     match /users/{userId}/months/{monthId} {
-      function nonnegative(value) {
-        return value is int && value >= 0;
-      }
       function pair(value) {
         return value is map && value.keys().hasOnly(['necesidad', 'ocio'])
           && nonnegative(value.necesidad) && nonnegative(value.ocio);
-      }
-      function percentage(value) {
-        return value is map && value.keys().hasOnly(['necesidad', 'ocio', 'ahorro'])
-          && nonnegative(value.necesidad) && nonnegative(value.ocio) && nonnegative(value.ahorro)
-          && value.necesidad + value.ocio + value.ahorro == 100;
       }
       // UTC +/- 3 days covers UTC-12..UTC+14 plus two days of clock margin.
       function currentMonth() {
@@ -170,11 +180,12 @@ service cloud.firestore {
         return currentMonth()
           && data.keys().hasOnly(['totalIncomeCents', 'distribution', 'capsCents', 'spentCents',
             'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents', 'incomeCount',
-            'closed', 'createdAt', 'inheritedNecesidadCents'])
+            'distributedIncomeCount', 'closed', 'createdAt', 'inheritedNecesidadCents'])
           && percentage(data.distribution) && pair(data.capsCents) && pair(data.borrowedCapsCents)
           && (!('inheritedNecesidadCents' in data)
             || (nonnegative(data.inheritedNecesidadCents)
               && data.inheritedNecesidadCents == data.capsCents.necesidad - data.borrowedCapsCents.necesidad))
+          && (!('distributedIncomeCount' in data) || (data.distributedIncomeCount is int && data.distributedIncomeCount == 0))
           && data.totalIncomeCents is int && data.totalIncomeCents == 0
           && data.incomeCount is int && data.incomeCount == 0
           && data.ahorroContributedCents is int && data.ahorroContributedCents == 0
@@ -196,6 +207,7 @@ service cloud.firestore {
       function changedAmounts(data, changed) {
         return (!changed.hasAny(['totalIncomeCents']) || nonnegative(data.totalIncomeCents))
           && (!changed.hasAny(['incomeCount']) || nonnegative(data.incomeCount))
+          && (!changed.hasAny(['distributedIncomeCount']) || nonnegative(data.distributedIncomeCount))
           && (!changed.hasAny(['ahorroContributedCents']) || nonnegative(data.ahorroContributedCents))
           && (!changed.hasAny(['directSavingsCents']) || nonnegative(data.directSavingsCents))
           && (!changed.hasAny(['inheritedNecesidadCents']) || nonnegative(data.inheritedNecesidadCents))
@@ -211,9 +223,14 @@ service cloud.firestore {
         let changed = data.diff(resource.data).affectedKeys();
         return changed.hasOnly(['distribution', 'totalIncomeCents', 'capsCents', 'spentCents',
             'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents',
-            'directSavingsCents', 'inheritedNecesidadCents', 'incomeCount', 'closed', 'remainder'])
+            'directSavingsCents', 'inheritedNecesidadCents', 'incomeCount',
+            'distributedIncomeCount', 'closed', 'remainder'])
           && changedAmounts(data, changed)
-          && (!changed.hasAny(['distribution']) || (resource.data.incomeCount == 0 && percentage(data.distribution)))
+          && (!changed.hasAny(['distribution'])
+            || (percentage(data.distribution)
+              && (resource.data.get('distributedIncomeCount', resource.data.totalIncomeCents > 0 ? 1 : 0) == 0
+                || (changed.hasOnly(['distribution'])
+                  && data.distribution == getAfter(/databases/$(database)/documents/users/$(userId)).data.distribution))))
           && ((resource.data.closed == false
               && ((data.closed == false && !changed.hasAny(['remainder']))
                 || (data.closed == true && changed.hasOnly(['closed', 'remainder']) && validRemainder(data))))
@@ -229,9 +246,6 @@ service cloud.firestore {
       function openMonth() {
         let path = /databases/$(database)/documents/users/$(userId)/months/$(monthId);
         return get(path).data.closed == false && getAfter(path).data.closed == false;
-      }
-      function nonnegative(value) {
-        return value is int && value >= 0;
       }
       function text(value, limit) {
         return value is string && value.size() > 0 && value.size() <= limit;

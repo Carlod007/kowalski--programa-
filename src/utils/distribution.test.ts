@@ -3,7 +3,11 @@ import {
   calculateDistribution,
   calculateMinimumNecesidadPercentage,
   calculateProportionalSplit,
+  distributionsEqual,
+  formatDistributionShort,
   getMinimumNecesidadRecommendation,
+  isMixedInitialSplit,
+  isValidDistributionPercentage,
 } from "./distribution";
 import type { Distribution } from "../types/transaction";
 
@@ -162,5 +166,101 @@ describe("calculateProportionalSplit", () => {
     // Es el caso de un aporte directo: no debe empezar a repartirse.
     const original: Distribution = { necesidad: 0, ocio: 0, ahorro: 1000 };
     expect(calculateProportionalSplit(1000, 1000, original)).toEqual(original);
+  });
+});
+
+describe("isValidDistributionPercentage", () => {
+  it("acepta porcentajes enteros entre 0 y 100 que suman 100", () => {
+    expect(
+      isValidDistributionPercentage({ necesidad: 50, ocio: 30, ahorro: 20 }),
+    ).toBe(true);
+    expect(
+      isValidDistributionPercentage({ necesidad: 100, ocio: 0, ahorro: 0 }),
+    ).toBe(true);
+    expect(
+      isValidDistributionPercentage({ necesidad: 0, ocio: 0, ahorro: 100 }),
+    ).toBe(true);
+  });
+
+  it("rechaza decimales, negativos, NaN, sumas distintas de 100 o claves extra", () => {
+    expect(
+      isValidDistributionPercentage({
+        necesidad: 49.5,
+        ocio: 30.5,
+        ahorro: 20,
+      }),
+    ).toBe(false);
+    expect(
+      isValidDistributionPercentage({ necesidad: -10, ocio: 60, ahorro: 50 }),
+    ).toBe(false);
+    expect(
+      isValidDistributionPercentage({
+        necesidad: Number.NaN,
+        ocio: 50,
+        ahorro: 50,
+      }),
+    ).toBe(false);
+    expect(
+      isValidDistributionPercentage({ necesidad: 50, ocio: 30, ahorro: 10 }),
+    ).toBe(false);
+    expect(
+      isValidDistributionPercentage({
+        necesidad: 50,
+        ocio: 30,
+        ahorro: 20,
+        extra: 0,
+      }),
+    ).toBe(false);
+    expect(isValidDistributionPercentage(null)).toBe(false);
+  });
+});
+
+describe("isMixedInitialSplit y helpers de presentación", () => {
+  it("formatea y compara distribuciones", () => {
+    expect(
+      formatDistributionShort({ necesidad: 50, ocio: 30, ahorro: 20 }),
+    ).toBe("50/30/20");
+    expect(
+      distributionsEqual(
+        { necesidad: 50, ocio: 30, ahorro: 20 },
+        { necesidad: 50, ocio: 30, ahorro: 20 },
+      ),
+    ).toBe(true);
+    expect(
+      distributionsEqual(
+        { necesidad: 50, ocio: 30, ahorro: 20 },
+        { necesidad: 40, ocio: 30, ahorro: 30 },
+      ),
+    ).toBe(false);
+  });
+
+  it("detecta cuando un mes tuvo ingresos con porcentajes mixtos", () => {
+    expect(
+      isMixedInitialSplit(
+        [
+          {
+            amountCents: 100_000,
+            distribution: { necesidad: 50_000, ocio: 30_000, ahorro: 20_000 },
+          },
+          {
+            amountCents: 100_000,
+            distribution: { necesidad: 40_000, ocio: 30_000, ahorro: 30_000 },
+          },
+        ],
+        { necesidad: 40, ocio: 30, ahorro: 30 },
+      ),
+    ).toBe(true);
+
+    expect(
+      isMixedInitialSplit(
+        [
+          {
+            amountCents: 100_000,
+            distribution: { necesidad: 40_000, ocio: 30_000, ahorro: 30_000 },
+          },
+        ],
+        { necesidad: 40, ocio: 30, ahorro: 30 },
+      ),
+    ).toBe(false);
   });
 });

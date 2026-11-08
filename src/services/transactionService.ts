@@ -191,10 +191,12 @@ export async function deleteTransaction(
       ? await transaction.get(linkedCardRef)
       : null;
 
+    const month = monthSnap.data() as Month;
+
     if (tx.type === "income") {
       assertRevertible(
         tx as IncomeTransaction,
-        monthSnap.data() as Month,
+        month,
         userSnap.exists() ? (userSnap.data() as User) : null,
       );
     }
@@ -312,6 +314,9 @@ export async function deleteTransaction(
         transaction.update(monthRef, {
           totalIncomeCents: increment(-income.amountCents),
           incomeCount: increment(-1),
+          ...((month.distributedIncomeCount ?? 1) > 0
+            ? { distributedIncomeCount: increment(-1) }
+            : {}),
           "capsCents.necesidad": increment(-income.distribution.necesidad),
           "capsCents.ocio": increment(-income.distribution.ocio),
           ahorroContributedCents: increment(-income.distribution.ahorro),
@@ -484,11 +489,13 @@ export async function updateIncome(
       throw new Error("El monto debe ser mayor a 0");
     }
 
-    const newSplit = calculateProportionalSplit(
-      newValues.amountCents,
-      tx.amountCents,
-      tx.distribution,
-    );
+    const newSplit: Distribution = tx.isDirectSavings
+      ? { necesidad: 0, ocio: 0, ahorro: newValues.amountCents }
+      : calculateProportionalSplit(
+          newValues.amountCents,
+          tx.amountCents,
+          tx.distribution,
+        );
 
     // Bajar el monto descuenta de ahorro y de los topes, igual que borrarlo.
     // Si ese dinero ya se gastó o está reservado en metas, la resta dejaría
@@ -516,43 +523,50 @@ export async function updateIncome(
       }
     }
 
-    const necesidadDelta = newSplit.necesidad - tx.distribution.necesidad;
-    const ownedCapNecesidad =
-      month.capsCents.necesidad - (month.borrowedCapsCents?.necesidad ?? 0);
-    const ownedSpentNecesidad =
-      month.spentCents.necesidad -
-      (month.loanFundedSpentCents?.necesidad ?? 0);
-    const availableOwnedNecesidad = ownedCapNecesidad - ownedSpentNecesidad;
-    if (necesidadDelta < 0 && -necesidadDelta > availableOwnedNecesidad) {
-      throw new Error(
-        "No se puede bajar tanto: el disponible propio de Necesidad de este mes ya no lo cubre.",
-      );
+    if (!tx.isDirectSavings) {
+      const necesidadDelta = newSplit.necesidad - tx.distribution.necesidad;
+      const ownedCapNecesidad =
+        month.capsCents.necesidad - (month.borrowedCapsCents?.necesidad ?? 0);
+      const ownedSpentNecesidad =
+        month.spentCents.necesidad -
+        (month.loanFundedSpentCents?.necesidad ?? 0);
+      const availableOwnedNecesidad = ownedCapNecesidad - ownedSpentNecesidad;
+      if (necesidadDelta < 0 && -necesidadDelta > availableOwnedNecesidad) {
+        throw new Error(
+          "No se puede bajar tanto: el disponible propio de Necesidad de este mes ya no lo cubre.",
+        );
+      }
+
+      const ocioDelta = newSplit.ocio - tx.distribution.ocio;
+      const ownedCapOcio =
+        month.capsCents.ocio - (month.borrowedCapsCents?.ocio ?? 0);
+      const ownedSpentOcio =
+        month.spentCents.ocio - (month.loanFundedSpentCents?.ocio ?? 0);
+      const availableOwnedOcio = ownedCapOcio - ownedSpentOcio;
+      if (ocioDelta < 0 && -ocioDelta > availableOwnedOcio) {
+        throw new Error(
+          "No se puede bajar tanto: el disponible propio de Ocio de este mes ya no lo cubre.",
+        );
+      }
     }
 
-    const ocioDelta = newSplit.ocio - tx.distribution.ocio;
-    const ownedCapOcio =
-      month.capsCents.ocio - (month.borrowedCapsCents?.ocio ?? 0);
-    const ownedSpentOcio =
-      month.spentCents.ocio - (month.loanFundedSpentCents?.ocio ?? 0);
-    const availableOwnedOcio = ownedCapOcio - ownedSpentOcio;
-    if (ocioDelta < 0 && -ocioDelta > availableOwnedOcio) {
-      throw new Error(
-        "No se puede bajar tanto: el disponible propio de Ocio de este mes ya no lo cubre.",
-      );
+    if (tx.isDirectSavings) {
+      transaction.update(monthRef, {
+        directSavingsCents: increment(newValues.amountCents - tx.amountCents),
+        ahorroContributedCents: increment(ahorroDelta),
+      });
+    } else {
+      transaction.update(monthRef, {
+        totalIncomeCents: increment(newValues.amountCents - tx.amountCents),
+        "capsCents.necesidad": increment(
+          newSplit.necesidad - tx.distribution.necesidad,
+        ),
+        "capsCents.ocio": increment(newSplit.ocio - tx.distribution.ocio),
+        ahorroContributedCents: increment(ahorroDelta),
+      });
     }
-
-    transaction.update(monthRef, {
-      totalIncomeCents: increment(newValues.amountCents - tx.amountCents),
-      "capsCents.necesidad": increment(
-        newSplit.necesidad - tx.distribution.necesidad,
-      ),
-      "capsCents.ocio": increment(newSplit.ocio - tx.distribution.ocio),
-      ahorroContributedCents: increment(
-        newSplit.ahorro - tx.distribution.ahorro,
-      ),
-    });
     transaction.update(userRef, {
-      savingsTotalCents: increment(newSplit.ahorro - tx.distribution.ahorro),
+      savingsTotalCents: increment(ahorroDelta),
     });
 
     transaction.update(txRef, {
@@ -583,14 +597,15 @@ export async function withdrawFromFund(
     goalId: string;
     amountCents: number;
     paymentMethod: string;
-    description?: string;
     date: string;
+    description?: string;
+    allowAutoAssign?: boolean;
   },
 ): Promise<void> {
-  validateTransactionTiming(monthId, input.date);
   if (input.amountCents <= 0) {
     throw new Error("El monto debe ser mayor a 0");
   }
+  validateTransactionTiming(monthId, input.date);
 
   const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
@@ -621,13 +636,25 @@ export async function withdrawFromFund(
       throw new Error("Ese fondo ya no existe");
     }
     if (getGoalKind(goal) !== "fondo") {
-      throw new Error("Solo los fondos permiten retiros parciales");
+      throw new Error("Esta meta se usa para una compra completa, no por partes");
     }
 
     const allocated = getGoalAllocated(goal);
-    if (input.amountCents > allocated) {
-      throw new Error("El monto supera lo asignado a este fondo");
+    const missing = Math.max(0, input.amountCents - allocated);
+
+    if (missing > 0) {
+      if (!input.allowAutoAssign) {
+        throw new Error("El monto supera lo que tienes en este fondo");
+      }
+      const unassigned = getUnassignedCents(
+        userProfile.savingsTotalCents ?? 0,
+        goals,
+      );
+      if (missing > unassigned) {
+        throw new Error("No tienes suficiente ahorro sin asignar");
+      }
     }
+
     if (input.amountCents > (userProfile.savingsTotalCents ?? 0)) {
       throw new Error(
         "El monto supera tu ahorro total disponible. Revisa si tu ahorro está sobreasignado.",
@@ -648,29 +675,29 @@ export async function withdrawFromFund(
     };
     transaction.set(txRef, tx);
 
+    // Si faltaba asignado y se autorizó completarlo desde "sin asignar", el
+    // fondo queda en 0; si alcanzaba, solo baja en lo retirado. En ambos casos
+    // el dinero que sale es input.amountCents.
+    const nextAllocated = Math.max(0, allocated - input.amountCents);
     transaction.update(userRef, {
       savingsTotalCents: increment(-input.amountCents),
       savingsGoals: goals.map((g) =>
-        g.id === goal.id
-          ? { ...g, allocatedCents: allocated - input.amountCents }
-          : g,
+        g.id === goal.id ? { ...g, allocatedCents: nextAllocated } : g,
       ),
     });
   });
 }
 
 /**
- * Compra una meta de tipo "compra": se gasta completa y solo si esa meta ya
- * tiene asignado su objetivo. Se valida contra lo asignado a ESA meta, no
- * contra el ahorro total - si no, la misma plata habilitaría todas las metas
- * a la vez.
+ * Compra una meta de tipo "compra" (un bien concreto). El monto siempre es el
+ * objetivo completo (`goal.targetCents`). Al comprar:
+ * - se descuenta del ahorro acumulado del usuario,
+ * - se consume lo asignado a la meta (vuelve a 0 para poder ahorrar de nuevo si
+ *   quiere repetirla, o dejarla en "Comprada"),
+ * - se incrementa `purchaseCount` y se actualiza `lastPurchasedAt`.
  *
- * Se recibe goalId (no el objeto) y se relee dentro de la transacción, para
- * no comprar con un nombre o monto que quedó viejo en la pantalla.
- *
- * allowAutoAssign es el atajo: si la meta no llega pero hay ahorro sin
- * asignar que cubre la diferencia, se asigna y se compra en una sola
- * operación. Nunca ocurre solo - la pantalla tiene que pedirlo explícitamente.
+ * No toca `spentCents` del mes porque esto no salió del presupuesto mensual de
+ * Necesidad/Ocio: salió del ahorro acumulado.
  */
 export async function purchaseGoalExpense(
   userId: string,
@@ -678,12 +705,13 @@ export async function purchaseGoalExpense(
   input: {
     goalId: string;
     paymentMethod: string;
-    description?: string;
     date: string;
+    description?: string;
     allowAutoAssign?: boolean;
   },
 ): Promise<void> {
   validateTransactionTiming(monthId, input.date);
+
   const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
   const txRef = doc(
@@ -765,9 +793,10 @@ export async function purchaseGoalExpense(
               ...g,
               allocatedCents: remainingAllocated,
               purchaseCount: getPurchaseCount(g) + 1,
-              lastPurchasedAt: goal.lastPurchasedAt && goal.lastPurchasedAt > input.date
-                ? goal.lastPurchasedAt
-                : input.date,
+              lastPurchasedAt:
+                goal.lastPurchasedAt && goal.lastPurchasedAt > input.date
+                  ? goal.lastPurchasedAt
+                  : input.date,
             }
           : g,
       ),
@@ -811,7 +840,10 @@ export async function registerIncome(
 
   const executeWrite = async (
     fallbackMonth?: Month,
-  ): Promise<{ monthMissing: true } | { monthMissing: false; distribution: Distribution }> => {
+  ): Promise<
+    | { monthMissing: true }
+    | { monthMissing: false; distribution: Distribution }
+  > => {
     const txRef = doc(
       collection(db, "users", userId, "months", monthId, "transactions"),
     );
@@ -828,8 +860,9 @@ export async function registerIncome(
       }
 
       if (isDirectSavings) {
-        // Va entero al ahorro: no toca los topes ni totalIncomeCents, para no
-        // alterar los porcentajes del mes con plata que nunca se repartió.
+        // Va entero al ahorro: no toca los topes, totalIncomeCents ni
+        // distributedIncomeCount, para no congelar ni alterar los porcentajes
+        // del mes con plata que nunca se repartió.
         const distribution: Distribution = {
           necesidad: 0,
           ocio: 0,
@@ -880,6 +913,7 @@ export async function registerIncome(
       const monthUpdate: UpdateData<Month> = {
         totalIncomeCents: increment(input.amountCents),
         incomeCount: increment(1),
+        distributedIncomeCount: increment(1),
         "capsCents.necesidad": increment(distribution.necesidad),
         "capsCents.ocio": increment(distribution.ocio),
         ahorroContributedCents: increment(distribution.ahorro),

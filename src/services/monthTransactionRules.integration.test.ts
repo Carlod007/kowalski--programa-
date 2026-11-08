@@ -7,7 +7,7 @@ import {
   type DocumentData,
 } from 'firebase/firestore';
 import { initializeApp as initializeAdminApp, deleteApp as deleteAdminApp } from 'firebase-admin/app';
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import { getMonthId, toDateInputValue } from '@/utils/date';
 
 // Dedicated demo project/port: never connects to production or clears other suites.
@@ -185,7 +185,7 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     await updateDoc(monthRef, { distribution: { necesidad: 70, ocio: 10, ahorro: 20 } });
     await updateDoc(monthRef, { totalIncomeCents: 1000, incomeCount: 1, 'capsCents.necesidad': 700, 'capsCents.ocio': 100, ahorroContributedCents: 200 });
     await updateDoc(monthRef, { 'spentCents.necesidad': 50, 'capsCents.ocio': 120, ahorroContributedCents: 210 });
-    await deny(updateDoc(monthRef, { distribution: percentages }));
+    await deny(updateDoc(monthRef, { distribution: { necesidad: 60, ocio: 20, ahorro: 20 } }));
     await deny(updateDoc(monthRef, { incomeCount: 0, distribution: percentages }));
   });
   it.each([
@@ -644,9 +644,82 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     expect(monthSnap.totalIncomeCents).toBe(100000);
     expect(monthSnap.directSavingsCents).toBe(15000);
     expect(monthSnap.incomeCount).toBe(2);
+    expect(monthSnap.distributedIncomeCount).toBe(1);
     expect(monthSnap.capsCents).toEqual({ necesidad: 50000, ocio: 30000 });
     expect(monthSnap.spentCents).toEqual({ necesidad: 12000, ocio: 0 });
     expect(monthSnap.ahorroContributedCents).toBe(35000);
     expect((await admin.doc(profilePath).get()).data()?.savingsTotalCents).toBe(35000);
+  });
+  it('F2b SERVICIO Y REGLAS: aporte directo no congela %; next_income, next_month, edición/borrado con % mixtos y mes legacy', async () => {
+    const { ensureCurrentMonth, updateDistributionNow } = await import('./monthService');
+    const { registerIncome, updateIncome, deleteTransaction } = await import('./transactionService');
+    const localDate = toDateInputValue(); const localMonth = getMonthId();
+    const localPath = `users/owner/months/${localMonth}`;
+    await admin.doc(localPath).delete();
+    await admin.doc(profilePath).update({ lastClosedMonth: null, savingsTotalCents: 0, distribution: { necesidad: 50, ocio: 30, ahorro: 20 } });
+
+    await ensureCurrentMonth('owner');
+
+    // 1) Aporte directo como primer movimiento NO bloquea cambiar %
+    await registerIncome('owner', {
+      monthId: localMonth,
+      amountCents: 20000,
+      isDirectSavings: true,
+      date: localDate,
+      description: 'Regalo',
+    });
+    await updateDistributionNow('owner', { necesidad: 60, ocio: 20, ahorro: 20 }, 'next_month');
+    expect((await admin.doc(localPath).get()).data()?.distribution).toEqual({ necesidad: 60, ocio: 20, ahorro: 20 });
+
+    // Volvemos a 50/30/20 antes de repartir ingresos
+    await updateDistributionNow('owner', { necesidad: 50, ocio: 30, ahorro: 20 }, 'next_income');
+
+    // 2) Ingreso 1 con 50/30/20 (S/ 1000 -> 50k/30k/20k)
+    await registerIncome('owner', {
+      monthId: localMonth,
+      amountCents: 100000,
+      source: 'Sueldo',
+      date: localDate,
+      description: 'Quincena 1',
+    });
+
+    // 3) Modo next_income a 40/30/30 e Ingreso 2 con 40/30/30 (S/ 1000 -> 40k/30k/30k)
+    await updateDistributionNow('owner', { necesidad: 40, ocio: 30, ahorro: 30 }, 'next_income');
+    expect((await admin.doc(localPath).get()).data()?.distribution).toEqual({ necesidad: 40, ocio: 30, ahorro: 30 });
+
+    await registerIncome('owner', {
+      monthId: localMonth,
+      amountCents: 100000,
+      source: 'Bono',
+      date: localDate,
+      description: 'Quincena 2',
+    });
+
+    let snap = (await admin.doc(localPath).get()).data()!;
+    expect(snap.distributedIncomeCount).toBe(2);
+    expect(snap.capsCents).toEqual({ necesidad: 90000, ocio: 60000 });
+    expect(snap.ahorroContributedCents).toBe(70000); // 20k directo + 20k ing1 + 30k ing2
+
+    // 4) Editar y luego borrar Ingreso 1 usa su split original (50/30/20)
+    const txDocs = (await admin.collection(`${localPath}/transactions`).get()).docs;
+    const tx1 = txDocs.find((d) => d.data().description === 'Quincena 1')!;
+    await updateIncome('owner', localMonth, tx1.id, { amountCents: 200000, source: 'Sueldo', description: 'Quincena 1 editada' });
+    snap = (await admin.doc(localPath).get()).data()!;
+    expect(snap.capsCents).toEqual({ necesidad: 140000, ocio: 90000 }); // +50k/+30k
+
+    await deleteTransaction('owner', localMonth, tx1.id);
+    snap = (await admin.doc(localPath).get()).data()!;
+    expect(snap.distributedIncomeCount).toBe(1);
+    expect(snap.capsCents).toEqual({ necesidad: 40000, ocio: 30000 }); // solo queda Ingreso 2
+
+    // 5) Modo next_month actualiza solo userProfile y deja month.distribution intacto
+    await updateDistributionNow('owner', { necesidad: 55, ocio: 25, ahorro: 20 }, 'next_month');
+    expect((await admin.doc(profilePath).get()).data()?.distribution).toEqual({ necesidad: 55, ocio: 25, ahorro: 20 });
+    expect((await admin.doc(localPath).get()).data()?.distribution).toEqual({ necesidad: 40, ocio: 30, ahorro: 30 });
+
+    // 6) Mes legacy sin distributedIncomeCount acepta next_income cuando coincide con getAfter(userProfile)
+    await admin.doc(localPath).update({ distributedIncomeCount: FieldValue.delete() });
+    await updateDistributionNow('owner', { necesidad: 45, ocio: 35, ahorro: 20 }, 'next_income');
+    expect((await admin.doc(localPath).get()).data()?.distribution).toEqual({ necesidad: 45, ocio: 35, ahorro: 20 });
   });
 });

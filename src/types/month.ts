@@ -34,6 +34,11 @@ export type Month = {
   spentCents: MonthCaps;
   ahorroContributedCents: number;
   incomeCount: number;
+  /**
+   * Cantidad de ingresos repartidos por porcentajes (excluye aportes directos
+   * a Ahorro). Opcional en meses anteriores a F2b (fallback: totalIncomeCents > 0).
+   */
+  distributedIncomeCount?: number;
   closed: boolean;
   remainder?: MonthRemainder;
   /**

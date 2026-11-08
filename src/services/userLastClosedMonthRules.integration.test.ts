@@ -385,4 +385,15 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
     await deleteDoc(profileRef);
     expect((await getDoc(profileRef)).exists()).toBe(false);
   });
+  it.each([
+    ['suma distinta de 100', { necesidad: 50, ocio: 30, ahorro: 10 }],
+    ['decimal', { necesidad: 49.5, ocio: 30.5, ahorro: 20 }],
+    ['negativo', { necesidad: -10, ocio: 60, ahorro: 50 }],
+    ['campo extra', { necesidad: 50, ocio: 30, ahorro: 20, extra: 0 }],
+    ['falta campo', { necesidad: 50, ocio: 50 }],
+  ])('F2b: rechaza distribution inválida en /users/{uid} (%s)', async (_label, invalidDist) => {
+    await deny(updateDoc(profileRef, { distribution: invalidDist }));
+    await admin.doc(profilePath).delete();
+    await deny(setDoc(profileRef, { ...buildInitialUserProfile(identity), distribution: invalidDist }));
+  });
 });

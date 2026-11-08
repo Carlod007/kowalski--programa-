@@ -58,7 +58,12 @@ import {
   updateIncome,
   withdrawFromFund,
 } from "./transactionService";
-import { checkAndCloseMonth, ensureCurrentMonth } from "./monthService";
+import {
+  checkAndCloseMonth,
+  ensureCurrentMonth,
+  hasDistributedIncomes,
+  updateDistributionNow,
+} from "./monthService";
 
 const userPath = "users/u";
 const monthPath = "users/u/months/2026-09";
@@ -392,6 +397,7 @@ describe("integridad financiera F1 en servicios", () => {
       expect(mocks.update).toHaveBeenCalledWith(monthPath, {
         totalIncomeCents: { __op: "increment", value: 100_000 },
         incomeCount: { __op: "increment", value: 1 },
+        distributedIncomeCount: { __op: "increment", value: 1 },
         "capsCents.necesidad": { __op: "increment", value: 50_000 },
         "capsCents.ocio": { __op: "increment", value: 30_000 },
         ahorroContributedCents: { __op: "increment", value: 20_000 },
@@ -573,6 +579,286 @@ describe("integridad financiera F1 en servicios", () => {
           distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
         }),
       );
+    });
+  });
+
+  describe("F2b: gate distributedIncomeCount y modos A/B de cambio de %", () => {
+    it("aporte directo como primer movimiento NO bloquea el cambio de % del mes", async () => {
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        savingsTotalCents: 25_000,
+      });
+      // Mes con un aporte directo (incomeCount: 1, distributedIncomeCount: 0, totalIncomeCents: 0)
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        totalIncomeCents: 0,
+        directSavingsCents: 25_000,
+        incomeCount: 1,
+        distributedIncomeCount: 0,
+        capsCents: { necesidad: 0, ocio: 0 },
+        spentCents: { necesidad: 0, ocio: 0 },
+        ahorroContributedCents: 25_000,
+      });
+
+      expect(
+        hasDistributedIncomes({
+          distributedIncomeCount: 0,
+          totalIncomeCents: 0,
+        }),
+      ).toBe(false);
+
+      // Cambiar a 40/30/30 actualiza tanto userProfile como month.distribution
+      await updateDistributionNow(
+        "u",
+        { necesidad: 40, ocio: 30, ahorro: 30 },
+        "next_month",
+      );
+
+      expect(mocks.update).toHaveBeenCalledWith(userPath, {
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+      });
+      expect(mocks.update).toHaveBeenCalledWith(monthPath, {
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+      });
+
+      // ensureCurrentMonth / checkAndCloseMonth también sincroniza si solo hubo aporte directo
+      mocks.update.mockClear();
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 60, ocio: 20, ahorro: 20 },
+        lastClosedMonth: "2026-09",
+        savingsTotalCents: 25_000,
+      });
+      await ensureCurrentMonth("u");
+      expect(mocks.update).toHaveBeenCalledWith(monthPath, {
+        distribution: { necesidad: 60, ocio: 20, ahorro: 20 },
+      });
+    });
+
+    it("modo next_income: ingreso 1 con 50/30/20, cambio a 40/30/30, ingreso 2 reparte con el nuevo % y el primero no cambia", async () => {
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        savingsTotalCents: 0,
+      });
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        totalIncomeCents: 0,
+        incomeCount: 0,
+        distributedIncomeCount: 0,
+        capsCents: { necesidad: 0, ocio: 0 },
+        spentCents: { necesidad: 0, ocio: 0 },
+        ahorroContributedCents: 0,
+      });
+
+      // Ingreso 1: S/ 1000 con 50/30/20
+      const r1 = await registerIncome("u", {
+        monthId: "2026-09",
+        amountCents: 100_000,
+        source: "Sueldo",
+        date: "2026-09-10",
+      });
+      expect(r1.distribution).toEqual({
+        necesidad: 50_000,
+        ocio: 30_000,
+        ahorro: 20_000,
+      });
+
+      // Reflejar estado tras ingreso 1
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        totalIncomeCents: 100_000,
+        incomeCount: 1,
+        distributedIncomeCount: 1,
+        capsCents: { necesidad: 50_000, ocio: 30_000 },
+        spentCents: { necesidad: 0, ocio: 0 },
+        ahorroContributedCents: 20_000,
+      });
+      mocks.docs.set(`${monthPath}/transactions/tx1`, {
+        type: "income",
+        amountCents: 100_000,
+        source: "Sueldo",
+        transactionDate: "2026-09-10",
+        distribution: { necesidad: 50_000, ocio: 30_000, ahorro: 20_000 },
+      });
+
+      // Cambio en modo next_income a 40/30/30
+      mocks.update.mockClear();
+      await updateDistributionNow(
+        "u",
+        { necesidad: 40, ocio: 30, ahorro: 30 },
+        "next_income",
+      );
+      expect(mocks.update).toHaveBeenCalledWith(userPath, {
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+      });
+      expect(mocks.update).toHaveBeenCalledWith(monthPath, {
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+      });
+      // No toca capsCents ni savingsTotalCents ni tx1
+      expect(mocks.update).toHaveBeenCalledTimes(2);
+
+      // Reflejar nuevo month.distribution y registrar Ingreso 2: S/ 1000
+      mocks.docs.set(monthPath, {
+        ...mocks.docs.get(monthPath)!,
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+      });
+      const r2 = await registerIncome("u", {
+        monthId: "2026-09",
+        amountCents: 100_000,
+        source: "Bono",
+        date: "2026-09-15",
+      });
+      expect(r2.distribution).toEqual({
+        necesidad: 40_000,
+        ocio: 30_000,
+        ahorro: 30_000,
+      });
+      // Ingreso 1 conserva su tx.distribution intacto
+      expect(mocks.docs.get(`${monthPath}/transactions/tx1`)?.distribution).toEqual({
+        necesidad: 50_000,
+        ocio: 30_000,
+        ahorro: 20_000,
+      });
+    });
+
+    it("editar o borrar el ingreso 1 tras cambiar los % usa su split original (50/30/20) y cuadra al centavo", async () => {
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+        savingsTotalCents: 50_000,
+        savingsGoals: [],
+      });
+      // Mes ya tiene 40/30/30 y suma de ingreso 1 (50k/30k/20k) + ingreso 2 (40k/30k/30k)
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+        totalIncomeCents: 200_000,
+        incomeCount: 2,
+        distributedIncomeCount: 2,
+        capsCents: { necesidad: 90_000, ocio: 60_000 },
+        spentCents: { necesidad: 0, ocio: 0 },
+        ahorroContributedCents: 50_000,
+      });
+      mocks.docs.set(txPath, {
+        type: "income",
+        amountCents: 100_000,
+        source: "Sueldo",
+        transactionDate: "2026-09-10",
+        distribution: { necesidad: 50_000, ocio: 30_000, ahorro: 20_000 },
+      });
+
+      // 1) Editar ingreso 1 de S/ 1000 a S/ 2000 debe reescalar con 50/30/20 (+50k/+30k/+20k), NO con 40/30/30
+      await updateIncome("u", "2026-09", "tx1", {
+        amountCents: 200_000,
+        source: "Sueldo",
+      });
+
+      expect(mocks.update).toHaveBeenCalledWith(txPath, {
+        amountCents: 200_000,
+        source: "Sueldo",
+        description: { __op: "deleteField" },
+        distribution: { necesidad: 100_000, ocio: 60_000, ahorro: 40_000 },
+      });
+      expect(mocks.update).toHaveBeenCalledWith(monthPath, {
+        totalIncomeCents: { __op: "increment", value: 100_000 },
+        "capsCents.necesidad": { __op: "increment", value: 50_000 },
+        "capsCents.ocio": { __op: "increment", value: 30_000 },
+        ahorroContributedCents: { __op: "increment", value: 20_000 },
+      });
+
+      // 2) Borrar ingreso 1 revierte exactamente su tx.distribution (-50k/-30k/-20k) y decrementa distributedIncomeCount
+      mocks.update.mockClear();
+      await deleteTransaction("u", "2026-09", "tx1");
+
+      expect(mocks.update).toHaveBeenCalledWith(monthPath, {
+        totalIncomeCents: { __op: "increment", value: -100_000 },
+        incomeCount: { __op: "increment", value: -1 },
+        distributedIncomeCount: { __op: "increment", value: -1 },
+        "capsCents.necesidad": { __op: "increment", value: -50_000 },
+        "capsCents.ocio": { __op: "increment", value: -30_000 },
+        ahorroContributedCents: { __op: "increment", value: -20_000 },
+      });
+      expect(mocks.update).toHaveBeenCalledWith(userPath, {
+        savingsTotalCents: { __op: "increment", value: -20_000 },
+      });
+    });
+
+    it("modo next_month: el mes actual no cambia y el mes siguiente se crea con el nuevo %", async () => {
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        lastClosedMonth: "2026-09",
+        savingsTotalCents: 20_000,
+      });
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        totalIncomeCents: 100_000,
+        incomeCount: 1,
+        distributedIncomeCount: 1,
+        capsCents: { necesidad: 50_000, ocio: 30_000 },
+        spentCents: { necesidad: 50_000, ocio: 30_000 },
+        ahorroContributedCents: 20_000,
+      });
+
+      await updateDistributionNow(
+        "u",
+        { necesidad: 40, ocio: 30, ahorro: 30 },
+        "next_month",
+      );
+
+      // Solo cambia userProfile.distribution; monthPath no se toca
+      expect(mocks.update).toHaveBeenCalledTimes(1);
+      expect(mocks.update).toHaveBeenCalledWith(userPath, {
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+      });
+
+      // Al avanzar al mes siguiente (2026-10), el nuevo mes se crea con 40/30/30
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+        lastClosedMonth: "2026-09",
+        savingsTotalCents: 20_000,
+      });
+      vi.setSystemTime(new Date(2026, 9, 2, 10, 0)); // 2026-10-02
+      await checkAndCloseMonth("u");
+
+      expect(mocks.set).toHaveBeenCalledWith(
+        "users/u/months/2026-10",
+        expect.objectContaining({
+          distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+          distributedIncomeCount: 0,
+        }),
+      );
+    });
+
+    it("meses legacy sin distributedIncomeCount funcionan usando el fallback totalIncomeCents > 0", async () => {
+      expect(
+        hasDistributedIncomes({
+          totalIncomeCents: 100_000,
+        }),
+      ).toBe(true);
+      expect(
+        hasDistributedIncomes({
+          totalIncomeCents: 0,
+        }),
+      ).toBe(false);
+
+      // En un mes legacy con totalIncomeCents > 0, ensureCurrentMonth NO sobrescribe month.distribution
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 40, ocio: 30, ahorro: 30 },
+        lastClosedMonth: "2026-09",
+        savingsTotalCents: 20_000,
+      });
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        totalIncomeCents: 100_000,
+        incomeCount: 1,
+        capsCents: { necesidad: 50_000, ocio: 30_000 },
+        spentCents: { necesidad: 0, ocio: 0 },
+      });
+      await ensureCurrentMonth("u");
+      expect(mocks.update).not.toHaveBeenCalled();
     });
   });
 });
