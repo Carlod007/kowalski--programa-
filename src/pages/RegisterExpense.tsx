@@ -61,7 +61,10 @@ import type { LoanWithId } from "@/types/loan";
 import type { CreditCardWithId } from "@/types/creditCard";
 import BackButton from "@/components/BackButton";
 import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
-import { validateTransactionTiming } from "@/utils/transactionTiming";
+import {
+  resolveTargetMonthIdForDate,
+  validateTransactionTiming,
+} from "@/utils/transactionTiming";
 
 type Step = "category" | "detail" | "goal";
 
@@ -208,7 +211,8 @@ export default function RegisterExpense() {
       (month?.borrowedCapsCents?.[category] ?? 0);
     const ownedSpentCents =
       (month?.spentCents[category] ?? 0) -
-      (month?.loanFundedSpentCents?.[category] ?? 0);
+      (month?.loanFundedSpentCents?.[category] ?? 0) +
+      (category === "necesidad" ? (month?.carriedDeficitCents ?? 0) : 0);
     return (
       <ExpenseDetailStep
         category={category}
@@ -336,7 +340,8 @@ export default function RegisterExpense() {
             }
             spentCents={
               (month?.spentCents[cat] ?? 0) -
-              (month?.loanFundedSpentCents?.[cat] ?? 0)
+              (month?.loanFundedSpentCents?.[cat] ?? 0) +
+              (cat === "necesidad" ? (month?.carriedDeficitCents ?? 0) : 0)
             }
             selected={category === cat}
             onSelect={(selectedCat) => {
@@ -561,8 +566,8 @@ function ExpenseDetailStep({
     setSubmitError(null);
 
     const amountCents = Math.round(parseFloat(values.amount) * 100);
-    const monthId = getMonthId();
     const transactionDate = values.date || toDateInputValue();
+    const monthId = resolveTargetMonthIdForDate(transactionDate, getMonthId());
     try {
       validateTransactionTiming(monthId, transactionDate);
     } catch (error) {
@@ -1270,20 +1275,25 @@ function GoalPurchaseStep({
     setSubmitError(null);
 
     try {
+      const targetDate = date || toDateInputValue();
+      const targetMonthId = resolveTargetMonthIdForDate(
+        targetDate,
+        getMonthId(),
+      );
       if (isFund) {
-        await withdrawFromFund(user.uid, getMonthId(), {
+        await withdrawFromFund(user.uid, targetMonthId, {
           goalId: selectedGoal.id,
           amountCents: withdrawCents,
           paymentMethod,
           description: description.trim() || undefined,
-          date: date || toDateInputValue(),
+          date: targetDate,
         });
       } else {
-        await purchaseGoalExpense(user.uid, getMonthId(), {
+        await purchaseGoalExpense(user.uid, targetMonthId, {
           goalId: selectedGoal.id,
           paymentMethod,
           description: description.trim() || undefined,
-          date: date || toDateInputValue(),
+          date: targetDate,
           actualAmountCents: purchaseCents,
           releaseRemainder: true,
           allowAutoAssign: needsAutoAssign,

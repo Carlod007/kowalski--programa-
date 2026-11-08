@@ -124,6 +124,7 @@ export function useAhorroBreakdown(
       spentCents: month?.spentCents ?? { necesidad: 0, ocio: 0 },
       borrowedCapsCents: month?.borrowedCapsCents,
       loanFundedSpentCents: month?.loanFundedSpentCents,
+      carriedDeficitCents: month?.carriedDeficitCents,
     },
     initialSplitAhorroCents,
     isInitialSplitDeterminable,

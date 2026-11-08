@@ -104,14 +104,17 @@ export function getCategoryDisplayBalance(
     | "spentCents"
     | "borrowedCapsCents"
     | "loanFundedSpentCents"
+    | "carriedDeficitCents"
     | "remainder"
   >,
 ): CategoryDisplayBalance {
   const borrowedCap = month.borrowedCapsCents?.[category] ?? 0;
   const loanFundedSpent = month.loanFundedSpentCents?.[category] ?? 0;
+  const carriedDeficit =
+    category === "necesidad" ? (month.carriedDeficitCents ?? 0) : 0;
   const ownedCap = Math.max(0, month.capsCents[category] - borrowedCap);
   const ownedSpent = Math.max(0, month.spentCents[category] - loanFundedSpent);
-  const rawBalance = ownedCap - ownedSpent;
+  const rawBalance = ownedCap - ownedSpent - carriedDeficit;
 
   if (!month.closed) {
     return {

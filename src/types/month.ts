@@ -13,6 +13,10 @@ export type MonthRemainder = {
   borrowedNecesidadCents?: number;
   borrowedOcioCents?: number;
   deficitResolution?: DeficitResolution;
+  /** Parte del déficit cubierta con ahorro sin asignar en confirmMonthClose. */
+  coveredBySavingsCents?: number;
+  /** Parte del déficit que quedó pendiente cuando el ahorro sin asignar no alcanzó. */
+  uncoveredDeficitCents?: number;
   closedAt?: Timestamp | null;
 };
 
@@ -45,6 +49,12 @@ export type Month = {
    * Excedente propio de Necesidad heredado del mes anterior al cerrarse.
    */
   inheritedNecesidadCents?: number;
+  /**
+   * Déficit neto arrastrado desde el mes anterior cuando el usuario eligió
+   * "carried_forward". Reduce el disponible de Necesidad del mes nuevo sin
+   * dejar capsCents negativo ni inventar un gasto en spentCents.
+   */
+  carriedDeficitCents?: number;
   /**
    * Plata que entró y fue entera al ahorro, sin repartirse. Opcional: los
    * meses anteriores a esta función no lo tienen y valen 0.

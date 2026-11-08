@@ -12,10 +12,11 @@ import { getMonthId } from '@/utils/date';
 // Only isolated emulator fixtures; never uses production configuration or credentials.
 // Shares the existing Firestore emulator port, but not the months suite's demo project.
 // RUN_MONTH_RULES_TESTS=true npm.cmd test -- src/services/userLastClosedMonthRules.integration.test.ts
+// También: RUN_USER_RULES_TESTS=true npm.cmd test -- src/services/userLastClosedMonthRules.integration.test.ts
 const PROJECT = 'demo-kowalski-user-marker';
 const HOST = '127.0.0.1';
 const PORT = 8180;
-const enabled = process.env.RUN_MONTH_RULES_TESTS === 'true';
+const enabled = process.env.RUN_MONTH_RULES_TESTS === 'true' || process.env.RUN_USER_RULES_TESTS === 'true';
 const app = initializeApp({ projectId: PROJECT, apiKey: 'demo-key' }, 'marker-owner');
 const db = getFirestore(app);
 connectFirestoreEmulator(db, HOST, PORT, { mockUserToken: { sub: 'owner' } });
@@ -188,6 +189,22 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
     await assertMarker(previousId);
     expect((await getDoc(previousRef)).data()?.closed).toBe(false);
   });
+  it('F5: avanza el marcador dejando el mes anterior abierto y pendiente de cierre', async () => {
+    await seedPrevious();
+    await updateDoc(profileRef, {
+      lastClosedMonth: currentId,
+      pendingCloseMonthId: previousId,
+    });
+    await assertMarker(currentId);
+    expect((await getDoc(profileRef)).data()?.pendingCloseMonthId).toBe(previousId);
+    expect((await getDoc(previousRef)).data()?.closed).toBe(false);
+  });
+  it('F5: rechaza marcar pendiente un mes cerrado o con formato inválido', async () => {
+    await seedPrevious(previousMonth({ closed: true }));
+    await deny(updateDoc(profileRef, { pendingCloseMonthId: previousId }));
+    await deny(updateDoc(profileRef, { pendingCloseMonthId: '2026-13' }));
+    expect((await getDoc(profileRef)).data()?.pendingCloseMonthId ?? null).toBeNull();
+  });
   it('rechaza el marcador aunque el lote modifique otro mes', async () => {
     await seedPrevious();
     const batch = writeBatch(db);
@@ -283,6 +300,13 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
     await assertMarker(null);
     expect((await getDoc(currentRef)).exists()).toBe(true);
   });
+  it('F5: admite closingMode auto_grace y rechaza modos fuera de F5', async () => {
+    await updateDoc(profileRef, { closingMode: 'auto_grace' });
+    await deny(updateDoc(profileRef, { closingMode: 'assisted' }));
+    await deny(updateDoc(profileRef, { closingMode: 'auto_immediate' }));
+    await deny(updateDoc(profileRef, { closingMode: 'manual' }));
+    expect((await getDoc(profileRef)).data()?.closingMode).toBe('auto_grace');
+  });
   it('conserva el mismo marcador sin imponer un cierre', async () => {
     await seedPrevious();
     await updateDoc(profileRef, { lastClosedMonth: previousId, name: 'Nuevo nombre' });
@@ -323,6 +347,10 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
         ocioToAhorroCents: 500,
         necesidadToNextMonthCents: 0,
         netDeficitCents: 0,
+        borrowedNecesidadCents: 0,
+        borrowedOcioCents: 100,
+        deficitResolution: 'none',
+        closedAt: expect.anything(),
       });
       expect(next.capsCents.ocio).toBe(100);
       expect(next.inheritedNecesidadCents).toBe(0);
@@ -421,6 +449,10 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
       ocioToAhorroCents: 0,
       necesidadToNextMonthCents: 15000,
       netDeficitCents: 0,
+      borrowedNecesidadCents: 0,
+      borrowedOcioCents: 0,
+      deficitResolution: 'none',
+      closedAt: expect.anything(),
     });
     expect(intermediateSnap.closed).toBe(true);
     expect(intermediateSnap.capsCents).toEqual({ necesidad: 15000, ocio: 0 });
@@ -428,6 +460,10 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
       ocioToAhorroCents: 0,
       necesidadToNextMonthCents: 15000,
       netDeficitCents: 0,
+      borrowedNecesidadCents: 0,
+      borrowedOcioCents: 0,
+      deficitResolution: 'none',
+      closedAt: expect.anything(),
     });
     expect(currentSnap.closed).toBe(false);
     expect(currentSnap.capsCents).toEqual({ necesidad: 15000, ocio: 0 });

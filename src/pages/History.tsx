@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection,
@@ -24,7 +24,10 @@ import {
 } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import { CATEGORY_META } from "@/utils/category";
-import { deleteTransaction } from "@/services/transactionService";
+import {
+  deleteTransaction,
+  recordClosedMonthAdjustment,
+} from "@/services/transactionService";
 import {
   getAvailableMonths,
   buildHistoryCsv,
@@ -39,7 +42,12 @@ import type {
 import BackButton from "@/components/BackButton";
 import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
 import { updateTransactionTiming } from "@/services/transactionTimingService";
-import { canEditTransactionTiming, compareRecordedTiming, getRecordedDate } from "@/utils/transactionTiming";
+import {
+  canEditTransactionTiming,
+  compareRecordedTiming,
+  getRecordedDate,
+  isWithinGraceWindow,
+} from "@/utils/transactionTiming";
 import {
   getAvailableExpenseTags,
   hasExpenseTag,
@@ -98,10 +106,20 @@ export default function History() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [timingTx, setTimingTx] = useState<TxWithId | null>(null);
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
+  const [adjustmentSuccess, setAdjustmentSuccess] = useState<string | null>(
+    null,
+  );
 
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isClosed = month?.closed === true;
+  const isEditableOpenMonth =
+    loadedMonthId === viewedMonthId &&
+    month?.closed === false &&
+    (viewedMonthId === currentMonthId ||
+      (viewedMonthId === shiftMonthId(currentMonthId, -1) &&
+        isWithinGraceWindow()));
 
   useEffect(() => {
     if (!user) return;
@@ -262,9 +280,25 @@ export default function History() {
       </div>
 
       {isClosed && (
-        <p className="mt-3 px-5 text-center text-sm text-stone-500">
-          Mes cerrado - solo lectura
-        </p>
+        <div className="mt-3 flex flex-col items-center gap-2 px-5 text-center">
+          <p className="text-sm text-stone-500">Mes cerrado - solo lectura</p>
+          <button
+            type="button"
+            onClick={() => {
+              setAdjustmentSuccess(null);
+              setShowAdjustmentModal(true);
+            }}
+            className="rounded-xl border border-stone-300 bg-white px-3.5 py-1.5 text-xs font-medium text-stone-700"
+          >
+            Registrar ajuste
+          </button>
+        </div>
+      )}
+
+      {adjustmentSuccess && (
+        <div className="mx-5 mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+          {adjustmentSuccess}
+        </div>
       )}
 
       <div className="mt-4 flex gap-2 overflow-x-auto px-5">
@@ -329,9 +363,7 @@ export default function History() {
               <div className="flex flex-col gap-2">
                 {group.items.map((tx) => {
                   const isDeleting = deletingId === tx._id;
-                  const isOpen = loadedMonthId === viewedMonthId
-                    && viewedMonthId === currentMonthId
-                    && month?.closed === false;
+                  const isOpen = isEditableOpenMonth;
 
                   if (isDeleting) {
                     return (
@@ -391,10 +423,23 @@ export default function History() {
         )}
       </main>
 
-      {timingTx && user && loadedMonthId === viewedMonthId
-        && viewedMonthId === currentMonthId && month?.closed === false && (
+      {timingTx && user && isEditableOpenMonth && (
         <TimingEditor key={timingTx._id} tx={timingTx} userId={user.uid}
           monthId={viewedMonthId} onClose={() => setTimingTx(null)} />
+      )}
+      {showAdjustmentModal && user && isClosed && (
+        <ClosedMonthAdjustmentModal
+          userId={user.uid}
+          referenceMonthId={viewedMonthId}
+          currentMonthId={currentMonthId}
+          onClose={() => setShowAdjustmentModal(false)}
+          onSaved={() => {
+            setShowAdjustmentModal(false);
+            setAdjustmentSuccess(
+              `Ajuste vinculado a ${formatMonthLabel(viewedMonthId)} registrado en ${formatMonthLabel(currentMonthId)}.`,
+            );
+          }}
+        />
       )}
       <BottomNav />
     </div>
@@ -565,7 +610,7 @@ function TimingEditor({ tx, userId, monthId, onClose }: {
   const [date, setDate] = useState(tx.transactionDate);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  async function save(event: React.FormEvent) {
+  async function save(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError(null);
@@ -582,7 +627,7 @@ function TimingEditor({ tx, userId, monthId, onClose }: {
       <form onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="timing-title"
         className="w-full max-w-md rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="timing-title" className="mb-4 text-lg font-semibold text-stone-900">Corregir fecha</h2>
-        <TransactionDateTimeFields date={date} onDateChange={setDate} editing />
+        <TransactionDateTimeFields date={date} onDateChange={setDate} editing monthId={monthId} />
         <p className="mt-3 text-xs text-stone-500">El monto, los saldos y la fecha original de registro se conservan.</p>
         {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
         <div className="mt-4 flex gap-3">
@@ -591,6 +636,195 @@ function TimingEditor({ tx, userId, monthId, onClose }: {
           <button type="submit" disabled={saving}
             className="flex-1 rounded-xl bg-emerald-600 py-2 text-sm font-medium text-white disabled:opacity-50">
             {saving ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ClosedMonthAdjustmentModal({
+  userId,
+  referenceMonthId,
+  currentMonthId,
+  onClose,
+  onSaved,
+}: {
+  userId: string;
+  referenceMonthId: string;
+  currentMonthId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [category, setCategory] = useState<Category>("necesidad");
+  const [direction, setDirection] = useState<"add" | "subtract">("add");
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [allowOverSpentCap, setAllowOverSpentCap] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    const parsed = Number.parseFloat(amount);
+    const amountCents = Math.round(parsed * 100);
+    if (!Number.isFinite(parsed) || amountCents <= 0) {
+      setError("Ingresa un monto mayor a 0.");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("El motivo del ajuste es obligatorio.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await recordClosedMonthAdjustment(userId, {
+        referenceMonthId,
+        category,
+        deltaCents: direction === "add" ? amountCents : -amountCents,
+        reason: reason.trim(),
+        allowOverSpentCap:
+          direction === "subtract" ? allowOverSpentCap : undefined,
+        currentMonthId,
+      });
+      onSaved();
+    } catch (err) {
+      console.error("Error al registrar ajuste de mes cerrado:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo registrar el ajuste. Intenta de nuevo.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-5"
+      onClick={() => !saving && onClose()}
+    >
+      <form
+        onSubmit={save}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="adjustment-title"
+        className="w-full max-w-md rounded-2xl bg-white p-5"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2
+          id="adjustment-title"
+          className="text-lg font-semibold text-stone-900"
+        >
+          Registrar ajuste
+        </h2>
+        <p className="mt-1 text-xs text-stone-500">
+          El mes cerrado no se modifica. El ajuste se registra en{" "}
+          {formatMonthLabel(currentMonthId)} y queda vinculado a{" "}
+          {formatMonthLabel(referenceMonthId)}.
+        </p>
+
+        <label className="mt-4 block text-sm font-medium text-stone-700">
+          Categoría
+          <select
+            value={category}
+            onChange={(event) => setCategory(event.target.value as Category)}
+            className="mt-1 block w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
+          >
+            <option value="necesidad">Necesidad</option>
+            <option value="ocio">Ocio</option>
+            <option value="ahorro">Ahorro</option>
+          </select>
+        </label>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setDirection("add")}
+            className={`rounded-xl border px-3 py-2 text-xs font-medium ${
+              direction === "add"
+                ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+                : "border-stone-200 text-stone-600"
+            }`}
+          >
+            Aumentar
+          </button>
+          <button
+            type="button"
+            onClick={() => setDirection("subtract")}
+            className={`rounded-xl border px-3 py-2 text-xs font-medium ${
+              direction === "subtract"
+                ? "border-amber-600 bg-amber-50 text-amber-800"
+                : "border-stone-200 text-stone-600"
+            }`}
+          >
+            Disminuir
+          </button>
+        </div>
+
+        <label className="mt-3 block text-sm font-medium text-stone-700">
+          Monto (S/)
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0.01"
+            step="0.01"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+            className="mt-1 block w-full rounded-xl border border-stone-300 px-3 py-2 text-sm text-stone-900"
+          />
+        </label>
+
+        <label className="mt-3 block text-sm font-medium text-stone-700">
+          Motivo
+          <textarea
+            required
+            maxLength={200}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Ej. Gasto olvidado del mes anterior"
+            className="mt-1 block w-full rounded-xl border border-stone-300 px-3 py-2 text-sm text-stone-900"
+          />
+        </label>
+
+        {direction === "subtract" && category !== "ahorro" && (
+          <label className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <input
+              type="checkbox"
+              checked={allowOverSpentCap}
+              onChange={(event) => setAllowOverSpentCap(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Confirmo reducir el tope aunque quede por debajo de lo ya gastado
+              este mes. El aviso no bloquea el ajuste una vez confirmado.
+            </span>
+          </label>
+        )}
+
+        {error && (
+          <p role="alert" className="mt-3 text-xs text-red-600">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-4 flex gap-3">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={onClose}
+            className="flex-1 rounded-xl border border-stone-300 py-2 text-sm text-stone-700 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex-1 rounded-xl bg-emerald-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {saving ? "Guardando..." : "Registrar ajuste"}
           </button>
         </div>
       </form>

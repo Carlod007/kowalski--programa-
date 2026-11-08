@@ -306,6 +306,119 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     const id = far.slice(0, 7); await seed(`users/owner/months/${id}`, month());
     await deny(setDoc(doc(db, `users/owner/months/${id}/transactions/future`), expense({ transactionDate: far })));
   });
+  it('F5: acepta fecha de cualquier día del mes anterior abierto y pendiente en gracia', async () => {
+    await admin.doc(profilePath).update({ lastClosedMonth: monthId, pendingCloseMonthId: previousId });
+    await seed(`users/owner/months/${previousId}`, month());
+    const previousTxRef = doc(db, `users/owner/months/${previousId}/transactions/tx-prev`);
+    const previousDate = `${previousId}-15`;
+
+    await setDoc(previousTxRef, expense({ transactionDate: previousDate }));
+    expect((await getDoc(previousTxRef)).data()?.transactionDate).toBe(previousDate);
+
+    await admin.doc(`users/owner/months/${previousId}`).update({ closed: true });
+    await deny(setDoc(doc(db, `users/owner/months/${previousId}/transactions/tx-prev-closed`), expense({ transactionDate: previousDate })));
+  });
+  it('F5: sin pendingCloseMonthId rechaza la fecha del mes anterior', async () => {
+    await seed(`users/owner/months/${previousId}`, month());
+    await deny(setDoc(doc(db, `users/owner/months/${previousId}/transactions/tx-prev`), expense({ transactionDate: `${previousId}-15` })));
+  });
+  it('F5: admite carriedDeficitCents entero no negativo y lo rechaza negativo', async () => {
+    await setDoc(monthRef, month({ carriedDeficitCents: 100 }));
+    await updateDoc(monthRef, { carriedDeficitCents: 150 });
+    await deny(updateDoc(monthRef, { carriedDeficitCents: -1 }));
+  });
+  it('F5: cierra con remainder cubierto por ahorro y valida sus importes', async () => {
+    await seedMonth({
+      capsCents: { necesidad: 50000, ocio: 30000 },
+      spentCents: { necesidad: 70000, ocio: 20000 },
+    });
+    await updateDoc(monthRef, {
+      closed: true,
+      remainder: {
+        ocioToAhorroCents: 0,
+        necesidadToNextMonthCents: 0,
+        netDeficitCents: 10000,
+        borrowedNecesidadCents: 0,
+        borrowedOcioCents: 0,
+        deficitResolution: 'covered_by_savings',
+        coveredBySavingsCents: 4000,
+        uncoveredDeficitCents: 6000,
+        closedAt: serverTimestamp(),
+      },
+    });
+    expect((await getDoc(monthRef)).data()?.remainder.coveredBySavingsCents).toBe(4000);
+  });
+  it('F5: descuenta carriedDeficitCents al cerrar un mes que arrastra déficit', async () => {
+    await seedMonth({
+      capsCents: { necesidad: 50000, ocio: 30000 },
+      spentCents: { necesidad: 70000, ocio: 20000 },
+      carriedDeficitCents: 5000,
+    });
+    await updateDoc(monthRef, {
+      closed: true,
+      remainder: {
+        ocioToAhorroCents: 0,
+        necesidadToNextMonthCents: 0,
+        netDeficitCents: 15000,
+        borrowedNecesidadCents: 0,
+        borrowedOcioCents: 0,
+        deficitResolution: 'none',
+        closedAt: serverTimestamp(),
+      },
+    });
+    expect((await getDoc(monthRef)).data()?.remainder.netDeficitCents).toBe(15000);
+  });
+  it.each([
+    ['suma distinta', { coveredBySavingsCents: 4000, uncoveredDeficitCents: 5000 }],
+    ['cubre más que el déficit', { coveredBySavingsCents: 11000, uncoveredDeficitCents: 0 }],
+    ['negativo', { coveredBySavingsCents: -1, uncoveredDeficitCents: 10001 }],
+  ])('F5: rechaza remainder con cobertura %s', async (_label, coverage) => {
+    await seedMonth({
+      capsCents: { necesidad: 50000, ocio: 30000 },
+      spentCents: { necesidad: 70000, ocio: 20000 },
+    });
+    await deny(updateDoc(monthRef, {
+      closed: true,
+      remainder: {
+        ocioToAhorroCents: 0,
+        necesidadToNextMonthCents: 0,
+        netDeficitCents: 10000,
+        borrowedNecesidadCents: 0,
+        borrowedOcioCents: 0,
+        deficitResolution: 'covered_by_savings',
+        ...coverage,
+      },
+    }));
+  });
+  it('F5: acepta asiento de ajuste en el mes actual referenciando un mes cerrado', async () => {
+    await seedMonth();
+    await seed(`users/owner/months/${previousId}`, month({ closed: true }));
+    const movement = {
+      userId: 'owner', monthId, origin: 'necesidad', destination: 'necesidad',
+      amountCents: 5000, kind: 'closed_month_adjustment', referenceMonthId: previousId,
+      category: 'necesidad', deltaCents: -5000, reason: 'Corregir tope anterior',
+      transactionDate: date, serverDate: serverTimestamp(),
+    };
+    const ref = doc(db, `${monthPath}/movements/adjust`);
+    await setDoc(ref, movement);
+    expect((await getDoc(ref)).data()?.referenceMonthId).toBe(previousId);
+
+    await admin.doc(`users/owner/months/${previousId}`).update({ closed: false });
+    await deny(setDoc(doc(db, `${monthPath}/movements/adjust-open`), movement));
+  });
+  it('F5: rechaza asientos de ajuste con importes o motivos inválidos', async () => {
+    await seedMonth();
+    await seed(`users/owner/months/${previousId}`, month({ closed: true }));
+    const base = {
+      userId: 'owner', monthId, origin: 'ocio', destination: 'ocio',
+      amountCents: 100, kind: 'closed_month_adjustment', referenceMonthId: previousId,
+      category: 'ocio', deltaCents: 100, reason: 'Motivo',
+      transactionDate: date, serverDate: serverTimestamp(),
+    };
+    await deny(setDoc(doc(db, `${monthPath}/movements/zero`), { ...base, amountCents: 101 }));
+    await deny(setDoc(doc(db, `${monthPath}/movements/no-reason`), { ...base, reason: '' }));
+    await deny(setDoc(doc(db, `${monthPath}/movements/category`), { ...base, category: 'otro' }));
+  });
   it('edita metadatos, importe, etiquetas y fecha del gasto; elimina opcionales', async () => {
     await seedMonth(); await seed(txPath, expense());
     await updateDoc(txRef, { amountCents: 200, subcategory: 'Casa', paymentMethod: 'Transferencia', description: 'Corregido', tags: ['casa'], transactionDate: firstDay });
@@ -507,6 +620,10 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
       ocioToAhorroCents: 400,
       necesidadToNextMonthCents: 600,
       netDeficitCents: 0,
+      borrowedNecesidadCents: 100,
+      borrowedOcioCents: 200,
+      deficitResolution: 'none',
+      closedAt: expect.anything(),
     });
   });
   it('F1(h): prohíbe cambiar amountCents en egresos de ahorro y permite editar otros campos', async () => {

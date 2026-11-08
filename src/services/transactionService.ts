@@ -12,7 +12,10 @@ import { db } from "@/lib/firebase";
 import { ensureCurrentMonth } from "@/services/monthService";
 import { getMonthId, toDateInputValue } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
-import { validateTransactionTiming } from "@/utils/transactionTiming";
+import {
+  resolveTargetMonthIdForDate,
+  validateTransactionTiming,
+} from "@/utils/transactionTiming";
 import {
   calculateDistribution,
   calculateProportionalSplit,
@@ -30,9 +33,11 @@ import {
 } from "@/utils/savings";
 import type { User } from "@/types/user";
 import type { Month } from "@/types/month";
+import type { Movement } from "@/types/movement";
 import type { Loan, LoanPayment } from "@/types/loan";
 import type { CreditCard } from "@/types/creditCard";
 import type {
+  Category,
   Distribution,
   ExpenseTransaction,
   IncomeTransaction,
@@ -79,7 +84,10 @@ function assertRevertible(
   const ownedSpentNecesidad =
     month.spentCents.necesidad -
     (month.loanFundedSpentCents?.necesidad ?? 0);
-  const availableOwnedNecesidad = ownedCapNecesidad - ownedSpentNecesidad;
+  const availableOwnedNecesidad =
+    ownedCapNecesidad -
+    ownedSpentNecesidad -
+    (month.carriedDeficitCents ?? 0);
 
   const ownedCapOcio =
     month.capsCents.ocio - (month.borrowedCapsCents?.ocio ?? 0);
@@ -530,7 +538,10 @@ export async function updateIncome(
       const ownedSpentNecesidad =
         month.spentCents.necesidad -
         (month.loanFundedSpentCents?.necesidad ?? 0);
-      const availableOwnedNecesidad = ownedCapNecesidad - ownedSpentNecesidad;
+      const availableOwnedNecesidad =
+        ownedCapNecesidad -
+        ownedSpentNecesidad -
+        (month.carriedDeficitCents ?? 0);
       if (necesidadDelta < 0 && -necesidadDelta > availableOwnedNecesidad) {
         throw new Error(
           "No se puede bajar tanto: el disponible propio de Necesidad de este mes ya no lo cubre.",
@@ -850,8 +861,8 @@ export async function registerIncome(
     throw new Error("Selecciona una fuente");
   }
 
-  const monthId = input.monthId ?? getMonthId();
   const transactionDate = input.date || toDateInputValue();
+  const monthId = resolveTargetMonthIdForDate(transactionDate, input.monthId);
   validateTransactionTiming(monthId, transactionDate);
 
   const description = input.description?.trim();
@@ -951,6 +962,10 @@ export async function registerIncome(
     return { distribution: firstAttempt.distribution };
   }
 
+  if (monthId !== getMonthId()) {
+    throw new Error(`registerIncome: mes ${monthId} no existe`);
+  }
+
   const ensuredMonth = await ensureCurrentMonth(userId);
   const secondAttempt = await executeWrite(ensuredMonth);
   if (secondAttempt.monthMissing) {
@@ -984,8 +999,8 @@ export async function registerExpense(
     throw new Error("Selecciona un método de pago");
   }
 
-  const monthId = input.monthId ?? getMonthId();
   const transactionDate = input.date || toDateInputValue();
+  const monthId = resolveTargetMonthIdForDate(transactionDate, input.monthId);
   validateTransactionTiming(monthId, transactionDate);
 
   const description = input.description?.trim();
@@ -1037,9 +1052,218 @@ export async function registerExpense(
     return;
   }
 
+  if (monthId !== getMonthId()) {
+    throw new Error(`registerExpense: mes ${monthId} no existe`);
+  }
+
   const ensuredMonth = await ensureCurrentMonth(userId);
   const secondAttempt = await executeWrite(ensuredMonth);
   if (secondAttempt.monthMissing) {
     throw new Error(`registerExpense: mes ${monthId} no existe`);
   }
+}
+
+export interface RecordClosedMonthAdjustmentInput {
+  referenceMonthId: string;
+  category: Category;
+  deltaCents: number;
+  reason: string;
+  allowOverSpentCap?: boolean;
+  currentMonthId?: string;
+}
+
+/**
+ * Registra un asiento de ajuste auditable en el mes ABIERTO actual vinculado a
+ * un mes cerrado (`referenceMonthId`), ajustando `capsCents` (Necesidad u Ocio)
+ * o `savingsTotalCents` / `ahorroContributedCents` (Ahorro) sin modificar jamás
+ * el documento del mes cerrado.
+ */
+export async function recordClosedMonthAdjustment(
+  userId: string,
+  input: RecordClosedMonthAdjustmentInput,
+): Promise<void> {
+  const trimmedReason = input.reason?.trim() ?? "";
+  if (!trimmedReason) {
+    throw new Error("El motivo del ajuste es obligatorio");
+  }
+  if (trimmedReason.length > 200) {
+    throw new Error("El motivo no puede superar los 200 caracteres");
+  }
+  if (!Number.isInteger(input.deltaCents) || input.deltaCents === 0) {
+    throw new Error("El ajuste debe ser un monto entero distinto de 0");
+  }
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.referenceMonthId)) {
+    throw new Error("Mes de referencia inválido");
+  }
+  if (
+    input.category !== "necesidad" &&
+    input.category !== "ocio" &&
+    input.category !== "ahorro"
+  ) {
+    throw new Error("Categoría inválida");
+  }
+
+  const openMonthId = input.currentMonthId ?? getMonthId();
+  if (input.referenceMonthId === openMonthId) {
+    throw new Error(
+      "El mes de referencia debe ser un mes cerrado distinto del mes actual",
+    );
+  }
+
+  const userRef = doc(db, "users", userId);
+  const refMonthRef = doc(
+    db,
+    "users",
+    userId,
+    "months",
+    input.referenceMonthId,
+  );
+  const openMonthRef = doc(db, "users", userId, "months", openMonthId);
+
+  const executeAdjustment = async (): Promise<{ openMonthMissing: boolean }> => {
+    const movementRef = doc(
+      collection(db, "users", userId, "months", openMonthId, "movements"),
+    );
+
+    return runTransaction(db, async (transaction) => {
+      const [userSnap, refMonthSnap, openMonthSnap] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(refMonthRef),
+        transaction.get(openMonthRef),
+      ]);
+
+      if (!userSnap.exists()) {
+        throw new Error(
+          `recordClosedMonthAdjustment: perfil ${userId} no existe`,
+        );
+      }
+      if (!refMonthSnap.exists()) {
+        throw new Error(
+          `El mes de referencia ${input.referenceMonthId} no existe`,
+        );
+      }
+      const refMonth = refMonthSnap.data() as Month;
+      if (!refMonth.closed) {
+        throw new Error(
+          "Solo se pueden registrar asientos de ajuste para meses cerrados",
+        );
+      }
+      if (!openMonthSnap.exists()) {
+        return { openMonthMissing: true };
+      }
+
+      const openMonth = openMonthSnap.data() as Month;
+      if (openMonth.closed) {
+        throw new Error("No se puede modificar un mes cerrado");
+      }
+
+      const userProfile = userSnap.data() as User;
+
+      if (input.category === "ahorro") {
+        const savingsTotal = userProfile.savingsTotalCents ?? 0;
+        const nextSavingsTotal = savingsTotal + input.deltaCents;
+        if (nextSavingsTotal < 0) {
+          throw new Error(
+            "El ajuste no puede dejar tu ahorro total en negativo",
+          );
+        }
+        const unassigned = getUnassignedCents(
+          savingsTotal,
+          userProfile.savingsGoals ?? [],
+        );
+        if (input.deltaCents < 0 && -input.deltaCents > unassigned) {
+          const toReleaseCents = -input.deltaCents - Math.max(0, unassigned);
+          throw new Error(
+            `El ajuste supera tu ahorro sin asignar. Libera ${formatCents(toReleaseCents)} de tus metas primero.`,
+          );
+        }
+
+        transaction.update(userRef, {
+          savingsTotalCents: increment(input.deltaCents),
+        });
+
+        if (input.deltaCents > 0) {
+          transaction.update(openMonthRef, {
+            ahorroContributedCents: increment(input.deltaCents),
+          });
+        } else {
+          const currentContributed = openMonth.ahorroContributedCents ?? 0;
+          const revertible = Math.min(-input.deltaCents, currentContributed);
+          if (revertible > 0) {
+            transaction.update(openMonthRef, {
+              ahorroContributedCents: increment(-revertible),
+            });
+          }
+        }
+      } else {
+        const cat = input.category;
+        const label = cat === "necesidad" ? "Necesidad" : "Ocio";
+        const currentCap = openMonth.capsCents[cat];
+        const borrowedCap = openMonth.borrowedCapsCents?.[cat] ?? 0;
+        const nextCap = currentCap + input.deltaCents;
+        const nextOwnedCap = nextCap - borrowedCap;
+
+        if (nextCap < 0 || nextOwnedCap < 0) {
+          throw new Error(
+            `El ajuste no puede dejar el tope propio de ${label} en negativo`,
+          );
+        }
+
+        const loanFundedSpent = openMonth.loanFundedSpentCents?.[cat] ?? 0;
+        const ownedSpent = Math.max(
+          0,
+          openMonth.spentCents[cat] - loanFundedSpent,
+        );
+        const carriedDeficit =
+          cat === "necesidad" ? (openMonth.carriedDeficitCents ?? 0) : 0;
+        const committedOwned = ownedSpent + carriedDeficit;
+
+        if (
+          input.deltaCents < 0 &&
+          nextOwnedCap < committedOwned &&
+          !input.allowOverSpentCap
+        ) {
+          throw new Error(
+            `Este ajuste deja el tope propio de ${label} (${formatCents(nextOwnedCap)}) por debajo de lo ya gastado este mes (${formatCents(committedOwned)}). Confirma explícitamente si deseas continuar.`,
+          );
+        }
+
+        transaction.update(openMonthRef, {
+          [`capsCents.${cat}`]: increment(input.deltaCents),
+        });
+      }
+
+      const absAmount = Math.abs(input.deltaCents);
+      const movement: WithFieldValue<Movement> = {
+        userId,
+        monthId: openMonthId,
+        origin: input.category,
+        destination: input.category,
+        amountCents: absAmount,
+        reason: trimmedReason,
+        kind: "closed_month_adjustment",
+        referenceMonthId: input.referenceMonthId,
+        category: input.category,
+        deltaCents: input.deltaCents,
+        transactionDate: toDateInputValue(),
+        serverDate: serverTimestamp(),
+      };
+      transaction.set(movementRef, movement);
+      return { openMonthMissing: false };
+    });
+  };
+
+  const firstAttempt = await executeAdjustment();
+  if (!firstAttempt.openMonthMissing) {
+    return;
+  }
+
+  if (openMonthId === getMonthId()) {
+    await ensureCurrentMonth(userId);
+    const secondAttempt = await executeAdjustment();
+    if (!secondAttempt.openMonthMissing) {
+      return;
+    }
+  }
+  throw new Error(`recordClosedMonthAdjustment: mes ${openMonthId} no existe`);
 }

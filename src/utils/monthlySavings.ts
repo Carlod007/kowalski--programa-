@@ -17,6 +17,7 @@ export type MonthlySavingsMonthInput = Pick<
       | "spentCents"
       | "borrowedCapsCents"
       | "loanFundedSpentCents"
+      | "carriedDeficitCents"
     >
   >;
 
@@ -30,12 +31,16 @@ export function getMonthlySavingsNet(
 ): number | null {
   if (!expenses || !movements) return null;
   if (!Number.isInteger(month.ahorroContributedCents)) return null;
-  const movedToAhorro = movements
-    .filter((m) => m.destination === "ahorro")
-    .reduce(
-      (sum, m) => sum + (Number.isInteger(m.amountCents) ? m.amountCents : 0),
-      0,
-    );
+  const movedToAhorro = movements.reduce((sum, m) => {
+    if (m.kind === "closed_month_adjustment") {
+      return m.category === "ahorro" && (m.deltaCents ?? 0) > 0
+        ? sum + (Number.isInteger(m.deltaCents) ? m.deltaCents! : 0)
+        : sum;
+    }
+    return m.destination === "ahorro" && Number.isInteger(m.amountCents)
+      ? sum + m.amountCents
+      : sum;
+  }, 0);
   const direct = month.directSavingsCents ?? 0;
   const fallbackInitialSplit =
     initialSplitAhorroCents ??
@@ -52,6 +57,7 @@ export function getMonthlySavingsNet(
       spentCents: month.spentCents ?? { necesidad: 0, ocio: 0 },
       borrowedCapsCents: month.borrowedCapsCents,
       loanFundedSpentCents: month.loanFundedSpentCents,
+      carriedDeficitCents: month.carriedDeficitCents,
     },
     initialSplitAhorroCents: fallbackInitialSplit,
     isInitialSplitDeterminable,

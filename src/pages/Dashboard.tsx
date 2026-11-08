@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { moveSurplus } from "@/services/monthService";
+import { confirmMonthClose, moveSurplus } from "@/services/monthService";
 import { checkAndRememberMonthClosing } from "@/services/monthClosingNoticeService";
 import AutomaticMonthClosingSummary from "@/components/AutomaticMonthClosingSummary";
 import DistributionMismatchBanner from "@/components/DistributionMismatchBanner";
@@ -14,7 +14,16 @@ import { getMonthExpenses } from "@/services/analyticsService";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
 import { useCurrentMonthId } from "@/hooks/useCurrentMonthId";
 import { getAssignableCents, getUnassignedCents } from "@/utils/savings";
-import { shiftMonthId, formatMonthLabel } from "@/utils/date";
+import {
+  shiftMonthId,
+  formatMonthLabel,
+  formatMonthLongLabel,
+} from "@/utils/date";
+import {
+  getGraceDeadlineDate,
+  isWithinGraceWindow,
+} from "@/utils/transactionTiming";
+import { getMonthRemainders } from "@/utils/monthRemainders";
 import { formatCents } from "@/utils/currency";
 import {
   CAP_CATEGORY_ORDER,
@@ -22,7 +31,7 @@ import {
   getCategoryDisplayBalance,
   getCategoryStatus,
 } from "@/utils/category";
-import type { Month, MonthCaps } from "@/types/month";
+import type { DeficitResolution, Month, MonthCaps } from "@/types/month";
 import type {
   Distribution,
   ExpenseTransaction,
@@ -114,7 +123,21 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <AutomaticMonthClosingSummary key={user.uid} userId={user.uid} />
+      <AutomaticMonthClosingSummary
+        key={user.uid}
+        userId={user.uid}
+        unseenClosedMonthId={userProfile?.unseenClosedMonthId}
+      />
+
+      {userProfile?.pendingCloseMonthId &&
+        userProfile.pendingCloseMonthId === shiftMonthId(currentMonthId, -1) &&
+        isWithinGraceWindow() && (
+          <PendingCloseGraceBanner
+            userId={user.uid}
+            pendingMonthId={userProfile.pendingCloseMonthId}
+            unassignedSavingsCents={assignableCents}
+          />
+        )}
 
       <MonthSummary
         key={viewedMonthId}
@@ -480,11 +503,13 @@ function CategoryRow({
   const spent = month.spentCents[category];
   const borrowedCap = month.borrowedCapsCents?.[category] ?? 0;
   const loanFundedSpent = month.loanFundedSpentCents?.[category] ?? 0;
+  const carriedDeficit =
+    category === "necesidad" ? (month.carriedDeficitCents ?? 0) : 0;
   const ownedCap = cap - borrowedCap;
   const ownedSpent = spent - loanFundedSpent;
-  const movableSurplus = ownedCap - ownedSpent;
+  const movableSurplus = ownedCap - ownedSpent - carriedDeficit;
   const pct = month.distribution[category];
-  const status = getCategoryStatus(ownedCap, ownedSpent);
+  const status = getCategoryStatus(ownedCap, ownedSpent + carriedDeficit);
   const displayBalance = getCategoryDisplayBalance(category, month);
   const [showMove, setShowMove] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -520,12 +545,17 @@ function CategoryRow({
   const inheritedNecesidadCents =
     category === "necesidad" ? (month.inheritedNecesidadCents ?? 0) : 0;
   const categoryMovementsDelta = movements.reduce((sum, m) => {
+    if (m.kind === "closed_month_adjustment") {
+      return m.category === category ? sum + (m.deltaCents ?? 0) : sum;
+    }
     if (m.destination === category) return sum + m.amountCents;
     if (m.origin === category) return sum - m.amountCents;
     return sum;
   }, 0);
-  const hasCategoryMovements = movements.some(
-    (m) => m.destination === category || m.origin === category,
+  const hasCategoryMovements = movements.some((m) =>
+    m.kind === "closed_month_adjustment"
+      ? m.category === category
+      : m.destination === category || m.origin === category,
   );
   const resolvedInheritedNecesidadCents =
     category === "necesidad"
@@ -657,6 +687,12 @@ function CategoryRow({
           {month.closed && displayBalance.netDeficitCents > 0 && (
             <p className="mt-1 text-center text-xs font-medium text-amber-700">
               Déficit neto del mes: {formatCents(displayBalance.netDeficitCents)}
+            </p>
+          )}
+          {!month.closed && carriedDeficit > 0 && (
+            <p className="mt-1 text-center text-xs font-medium text-amber-700">
+              Incluye déficit arrastrado del mes anterior:{" "}
+              {formatCents(carriedDeficit)}
             </p>
           )}
 
@@ -1376,5 +1412,227 @@ function MovementsModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function PendingCloseGraceBanner({
+  userId,
+  pendingMonthId,
+  unassignedSavingsCents,
+}: {
+  userId: string;
+  pendingMonthId: string;
+  unassignedSavingsCents: number;
+}) {
+  const navigate = useNavigate();
+  const [pendingMonth, setPendingMonth] = useState<Month | null>(null);
+  const [showDeficitModal, setShowDeficitModal] = useState(false);
+  const [selectedDecision, setSelectedDecision] =
+    useState<DeficitResolution>("covered_by_savings");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ref = doc(db, "users", userId, "months", pendingMonthId);
+    return onSnapshot(
+      ref,
+      (snap) => {
+        setPendingMonth(snap.exists() ? (snap.data() as Month) : null);
+      },
+      (err) => {
+        console.error("Error al observar mes pendiente de cierre:", err);
+      },
+    );
+  }, [userId, pendingMonthId]);
+
+  if (!pendingMonth || pendingMonth.closed) return null;
+
+  const remainders = getMonthRemainders(pendingMonth);
+  const netDeficitCents = remainders.netDeficitCents;
+  const maxCoverableCents = Math.max(
+    0,
+    Math.min(netDeficitCents, unassignedSavingsCents),
+  );
+  const remainingUncoveredCents = netDeficitCents - maxCoverableCents;
+  const deadlineDate = getGraceDeadlineDate(pendingMonthId);
+
+  async function handleConfirmClose(decision: DeficitResolution) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await confirmMonthClose(userId, pendingMonthId, decision);
+      setShowDeficitModal(false);
+    } catch (err) {
+      console.error("Error al confirmar cierre de mes:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo confirmar el cierre. Intenta de nuevo.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <section
+        className="mx-5 mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4"
+        aria-label="Mes anterior en ventana de gracia"
+      >
+        <p className="text-sm font-medium text-amber-900">
+          Tu mes de {formatMonthLongLabel(pendingMonthId)} sigue abierto hasta
+          el {formatDateLabel(deadlineDate)}. Registra gastos olvidados y
+          confirma el cierre
+        </p>
+        {netDeficitCents > 0 && (
+          <p className="mt-1 text-xs text-amber-800">
+            Déficit neto detectado en {formatMonthLabel(pendingMonthId)}:{" "}
+            {formatCents(netDeficitCents)}
+          </p>
+        )}
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => {
+              if (netDeficitCents > 0) {
+                setSelectedDecision(
+                  maxCoverableCents > 0
+                    ? "covered_by_savings"
+                    : "carried_forward",
+                );
+                setShowDeficitModal(true);
+              } else {
+                void handleConfirmClose("none");
+              }
+            }}
+            className="rounded-xl bg-amber-700 px-3.5 py-2 text-xs font-medium text-white disabled:opacity-50"
+          >
+            {submitting ? "Cerrando..." : "Confirmar cierre"}
+          </button>
+          <Link
+            to="/history"
+            className="rounded-xl border border-amber-400 bg-white px-3 py-2 text-xs font-medium text-amber-800"
+          >
+            Revisar movimientos
+          </Link>
+        </div>
+      </section>
+
+      {showDeficitModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-5 pb-5 sm:items-center"
+          onClick={() => !submitting && setShowDeficitModal(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold text-stone-900">
+              Resolver déficit antes de cerrar {formatMonthLabel(pendingMonthId)}
+            </h3>
+            <p className="mt-1 text-xs text-stone-600">
+              Tu mes de {formatMonthLabel(pendingMonthId)} cerró con un déficit
+              neto de{" "}
+              <span className="font-semibold text-amber-700">
+                {formatCents(netDeficitCents)}
+              </span>
+              . Elige cómo quieres tratarlo:
+            </p>
+
+            <div className="mt-4 flex flex-col gap-2.5">
+              <label
+                className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 text-xs ${
+                  selectedDecision === "covered_by_savings"
+                    ? "border-teal-600 bg-teal-50/60"
+                    : "border-stone-200 bg-white"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="deficit-resolution"
+                  checked={selectedDecision === "covered_by_savings"}
+                  onChange={() => setSelectedDecision("covered_by_savings")}
+                  className="mt-0.5"
+                />
+                <div>
+                  <p className="font-medium text-stone-900">
+                    1) Cubrir con ahorro sin asignar (hasta{" "}
+                    {formatCents(maxCoverableCents)})
+                  </p>
+                  <p className="mt-0.5 text-stone-500">
+                    Disponible sin asignar a metas:{" "}
+                    {formatCents(Math.max(0, unassignedSavingsCents))}.
+                    {remainingUncoveredCents > 0
+                      ? ` Se cubrirán ${formatCents(maxCoverableCents)} y quedarán ${formatCents(remainingUncoveredCents)} registrados como déficit pendiente.`
+                      : ` Se descontarán ${formatCents(maxCoverableCents)} de tu ahorro sin asignar.`}
+                  </p>
+                </div>
+              </label>
+
+              <label
+                className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 text-xs ${
+                  selectedDecision === "carried_forward"
+                    ? "border-teal-600 bg-teal-50/60"
+                    : "border-stone-200 bg-white"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="deficit-resolution"
+                  checked={selectedDecision === "carried_forward"}
+                  onChange={() => setSelectedDecision("carried_forward")}
+                  className="mt-0.5"
+                />
+                <div>
+                  <p className="font-medium text-stone-900">
+                    2) Arrastrar el déficit al mes nuevo (
+                    {formatCents(netDeficitCents)})
+                  </p>
+                  <p className="mt-0.5 text-stone-500">
+                    Reduce el disponible de Necesidad del mes actual en{" "}
+                    {formatCents(netDeficitCents)} sin tocar tu ahorro.
+                  </p>
+                </div>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeficitModal(false);
+                  navigate("/history");
+                }}
+                className="rounded-xl border border-stone-200 bg-stone-50 p-3 text-left text-xs font-medium text-stone-800"
+              >
+                3) Revisar o editar gastos en Historial antes de cerrar →
+              </button>
+            </div>
+
+            {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
+
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => setShowDeficitModal(false)}
+                className="flex-1 rounded-xl border border-stone-300 py-2.5 text-xs font-medium text-stone-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => void handleConfirmClose(selectedDecision)}
+                className="flex-1 rounded-xl bg-stone-900 py-2.5 text-xs font-medium text-white disabled:opacity-50"
+              >
+                {submitting ? "Confirmando..." : "Confirmar cierre"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

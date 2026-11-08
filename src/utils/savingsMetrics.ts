@@ -44,6 +44,7 @@ export type ComputeMonthSavingsMetricsInput = {
     | "spentCents"
     | "borrowedCapsCents"
     | "loanFundedSpentCents"
+    | "carriedDeficitCents"
   >;
   initialSplitAhorroCents: number;
   isInitialSplitDeterminable: boolean;
@@ -58,6 +59,7 @@ export function hasMonthEnvelopeDeficit(
     | "spentCents"
     | "borrowedCapsCents"
     | "loanFundedSpentCents"
+    | "carriedDeficitCents"
     | "closed"
     | "remainder"
   >,
@@ -70,6 +72,7 @@ export function hasMonthEnvelopeDeficit(
     necesidad: 0,
     ocio: 0,
   };
+  const carriedDeficit = month.carriedDeficitCents ?? 0;
   const necOwnedCap = Math.max(
     0,
     month.capsCents.necesidad - borrowedCaps.necesidad,
@@ -84,7 +87,7 @@ export function hasMonthEnvelopeDeficit(
     month.spentCents.ocio - loanFundedSpent.ocio,
   );
 
-  const rawNec = necOwnedCap - necOwnedSpent;
+  const rawNec = necOwnedCap - necOwnedSpent - carriedDeficit;
   const rawOcio = ocioOwnedCap - ocioOwnedSpent;
 
   if (month.closed) {
@@ -121,12 +124,22 @@ export function computeMonthSavingsMetrics(
     ? SAVINGS_DEFICIT_WARNING_COPY
     : null;
 
-  const movedToAhorroCents = (movements ?? [])
-    .filter((m) => m.destination === "ahorro")
-    .reduce((sum, m) => sum + m.amountCents, 0);
-  const movedOutOfAhorroCents = (movements ?? [])
-    .filter((m) => m.origin === "ahorro")
-    .reduce((sum, m) => sum + m.amountCents, 0);
+  const movedToAhorroCents = (movements ?? []).reduce((sum, m) => {
+    if (m.kind === "closed_month_adjustment") {
+      return m.category === "ahorro" && (m.deltaCents ?? 0) > 0
+        ? sum + (m.deltaCents ?? m.amountCents)
+        : sum;
+    }
+    return m.destination === "ahorro" ? sum + m.amountCents : sum;
+  }, 0);
+  const movedOutOfAhorroCents = (movements ?? []).reduce((sum, m) => {
+    if (m.kind === "closed_month_adjustment") {
+      return m.category === "ahorro" && (m.deltaCents ?? 0) < 0
+        ? sum + Math.abs(m.deltaCents ?? -m.amountCents)
+        : sum;
+    }
+    return m.origin === "ahorro" ? sum + m.amountCents : sum;
+  }, 0);
 
   const ahorroExpenses = (expenses ?? []).filter(
     (tx) => tx.category === "ahorro",

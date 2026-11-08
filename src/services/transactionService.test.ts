@@ -333,12 +333,18 @@ describe("integridad financiera F1 en servicios", () => {
           ocioToAhorroCents: 0,
           necesidadToNextMonthCents: 0,
           netDeficitCents: 10_000,
+          borrowedNecesidadCents: 0,
+          borrowedOcioCents: 0,
+          deficitResolution: "none",
+          closedAt: "SERVER_TIMESTAMP",
         },
       });
       // No se incrementa savingsTotalCents cuando ocioToAhorroCents === 0
       expect(mocks.update).toHaveBeenCalledTimes(2);
       expect(mocks.update).toHaveBeenCalledWith(userPath, {
         lastClosedMonth: "2026-09",
+        pendingCloseMonthId: null,
+        unseenClosedMonthId: "2026-08",
       });
       expect(mocks.set).toHaveBeenCalledWith(
         monthPath,
@@ -946,6 +952,10 @@ describe("integridad financiera F1 en servicios", () => {
         ocioToAhorroCents: 0,
         necesidadToNextMonthCents: 0,
         netDeficitCents: 5_000,
+        borrowedNecesidadCents: 0,
+        borrowedOcioCents: 0,
+        deficitResolution: "none",
+        closedAt: "SERVER_TIMESTAMP",
       });
       // Mes intermedio 2026-08 fue creado y cerrado en orden cronológico
       expect(m08.closed).toBe(true);
@@ -954,6 +964,10 @@ describe("integridad financiera F1 en servicios", () => {
         ocioToAhorroCents: 0,
         necesidadToNextMonthCents: 0,
         netDeficitCents: 0,
+        borrowedNecesidadCents: 0,
+        borrowedOcioCents: 0,
+        deficitResolution: "none",
+        closedAt: "SERVER_TIMESTAMP",
       });
       // Mes actual 2026-09 queda abierto y el cursor apunta a 2026-09
       expect(m09.closed).toBe(false);
@@ -981,6 +995,10 @@ describe("integridad financiera F1 en servicios", () => {
         ocioToAhorroCents: 0,
         necesidadToNextMonthCents: 20_000,
         netDeficitCents: 0,
+        borrowedNecesidadCents: 0,
+        borrowedOcioCents: 0,
+        deficitResolution: "none",
+        closedAt: "SERVER_TIMESTAMP",
       });
       expect(m10Closed.closed).toBe(true);
       expect(m10Closed.capsCents).toEqual({ necesidad: 20_000, ocio: 0 });
@@ -988,6 +1006,10 @@ describe("integridad financiera F1 en servicios", () => {
         ocioToAhorroCents: 0,
         necesidadToNextMonthCents: 20_000,
         netDeficitCents: 0,
+        borrowedNecesidadCents: 0,
+        borrowedOcioCents: 0,
+        deficitResolution: "none",
+        closedAt: "SERVER_TIMESTAMP",
       });
       expect(m11Open.closed).toBe(false);
       expect(m11Open.capsCents).toEqual({ necesidad: 20_000, ocio: 0 });

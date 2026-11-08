@@ -32,8 +32,10 @@ service cloud.firestore {
     }
 
     function rawOwned(data, category) {
-      return (data.capsCents[category] - data.get('borrowedCapsCents', {}).get(category, 0))
+      let owned = (data.capsCents[category] - data.get('borrowedCapsCents', {}).get(category, 0))
         - (data.spentCents[category] - data.get('loanFundedSpentCents', {}).get(category, 0));
+      // F5: el déficit arrastrado reduce el disponible propio de Necesidad.
+      return category == 'necesidad' ? owned - data.get('carriedDeficitCents', 0) : owned;
     }
 
     function legacyOcio(data) {
@@ -64,7 +66,8 @@ service cloud.firestore {
       return rem is map
         && 'ocioToAhorroCents' in rem
         && rem.keys().hasOnly(['ocioToAhorroCents', 'necesidadToNextMonthCents', 'netDeficitCents',
-          'borrowedNecesidadCents', 'borrowedOcioCents', 'deficitResolution', 'closedAt'])
+          'borrowedNecesidadCents', 'borrowedOcioCents', 'deficitResolution', 'closedAt',
+          'coveredBySavingsCents', 'uncoveredDeficitCents'])
         && rem.ocioToAhorroCents is int && rem.ocioToAhorroCents >= 0
         && (rem.keys().hasOnly(['ocioToAhorroCents'])
           ? (rem.ocioToAhorroCents == nettedOcio(prevData) || rem.ocioToAhorroCents == legacyOcio(prevData))
@@ -79,6 +82,14 @@ service cloud.firestore {
               || (rem.borrowedOcioCents is int && rem.borrowedOcioCents == borrowedRemainder(prevData, 'ocio')))
             && (!('deficitResolution' in rem)
               || rem.deficitResolution in ['covered_by_savings', 'carried_forward', 'none'])
+            && (!('coveredBySavingsCents' in rem)
+              || ('netDeficitCents' in rem && nonnegative(rem.coveredBySavingsCents)
+                && rem.coveredBySavingsCents <= rem.netDeficitCents))
+            && (!('uncoveredDeficitCents' in rem)
+              || ('netDeficitCents' in rem && nonnegative(rem.uncoveredDeficitCents)
+                && rem.uncoveredDeficitCents <= rem.netDeficitCents))
+            && (!('coveredBySavingsCents' in rem && 'uncoveredDeficitCents' in rem)
+              || rem.coveredBySavingsCents + rem.uncoveredDeficitCents == rem.netDeficitCents)
             && (!('closedAt' in rem) || rem.closedAt == null || rem.closedAt is timestamp)));
     }
 
@@ -101,9 +112,38 @@ service cloud.firestore {
         return previous.closed == false && after.closed == true
           && validClosureRemainder(after.remainder, previous);
       }
-      function previousMonthProcessed(previousId) {
+      function previousMonthPendingClose(previousId, data) {
+        // F5: el cursor puede avanzar al mes nuevo mientras el anterior sigue
+        // abierto durante la ventana de gracia. Solo se admite si el perfil lo
+        // marca como pendiente y el mes permanece abierto (sin cerrarlo aquí).
         let path = /databases/$(database)/documents/users/$(userId)/months/$(previousId);
-        return !exists(path) || get(path).data.closed == true || validPreviousClosure(previousId);
+        return exists(path) && get(path).data.closed == false
+          && getAfter(path).data.closed == false
+          && data.get('pendingCloseMonthId', null) == previousId;
+      }
+      function previousMonthProcessed(previousId, data) {
+        let path = /databases/$(database)/documents/users/$(userId)/months/$(previousId);
+        return !exists(path) || get(path).data.closed == true
+          || validPreviousClosure(previousId)
+          || previousMonthPendingClose(previousId, data);
+      }
+      function validNewProfileFields(data) {
+        // Validate only the F5 fields when present/changed; untouched legacy
+        // fields remain compatible with older clients.
+        let changed = data.diff(resource.data).affectedKeys();
+        return (!changed.hasAny(['pendingCloseMonthId'])
+            || data.get('pendingCloseMonthId', null) == null
+            || (data.pendingCloseMonthId is string
+              && data.pendingCloseMonthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+              && (!exists(/databases/$(database)/documents/users/$(userId)/months/$(data.pendingCloseMonthId))
+                || get(/databases/$(database)/documents/users/$(userId)/months/$(data.pendingCloseMonthId)).data.closed == false)))
+          && (!changed.hasAny(['unseenClosedMonthId'])
+            || data.get('unseenClosedMonthId', null) == null
+            || (data.unseenClosedMonthId is string
+              && data.unseenClosedMonthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+              && exists(/databases/$(database)/documents/users/$(userId)/months/$(data.unseenClosedMonthId))))
+          && (!changed.hasAny(['closingMode'])
+            || data.get('closingMode', 'auto_grace') == 'auto_grace');
       }
       function validLastClosedMonth(data) {
         let previousId = resource.data.get('lastClosedMonth', null);
@@ -119,7 +159,7 @@ service cloud.firestore {
                 && (previousId == null || (previousId is string
                   && previousId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$') && nextId > previousId))
                 && existsAfter(/databases/$(database)/documents/users/$(userId)/months/$(nextId))
-                && (previousId == null || previousMonthProcessed(previousId)))));
+                && (previousId == null || previousMonthProcessed(previousId, data)))));
       }
       function validSavingsTotal(data, creating) {
         return (creating
@@ -137,11 +177,15 @@ service cloud.firestore {
       allow create: if isOwner(userId)
                     && request.resource.data.lastClosedMonth == null
                     && validSavingsTotal(request.resource.data, true)
-                    && validDistribution(request.resource.data, true);
+                    && validDistribution(request.resource.data, true)
+                    && request.resource.data.get('pendingCloseMonthId', null) == null
+                    && request.resource.data.get('unseenClosedMonthId', null) == null
+                    && request.resource.data.get('closingMode', 'auto_grace') == 'auto_grace';
       allow update: if isOwner(userId)
                     && validLastClosedMonth(request.resource.data)
                     && validSavingsTotal(request.resource.data, false)
-                    && validDistribution(request.resource.data, false);
+                    && validDistribution(request.resource.data, false)
+                    && validNewProfileFields(request.resource.data);
       allow delete: if isOwner(userId)
                     && resource.data.get('dataDeletionMode', '') == 'delete-account';
     }
@@ -185,8 +229,10 @@ service cloud.firestore {
         return currentMonth()
           && data.keys().hasOnly(['totalIncomeCents', 'distribution', 'capsCents', 'spentCents',
             'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents', 'incomeCount',
-            'distributedIncomeCount', 'closed', 'createdAt', 'inheritedNecesidadCents'])
+            'distributedIncomeCount', 'closed', 'createdAt', 'inheritedNecesidadCents',
+            'carriedDeficitCents'])
           && percentage(data.distribution) && pair(data.capsCents) && pair(data.borrowedCapsCents)
+          && (!('carriedDeficitCents' in data) || nonnegative(data.carriedDeficitCents))
           && (!('inheritedNecesidadCents' in data)
             || (nonnegative(data.inheritedNecesidadCents)
               && data.inheritedNecesidadCents == data.capsCents.necesidad - data.borrowedCapsCents.necesidad))
@@ -216,6 +262,7 @@ service cloud.firestore {
           && (!changed.hasAny(['ahorroContributedCents']) || nonnegative(data.ahorroContributedCents))
           && (!changed.hasAny(['directSavingsCents']) || nonnegative(data.directSavingsCents))
           && (!changed.hasAny(['inheritedNecesidadCents']) || nonnegative(data.inheritedNecesidadCents))
+          && (!changed.hasAny(['carriedDeficitCents']) || nonnegative(data.carriedDeficitCents))
           && (!changed.hasAny(['capsCents']) || changedPair(data, 'capsCents'))
           && (!changed.hasAny(['spentCents']) || changedPair(data, 'spentCents'))
           && (!changed.hasAny(['borrowedCapsCents']) || changedPair(data, 'borrowedCapsCents'))
@@ -228,7 +275,7 @@ service cloud.firestore {
         let changed = data.diff(resource.data).affectedKeys();
         return changed.hasOnly(['distribution', 'totalIncomeCents', 'capsCents', 'spentCents',
             'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents',
-            'directSavingsCents', 'inheritedNecesidadCents', 'incomeCount',
+            'directSavingsCents', 'inheritedNecesidadCents', 'carriedDeficitCents', 'incomeCount',
             'distributedIncomeCount', 'closed', 'remainder'])
           && changedAmounts(data, changed)
           && (!changed.hasAny(['distribution'])
@@ -258,6 +305,16 @@ service cloud.firestore {
       function optionalText(data, field, limit) {
         return !(field in data) || (data[field] is string && data[field].size() <= limit);
       }
+      function graceOpenPreviousMonth() {
+        // F5: el mes inmediato anterior sigue abierto y marcado como pendiente
+        // solo durante la ventana de gracia. Se acepta cualquier día de ese mes
+        // (el cliente lo cierra en cuanto vence la gracia).
+        let userPath = /databases/$(database)/documents/users/$(userId);
+        let monthPath = /databases/$(database)/documents/users/$(userId)/months/$(monthId);
+        return get(userPath).data.get('pendingCloseMonthId', null) == monthId
+          && get(monthPath).data.closed == false
+          && getAfter(monthPath).data.closed == false;
+      }
       function validDate(value) {
         let parts = value.split('-');
         let year = int(parts[0]);
@@ -270,7 +327,8 @@ service cloud.firestore {
         return value is string && value.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
           && parts[0] + '-' + parts[1] == monthId
           && date.year() == year && date.month() == month && date.day() == day
-          && key >= low.year() * 12 + low.month() && key <= high.year() * 12 + high.month()
+          && (key >= low.year() * 12 + low.month() || graceOpenPreviousMonth())
+          && key <= high.year() * 12 + high.month()
           && date <= high;
       }
       function validTags(tags) {
@@ -850,6 +908,22 @@ service cloud.firestore {
       }
     }
     match /users/{userId}/months/{monthId}/movements/{movementId} {
+      function closedMonthAdjustment(data) {
+        // F5: asiento auditable de ajuste de un mes cerrado. Vive en el mes
+        // abierto actual, referencia el mes cerrado y no lo modifica.
+        let referencePath = /databases/$(database)/documents/users/$(userId)/months/$(data.get('referenceMonthId', ''));
+        return data.get('kind', '') == 'closed_month_adjustment'
+          && data.get('referenceMonthId', null) is string
+          && data.referenceMonthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && data.referenceMonthId != monthId
+          && exists(referencePath) && get(referencePath).data.closed == true
+          && data.get('category', null) in ['necesidad', 'ocio', 'ahorro']
+          && data.origin == data.category && data.destination == data.category
+          && data.get('deltaCents', null) is int && data.deltaCents != 0
+          && (data.amountCents == data.deltaCents || data.amountCents == -data.deltaCents)
+          && data.get('reason', null) is string
+          && data.reason.size() > 0 && data.reason.size() <= 200;
+      }
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
                     && request.auth.uid == userId
@@ -861,7 +935,11 @@ service cloud.firestore {
                     && request.resource.data.amountCents > 0
                     && request.resource.data.origin in ['necesidad', 'ocio', 'ahorro']
                     && request.resource.data.destination in ['necesidad', 'ocio', 'ahorro']
-                    && request.resource.data.origin != request.resource.data.destination
+                    && (
+                      (request.resource.data.origin != request.resource.data.destination
+                        && request.resource.data.get('kind', 'transfer') == 'transfer')
+                      || closedMonthAdjustment(request.resource.data)
+                    )
                     && request.resource.data.transactionDate is string
                     && request.resource.data.transactionDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
                     && request.resource.data.serverDate == request.time

@@ -74,6 +74,8 @@ export type SubcategoryBudget = {
 
 export type DataDeletionMode = "reset" | "delete-account";
 
+export type ClosingMode = "auto_grace";
+
 export type User = {
   name: string;
   email: string;
@@ -82,7 +84,25 @@ export type User = {
   subcategories: Record<"necesidad" | "ocio", string[]>;
   paymentMethods: PaymentMethod[];
   onboardingCompleted: boolean;
+  /**
+   * Nota histórica (F4): pese al nombre heredado en Firestore, almacena el ID
+   * del mes activo actual (YYYY-MM), no el último mes cerrado.
+   */
   lastClosedMonth: string | null;
+  /**
+   * Mes inmediato anterior que sigue abierto durante la ventana de gracia
+   * (días 1 a 3 del mes nuevo) a la espera de revisión/confirmación.
+   */
+  pendingCloseMonthId?: string | null;
+  /**
+   * Último mes cerrado cuyo resumen de cierre aún no fue visto por el usuario.
+   * Persistido en Firestore para sincronizarse entre dispositivos.
+   */
+  unseenClosedMonthId?: string | null;
+  /**
+   * Modo de cierre mensual. En F5 solo se usa el valor por defecto "auto_grace".
+   */
+  closingMode?: ClosingMode;
   savingsTotalCents: number;
   savingsGoals: SavingsGoal[];
   fixedIncomes?: FixedIncome[];

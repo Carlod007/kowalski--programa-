@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { Timestamp } from 'firebase/firestore';
-import { compareRecordedTiming, getRecordedDate, validateTransactionTiming } from './transactionTiming';
+import {
+  compareRecordedTiming,
+  getGraceDeadlineDate,
+  getRecordedDate,
+  isWithinGraceWindow,
+  resolveTargetMonthIdForDate,
+  validateTransactionTiming,
+} from './transactionTiming';
 
 const now = new Date(2026, 8, 26, 14, 30);
 describe('fecha declarada y momento de registro', () => {
@@ -16,6 +23,19 @@ describe('fecha declarada y momento de registro', () => {
     ['2026-09', ''],
   ])('rechaza fecha fuera de alcance: %s %s', (month, date) => {
     expect(() => validateTransactionTiming(month, date, now)).toThrow();
+  });
+  it('acepta un día del mes anterior solo durante los días 1 a 3', () => {
+    const day2 = new Date(2026, 10, 2, 14, 30);
+    expect(() => validateTransactionTiming('2026-10', '2026-10-30', day2)).not.toThrow();
+    expect(isWithinGraceWindow(day2)).toBe(true);
+    expect(getGraceDeadlineDate('2026-10')).toBe('2026-11-03');
+    expect(resolveTargetMonthIdForDate('2026-10-30', '2026-11', day2)).toBe('2026-10');
+    expect(resolveTargetMonthIdForDate('2026-11-01', '2026-11', day2)).toBe('2026-11');
+
+    const day4 = new Date(2026, 10, 4, 14, 30);
+    expect(isWithinGraceWindow(day4)).toBe(false);
+    expect(() => validateTransactionTiming('2026-10', '2026-10-30', day4)).toThrow();
+    expect(resolveTargetMonthIdForDate('2026-10-30', '2026-11', day4)).toBe('2026-11');
   });
   it('ordena por creación e ignora la hora declarada legada', () => {
     const base = { type: 'expense' as const, amountCents: 100, transactionDate: '2026-09-25', serverDate: null };

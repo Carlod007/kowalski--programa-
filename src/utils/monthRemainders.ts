@@ -2,7 +2,11 @@ import type { Month, MonthCaps } from "@/types/month";
 
 type RemainderInput = Pick<
   Month,
-  "capsCents" | "spentCents" | "borrowedCapsCents" | "loanFundedSpentCents"
+  | "capsCents"
+  | "spentCents"
+  | "borrowedCapsCents"
+  | "loanFundedSpentCents"
+  | "carriedDeficitCents"
 >;
 
 export type MonthRemainders = {
@@ -22,6 +26,7 @@ export function getMonthRemainders(month: RemainderInput): MonthRemainders {
     necesidad: 0,
     ocio: 0,
   };
+  const carriedDeficit = month.carriedDeficitCents ?? 0;
 
   const borrowedFor = (category: keyof MonthCaps) =>
     Math.max(0, borrowedCaps[category] - loanFundedSpent[category]);
@@ -38,7 +43,7 @@ export function getMonthRemainders(month: RemainderInput): MonthRemainders {
     return ownedCap - ownedSpent;
   };
 
-  const rawNec = rawOwnedFor("necesidad");
+  const rawNec = rawOwnedFor("necesidad") - carriedDeficit;
   const rawOcio = rawOwnedFor("ocio");
 
   const ocioToAhorroCents = Math.max(0, rawOcio - Math.max(0, -rawNec));

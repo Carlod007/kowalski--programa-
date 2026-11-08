@@ -8,7 +8,10 @@ import { useAuthStore } from "@/store/authStore";
 import { ensureCurrentMonth } from "@/services/monthService";
 import { registerIncome } from "@/services/transactionService";
 import { getMonthId, toDateInputValue } from "@/utils/date";
-import { validateTransactionTiming } from "@/utils/transactionTiming";
+import {
+  resolveTargetMonthIdForDate,
+  validateTransactionTiming,
+} from "@/utils/transactionTiming";
 import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
 import DistributionMismatchBanner from "@/components/DistributionMismatchBanner";
 import { calculateDistribution } from "@/utils/distribution";
@@ -105,8 +108,8 @@ export default function RegisterIncome() {
     }
 
     const amountCents = Math.round(parseFloat(values.amount) * 100);
-    const monthId = getMonthId();
     const transactionDate = values.date || toDateInputValue();
+    const monthId = resolveTargetMonthIdForDate(transactionDate, getMonthId());
     try {
       validateTransactionTiming(monthId, transactionDate);
     } catch (error) {

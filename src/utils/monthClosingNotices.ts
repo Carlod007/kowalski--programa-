@@ -32,6 +32,11 @@ function writeState(key: string, state: NoticeState): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
+export function isMonthClosingSeen(userId: string, monthId: string): boolean {
+  if (!monthId) return false;
+  return readState(keyFor(userId, monthId)) === 'seen';
+}
+
 export function rememberMonthClosing(userId: string, monthId: string | null): void {
   if (!monthId) return;
   const key = keyFor(userId, monthId);
@@ -42,7 +47,10 @@ export function markMonthClosingSeen(userId: string, monthId: string): void {
   writeState(keyFor(userId, monthId), 'seen');
 }
 
-export function getPendingMonthClosings(userId: string): string[] {
+export function getPendingMonthClosings(
+  userId: string,
+  firestoreUnseenMonthId?: string | null,
+): string[] {
   const prefix = userPrefix(userId);
   const keys = new Set(fallback.keys());
   try {
@@ -53,11 +61,20 @@ export function getPendingMonthClosings(userId: string): string[] {
   } catch {
     // The in-memory fallback lasts until this tab is closed.
   }
-  return [...keys]
-    .filter((key) => key.startsWith(prefix) && readState(key) === 'pending')
-    .map((key) => key.slice(prefix.length))
-    .filter((monthId) => /^\d{4}-(0[1-9]|1[0-2])$/.test(monthId))
-    .sort();
+  const pendingSet = new Set(
+    [...keys]
+      .filter((key) => key.startsWith(prefix) && readState(key) === 'pending')
+      .map((key) => key.slice(prefix.length))
+      .filter((monthId) => /^\d{4}-(0[1-9]|1[0-2])$/.test(monthId)),
+  );
+  if (
+    firestoreUnseenMonthId &&
+    /^\d{4}-(0[1-9]|1[0-2])$/.test(firestoreUnseenMonthId) &&
+    !isMonthClosingSeen(userId, firestoreUnseenMonthId)
+  ) {
+    pendingSet.add(firestoreUnseenMonthId);
+  }
+  return [...pendingSet].sort();
 }
 
 export function subscribeMonthClosingNotices(listener: () => void): () => void {

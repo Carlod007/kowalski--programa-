@@ -5,7 +5,7 @@ import type { Month } from '@/types/month';
 import { formatMonthLabel } from '@/utils/date';
 import { formatCents } from '@/utils/currency';
 import { getMonthRemainders } from '@/utils/monthRemainders';
-import { markMonthClosingSeen } from '@/utils/monthClosingNotices';
+import { acknowledgeClosedMonthSummary } from '@/services/monthService';
 
 /** Mount with a user/month key so a previous response is never shown for another month. */
 export default function MonthClosingSummary({ userId, monthId, closedOnly = false, onPresented, children }: {
@@ -69,7 +69,9 @@ function PresentedSummary({ userId, monthId, month, onPresented }: {
         if (!intersecting || document.visibilityState !== 'visible' || presented) return;
         presented = true;
         onPresented?.();
-        markMonthClosingSeen(userId, monthId);
+        acknowledgeClosedMonthSummary(userId, monthId).catch((err) => {
+          console.error('No se pudo actualizar unseenClosedMonthId:', err);
+        });
       });
     }
     const observer = new IntersectionObserver(([entry]) => {
@@ -99,6 +101,16 @@ export function MonthClosingSummaryContent({ monthId, month }: { monthId: string
   const netDeficit = isProjection
     ? remainders.netDeficitCents
     : (month.remainder?.netDeficitCents ?? remainders.netDeficitCents);
+  const borrowedNecesidad = isProjection
+    ? remainders.borrowed.necesidad
+    : (month.remainder?.borrowedNecesidadCents ?? remainders.borrowed.necesidad);
+  const borrowedOcio = isProjection
+    ? remainders.borrowed.ocio
+    : (month.remainder?.borrowedOcioCents ?? remainders.borrowed.ocio);
+  const deficitResolution = month.remainder?.deficitResolution;
+  const coveredBySavings = month.remainder?.coveredBySavingsCents ?? 0;
+  const uncoveredDeficit = month.remainder?.uncoveredDeficitCents ?? Math.max(0, netDeficit - coveredBySavings);
+
   return (
     <>
       <p className="mt-1 text-sm text-stone-500">
@@ -121,10 +133,26 @@ export function MonthClosingSummaryContent({ monthId, month }: { monthId: string
         </p>
         <div className="mt-3 flex flex-col gap-2">
           <Row label={`Necesidad propia no usada → ${isProjection ? 'se sumaría' : 'se sumó'} al mes nuevo`} value={necesidadToNext} />
-          <Row label={`Necesidad prestada no usada → ${isProjection ? 'continuaría' : 'continuó'} al mes nuevo`} value={remainders.borrowed.necesidad} valueClassName="text-violet-700" />
+          <Row label={`Necesidad prestada no usada → ${isProjection ? 'continuaría' : 'continuó'} al mes nuevo`} value={borrowedNecesidad} valueClassName="text-violet-700" />
           <Row label={`Ocio propio sobrante → ${isProjection ? 'se sumaría' : 'se sumó'} a tu Ahorro`} value={ocioToSavings} valueClassName="text-teal-700" />
-          {remainders.borrowed.ocio > 0 && <Row label={`Ocio prestado no usado → ${isProjection ? 'continuaría' : 'continuó'} al mes nuevo`} value={remainders.borrowed.ocio} valueClassName="text-violet-700" />}
+          {borrowedOcio > 0 && <Row label={`Ocio prestado no usado → ${isProjection ? 'continuaría' : 'continuó'} al mes nuevo`} value={borrowedOcio} valueClassName="text-violet-700" />}
           <Row label="Déficit neto del mes" value={netDeficit} valueClassName={netDeficit > 0 ? 'text-amber-700' : 'text-stone-900'} />
+          {!isProjection && netDeficit > 0 && deficitResolution === 'covered_by_savings' && (
+            <>
+              <Row label="Cubierto con ahorro sin asignar" value={coveredBySavings} valueClassName="text-teal-700" />
+              {uncoveredDeficit > 0 && (
+                <Row label="Déficit pendiente sin cubrir" value={uncoveredDeficit} valueClassName="text-amber-700" />
+              )}
+            </>
+          )}
+          {!isProjection && netDeficit > 0 && deficitResolution === 'carried_forward' && (
+            <Row label="Déficit arrastrado al mes siguiente" value={netDeficit} valueClassName="text-amber-700" />
+          )}
+          {!isProjection && netDeficit > 0 && (!deficitResolution || deficitResolution === 'none') && (
+            <p className="mt-1 text-xs text-amber-700">
+              Este déficit quedó registrado sin cubrir. Puedes compensarlo desde Historial con un asiento de ajuste.
+            </p>
+          )}
         </div>
       </div>
     </>

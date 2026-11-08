@@ -20,7 +20,9 @@ describe('resultado real del cierre y consumo posterior al commit', () => {
   let transaction: Transaction;
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 9, 2, 12));
+    // F5: el día 2 es ventana de gracia; esta suite conserva el cierre de F4
+    // usando el día 4, cuando la gracia ya venció.
+    vi.setSystemTime(new Date(2026, 9, 4, 12));
     mocks.docs.clear(); mocks.update.mockClear(); mocks.set.mockClear(); mocks.run.mockReset();
     const values = new Map<string, string>();
     vi.stubGlobal('localStorage', { get length() { return values.size; }, key: (i: number) => [...values.keys()][i] ?? null,
@@ -39,9 +41,22 @@ describe('resultado real del cierre y consumo posterior al commit', () => {
     expect(await checkAndCloseMonth('u')).toEqual({ closedMonthId: '2026-09' });
     expect(mocks.update).toHaveBeenCalledWith('users/u/months/2026-09', {
       closed: true,
-      remainder: { ocioToAhorroCents: 25000, necesidadToNextMonthCents: 30000, netDeficitCents: 0 },
+      remainder: {
+        ocioToAhorroCents: 25000,
+        necesidadToNextMonthCents: 30000,
+        netDeficitCents: 0,
+        borrowedNecesidadCents: 10000,
+        borrowedOcioCents: 25000,
+        deficitResolution: 'none',
+        closedAt: 'server',
+      },
     });
-    expect(mocks.update).toHaveBeenCalledWith('users/u', { savingsTotalCents: { increment: 25000 } });
+    expect(mocks.update).toHaveBeenCalledWith('users/u', {
+      lastClosedMonth: '2026-10',
+      pendingCloseMonthId: null,
+      savingsTotalCents: { increment: 25000 },
+      unseenClosedMonthId: '2026-09',
+    });
     expect(mocks.set.mock.calls[0][1]).toMatchObject({
       capsCents: { necesidad: 40000, ocio: 25000 },
       borrowedCapsCents: { necesidad: 10000, ocio: 25000 },
