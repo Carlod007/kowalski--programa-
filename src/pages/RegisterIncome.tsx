@@ -3,30 +3,17 @@ import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useNavigate } from "react-router-dom";
-import {
-  collection,
-  doc,
-  increment,
-  serverTimestamp,
-  writeBatch,
-  type UpdateData,
-  type WithFieldValue,
-} from "firebase/firestore";
 import { User, ChevronDown, FileText, Save } from "lucide-react";
-import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
+import { ensureCurrentMonth } from "@/services/monthService";
+import { registerIncome } from "@/services/transactionService";
 import { getMonthId, toDateInputValue } from "@/utils/date";
 import { validateTransactionTiming } from "@/utils/transactionTiming";
 import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
 import { calculateDistribution } from "@/utils/distribution";
-import { doc as firestoreDoc, getDoc } from "firebase/firestore";
 import { formatCents } from "@/utils/currency";
-import type { IncomeTransaction, Distribution } from "@/types/transaction";
-import type { Month } from "@/types/month";
+import type { Distribution } from "@/types/transaction";
 import BackButton from "@/components/BackButton";
-
-/** Etiqueta fija de los aportes directos: no ensucia las fuentes del usuario. */
-const DIRECT_SAVINGS_LABEL = "Aporte directo";
 
 const incomeSchema = z.object({
   // La fuente no se valida acá porque un aporte directo no lleva ninguna.
@@ -55,12 +42,9 @@ export default function RegisterIncome() {
 
   useEffect(() => {
     if (!user) return;
-    const monthId = getMonthId();
-    getDoc(firestoreDoc(db, "users", user.uid, "months", monthId))
-      .then((snap) => {
-        if (snap.exists()) {
-          setMonthDistribution((snap.data() as Month).distribution);
-        }
+    ensureCurrentMonth(user.uid)
+      .then((month) => {
+        setMonthDistribution(month.distribution);
       })
       .catch((err) => {
         console.error("Error al cargar distribución del mes:", err);
@@ -103,19 +87,17 @@ export default function RegisterIncome() {
     Number.isFinite(parsedAmount) && parsedAmount > 0
       ? Math.round(parsedAmount * 100)
       : 0;
+  const effectiveDistribution =
+    monthDistribution ?? userProfile?.distribution ?? null;
   const preview =
-    !isDirectSavings && previewCents > 0 && monthDistribution
-      ? calculateDistribution(previewCents, monthDistribution)
+    !isDirectSavings && previewCents > 0 && effectiveDistribution
+      ? calculateDistribution(previewCents, effectiveDistribution)
       : null;
 
   async function onSubmit(values: IncomeFormValues) {
     if (!user || !userProfile) return;
     setSubmitError(null);
 
-    if (!monthDistribution) {
-      setSubmitError("No se pudo cargar el mes. Intenta de nuevo.");
-      return;
-    }
     if (!isDirectSavings && !values.source) {
       setSubmitError("Selecciona una fuente");
       return;
@@ -133,70 +115,16 @@ export default function RegisterIncome() {
     const description = values.description?.trim();
     const selectedSource = sources.find((s) => s.id === values.source);
 
-    const batch = writeBatch(db);
-
-    const txRef = doc(
-      collection(db, "users", user.uid, "months", monthId, "transactions"),
-    );
-    const monthRef = doc(db, "users", user.uid, "months", monthId);
-    const userRef = doc(db, "users", user.uid);
-
-    if (isDirectSavings) {
-      // Va entero al ahorro: no toca los topes ni totalIncomeCents, para no
-      // alterar los porcentajes del mes con plata que nunca se repartió.
-      const tx: WithFieldValue<IncomeTransaction> = {
-        type: "income",
-        source: DIRECT_SAVINGS_LABEL,
-        transactionDate,
+    try {
+      await registerIncome(user.uid, {
+        monthId,
         amountCents,
-        distribution: { necesidad: 0, ocio: 0, ahorro: amountCents },
-        isDirectSavings: true,
-        serverDate: serverTimestamp(),
-        localDate: new Date().toISOString(),
-        ...(description ? { description } : {}),
-      };
-      batch.set(txRef, tx);
-
-      const monthUpdate: UpdateData<Month> = {
-        directSavingsCents: increment(amountCents),
-        incomeCount: increment(1),
-        ahorroContributedCents: increment(amountCents),
-      };
-      batch.update(monthRef, monthUpdate);
-      batch.update(userRef, { savingsTotalCents: increment(amountCents) });
-    } else {
-      const distribution = calculateDistribution(
-        amountCents,
-        monthDistribution,
-      );
-      const tx: WithFieldValue<IncomeTransaction> = {
-        type: "income",
+        date: transactionDate,
+        description,
+        isDirectSavings,
         source: selectedSource?.name ?? "",
         sourceId: values.source,
-        transactionDate,
-        amountCents,
-        distribution,
-        serverDate: serverTimestamp(),
-        localDate: new Date().toISOString(),
-        ...(description ? { description } : {}),
-      };
-      batch.set(txRef, tx);
-
-      const monthUpdate: UpdateData<Month> = {
-        totalIncomeCents: increment(amountCents),
-        incomeCount: increment(1),
-        "capsCents.necesidad": increment(distribution.necesidad),
-        "capsCents.ocio": increment(distribution.ocio),
-        ahorroContributedCents: increment(distribution.ahorro),
-      };
-      batch.update(monthRef, monthUpdate);
-      batch.update(userRef, {
-        savingsTotalCents: increment(distribution.ahorro),
       });
-    }
-
-    try {
-      await batch.commit();
       navigate("/dashboard");
     } catch (err) {
       console.error("Error al registrar ingreso:", err);

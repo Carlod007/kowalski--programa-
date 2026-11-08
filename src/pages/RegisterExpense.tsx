@@ -1,23 +1,15 @@
 import { useEffect, useState } from "react";
-import {
-  collection,
-  doc,
-  increment,
-  onSnapshot,
-  serverTimestamp,
-  writeBatch,
-  type UpdateData,
-  type WithFieldValue,
-} from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { checkAndRememberMonthClosing } from "@/services/monthClosingNoticeService";
+import { ensureCurrentMonth } from "@/services/monthService";
 import {
   purchaseGoalExpense,
+  registerExpense,
   withdrawFromFund,
 } from "@/services/transactionService";
 import {
@@ -155,8 +147,8 @@ export default function RegisterExpense() {
   useEffect(() => {
     if (!user) return;
 
-    checkAndRememberMonthClosing(user.uid).catch((err) => {
-      console.error("checkAndCloseMonth falló:", err);
+    ensureCurrentMonth(user.uid).catch((err) => {
+      console.error("ensureCurrentMonth falló:", err);
     });
 
     const monthRef = doc(db, "users", user.uid, "months", getMonthId());
@@ -637,33 +629,17 @@ function ExpenseDetailStep({
       return;
     }
 
-    const batch = writeBatch(db);
-
-    const txRef = doc(
-      collection(db, "users", user.uid, "months", monthId, "transactions"),
-    );
-    const tx: WithFieldValue<ExpenseTransaction> = {
-      type: "expense",
-      category,
-      subcategory,
-      paymentMethod,
-      amountCents,
-      transactionDate,
-      serverDate: serverTimestamp(),
-      localDate: new Date().toISOString(),
-      ...(description ? { description } : {}),
-      ...(tags.length > 0 ? { tags } : {}),
-    };
-    batch.set(txRef, tx);
-
-    const monthRef = doc(db, "users", user.uid, "months", monthId);
-    const monthUpdate: UpdateData<Month> = {
-      [`spentCents.${category}`]: increment(amountCents),
-    };
-    batch.update(monthRef, monthUpdate);
-
     try {
-      await batch.commit();
+      await registerExpense(user.uid, {
+        monthId,
+        category,
+        subcategory,
+        paymentMethod,
+        amountCents,
+        date: transactionDate,
+        description,
+        tags,
+      });
       navigate("/dashboard");
     } catch (err) {
       console.error("Error al registrar egreso:", err);

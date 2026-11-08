@@ -603,4 +603,50 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     expect((await admin.doc(cardPath).get()).data()?.currentDebtCents).toBe(1000);
     expect((await admin.collection(`users/owner/months/${localMonth}/transactions`).get()).empty).toBe(true);
   });
+  it('F2a SERVICIO: ensureCurrentMonth, registerIncome (normal y directo) y registerExpense contra reglas reales', async () => {
+    const { ensureCurrentMonth } = await import('./monthService');
+    const { registerIncome, registerExpense } = await import('./transactionService');
+    const localDate = toDateInputValue(); const localMonth = getMonthId();
+    const localPath = `users/owner/months/${localMonth}`;
+    await admin.doc(localPath).delete();
+    await admin.doc(profilePath).update({ lastClosedMonth: null, savingsTotalCents: 0 });
+
+    const ensured = await ensureCurrentMonth('owner');
+    expect(ensured.closed).toBe(false);
+
+    await registerIncome('owner', {
+      monthId: localMonth,
+      amountCents: 100000,
+      source: 'Sueldo',
+      sourceId: 'src-1',
+      date: localDate,
+      description: 'Nómina',
+    });
+    await registerIncome('owner', {
+      monthId: localMonth,
+      amountCents: 15000,
+      isDirectSavings: true,
+      date: localDate,
+      description: 'Extra',
+    });
+    await registerExpense('owner', {
+      monthId: localMonth,
+      category: 'necesidad',
+      subcategory: 'Comida',
+      paymentMethod: 'Efectivo',
+      amountCents: 12000,
+      date: localDate,
+      description: 'Mercado',
+      tags: ['hogar'],
+    });
+
+    const monthSnap = (await admin.doc(localPath).get()).data()!;
+    expect(monthSnap.totalIncomeCents).toBe(100000);
+    expect(monthSnap.directSavingsCents).toBe(15000);
+    expect(monthSnap.incomeCount).toBe(2);
+    expect(monthSnap.capsCents).toEqual({ necesidad: 50000, ocio: 30000 });
+    expect(monthSnap.spentCents).toEqual({ necesidad: 12000, ocio: 0 });
+    expect(monthSnap.ahorroContributedCents).toBe(35000);
+    expect((await admin.doc(profilePath).get()).data()?.savingsTotalCents).toBe(35000);
+  });
 });

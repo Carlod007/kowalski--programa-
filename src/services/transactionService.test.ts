@@ -52,11 +52,13 @@ vi.mock("firebase/firestore", () => ({
 import {
   deleteTransaction,
   purchaseGoalExpense,
+  registerExpense,
+  registerIncome,
   updateExpense,
   updateIncome,
   withdrawFromFund,
 } from "./transactionService";
-import { checkAndCloseMonth } from "./monthService";
+import { checkAndCloseMonth, ensureCurrentMonth } from "./monthService";
 
 const userPath = "users/u";
 const monthPath = "users/u/months/2026-09";
@@ -338,6 +340,237 @@ describe("integridad financiera F1 en servicios", () => {
         expect.objectContaining({
           capsCents: { necesidad: 0, ocio: 0 },
           inheritedNecesidadCents: 0,
+        }),
+      );
+    });
+  });
+
+  describe("F2a: registerIncome, registerExpense y ensureCurrentMonth", () => {
+    it("registerIncome registra un ingreso normal (1000 -> Necesidad 500 / Ocio 300 / Ahorro 200) releyendo month.distribution", async () => {
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 60, ocio: 20, ahorro: 20 },
+        savingsTotalCents: 10_000,
+      });
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        capsCents: { necesidad: 0, ocio: 0 },
+        spentCents: { necesidad: 0, ocio: 0 },
+        incomeCount: 1,
+      });
+
+      const result = await registerIncome("u", {
+        monthId: "2026-09",
+        amountCents: 100_000,
+        source: "Sueldo",
+        sourceId: "src-1",
+        date: "2026-09-15",
+        description: "Pago mensual",
+      });
+
+      expect(result.distribution).toEqual({
+        necesidad: 50_000,
+        ocio: 30_000,
+        ahorro: 20_000,
+      });
+      expect(mocks.set).toHaveBeenCalledWith(
+        `${monthPath}/transactions/generated-1`,
+        expect.objectContaining({
+          type: "income",
+          source: "Sueldo",
+          sourceId: "src-1",
+          transactionDate: "2026-09-15",
+          amountCents: 100_000,
+          distribution: {
+            necesidad: 50_000,
+            ocio: 30_000,
+            ahorro: 20_000,
+          },
+          description: "Pago mensual",
+        }),
+      );
+      expect(mocks.update).toHaveBeenCalledWith(monthPath, {
+        totalIncomeCents: { __op: "increment", value: 100_000 },
+        incomeCount: { __op: "increment", value: 1 },
+        "capsCents.necesidad": { __op: "increment", value: 50_000 },
+        "capsCents.ocio": { __op: "increment", value: 30_000 },
+        ahorroContributedCents: { __op: "increment", value: 20_000 },
+      });
+      expect(mocks.update).toHaveBeenCalledWith(userPath, {
+        savingsTotalCents: { __op: "increment", value: 20_000 },
+      });
+    });
+
+    it("registerIncome registra un aporte directo a Ahorro (isDirectSavings) con las mismas escrituras actuales", async () => {
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        savingsTotalCents: 0,
+      });
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        capsCents: { necesidad: 0, ocio: 0 },
+        spentCents: { necesidad: 0, ocio: 0 },
+        incomeCount: 0,
+      });
+
+      const result = await registerIncome("u", {
+        monthId: "2026-09",
+        amountCents: 25_000,
+        isDirectSavings: true,
+        date: "2026-09-15",
+        description: "Venta",
+      });
+
+      expect(result.distribution).toEqual({
+        necesidad: 0,
+        ocio: 0,
+        ahorro: 25_000,
+      });
+      expect(mocks.set).toHaveBeenCalledWith(
+        `${monthPath}/transactions/generated-1`,
+        expect.objectContaining({
+          type: "income",
+          source: "Aporte directo",
+          transactionDate: "2026-09-15",
+          amountCents: 25_000,
+          distribution: { necesidad: 0, ocio: 0, ahorro: 25_000 },
+          isDirectSavings: true,
+          description: "Venta",
+        }),
+      );
+      expect(mocks.update).toHaveBeenCalledWith(monthPath, {
+        directSavingsCents: { __op: "increment", value: 25_000 },
+        incomeCount: { __op: "increment", value: 1 },
+        ahorroContributedCents: { __op: "increment", value: 25_000 },
+      });
+      expect(mocks.update).toHaveBeenCalledWith(userPath, {
+        savingsTotalCents: { __op: "increment", value: 25_000 },
+      });
+    });
+
+    it("registerExpense registra un gasto normal e incrementa spentCents de la categoría", async () => {
+      mocks.docs.set(monthPath, {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        capsCents: { necesidad: 50_000, ocio: 30_000 },
+        spentCents: { necesidad: 0, ocio: 0 },
+      });
+
+      await registerExpense("u", {
+        monthId: "2026-09",
+        category: "necesidad",
+        subcategory: "Supermercado",
+        paymentMethod: "Débito",
+        amountCents: 12_500,
+        date: "2026-09-14",
+        description: "Compra semanal",
+        tags: ["casa"],
+      });
+
+      expect(mocks.set).toHaveBeenCalledWith(
+        `${monthPath}/transactions/generated-1`,
+        expect.objectContaining({
+          type: "expense",
+          category: "necesidad",
+          subcategory: "Supermercado",
+          paymentMethod: "Débito",
+          amountCents: 12_500,
+          transactionDate: "2026-09-14",
+          description: "Compra semanal",
+          tags: ["casa"],
+        }),
+      );
+      expect(mocks.update).toHaveBeenCalledWith(monthPath, {
+        "spentCents.necesidad": { __op: "increment", value: 12_500 },
+      });
+    });
+
+    it("registerExpense rechaza gasto con fecha inválida (futura o fuera del mes) sin tocar Firestore", async () => {
+      mocks.docs.set(monthPath, { closed: false });
+
+      await expect(
+        registerExpense("u", {
+          monthId: "2026-09",
+          category: "ocio",
+          subcategory: "Restaurante",
+          paymentMethod: "Efectivo",
+          amountCents: 5_000,
+          date: "2026-09-20", // Hoy es 2026-09-15 en fakeTimers
+        }),
+      ).rejects.toThrow("La fecha no puede estar en el futuro.");
+
+      await expect(
+        registerExpense("u", {
+          monthId: "2026-09",
+          category: "ocio",
+          subcategory: "Restaurante",
+          paymentMethod: "Efectivo",
+          amountCents: 5_000,
+          date: "2026-08-31",
+        }),
+      ).rejects.toThrow("La fecha debe pertenecer al mes actual abierto.");
+
+      expect(mocks.set).not.toHaveBeenCalled();
+      expect(mocks.update).not.toHaveBeenCalled();
+    });
+
+    it("crea el mes inexistente automáticamente mediante ensureCurrentMonth al registrar un ingreso o llamarlo directamente", async () => {
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        lastClosedMonth: null,
+        savingsTotalCents: 0,
+      });
+
+      // months/2026-09 no existe aún en mocks.docs
+      const result = await registerIncome("u", {
+        monthId: "2026-09",
+        amountCents: 100_000,
+        source: "Sueldo",
+        sourceId: "src-1",
+        date: "2026-09-15",
+      });
+
+      expect(result.distribution).toEqual({
+        necesidad: 50_000,
+        ocio: 30_000,
+        ahorro: 20_000,
+      });
+      // Se creó el documento del mes y luego la transacción de ingreso
+      expect(mocks.set).toHaveBeenCalledWith(
+        monthPath,
+        expect.objectContaining({
+          totalIncomeCents: 0,
+          distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+          closed: false,
+        }),
+      );
+      expect(mocks.set).toHaveBeenCalledWith(
+        expect.stringContaining(`${monthPath}/transactions/`),
+        expect.objectContaining({
+          type: "income",
+          amountCents: 100_000,
+        }),
+      );
+
+      // También si lastClosedMonth ya apuntaba al mes actual pero faltaba el doc del mes
+      mocks.set.mockClear();
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        lastClosedMonth: "2026-09",
+        savingsTotalCents: 0,
+      });
+      const ensured = await ensureCurrentMonth("u");
+      expect(ensured.distribution).toEqual({
+        necesidad: 50,
+        ocio: 30,
+        ahorro: 20,
+      });
+      expect(mocks.set).toHaveBeenCalledWith(
+        monthPath,
+        expect.objectContaining({
+          closed: false,
+          distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
         }),
       );
     });

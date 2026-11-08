@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { User as UserProfile } from "@/types/user";
 
@@ -24,15 +24,6 @@ export function buildInitialUserProfile(
     expenseTemplates: [],
     subcategoryBudgets: [],
   };
-}
-
-export async function getUserProfile(
-  userId: string,
-): Promise<UserProfile | null> {
-  const ref = doc(db, "users", userId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-  return snap.data() as UserProfile;
 }
 
 export async function createUserProfile(

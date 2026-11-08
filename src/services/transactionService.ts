@@ -5,12 +5,18 @@ import {
   increment,
   runTransaction,
   serverTimestamp,
+  type UpdateData,
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { ensureCurrentMonth } from "@/services/monthService";
+import { getMonthId, toDateInputValue } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import { validateTransactionTiming } from "@/utils/transactionTiming";
-import { calculateProportionalSplit } from "@/utils/distribution";
+import {
+  calculateDistribution,
+  calculateProportionalSplit,
+} from "@/utils/distribution";
 import {
   getBorrowedAvailableByCategory,
   reverseLoanPayment,
@@ -27,6 +33,7 @@ import type { Month } from "@/types/month";
 import type { Loan, LoanPayment } from "@/types/loan";
 import type { CreditCard } from "@/types/creditCard";
 import type {
+  Distribution,
   ExpenseTransaction,
   IncomeTransaction,
   Transaction,
@@ -766,4 +773,219 @@ export async function purchaseGoalExpense(
       ),
     });
   });
+}
+
+/** Etiqueta fija de los aportes directos: no ensucia las fuentes del usuario. */
+const DIRECT_SAVINGS_LABEL = "Aporte directo";
+
+export interface RegisterIncomeInput {
+  monthId?: string;
+  amountCents: number;
+  date?: string;
+  description?: string;
+  isDirectSavings?: boolean;
+  source?: string;
+  sourceId?: string;
+}
+
+export async function registerIncome(
+  userId: string,
+  input: RegisterIncomeInput,
+): Promise<{ distribution: Distribution }> {
+  if (input.amountCents <= 0) {
+    throw new Error("El monto debe ser mayor a 0");
+  }
+
+  const isDirectSavings = Boolean(input.isDirectSavings);
+  if (!isDirectSavings && !input.source && !input.sourceId) {
+    throw new Error("Selecciona una fuente");
+  }
+
+  const monthId = input.monthId ?? getMonthId();
+  const transactionDate = input.date || toDateInputValue();
+  validateTransactionTiming(monthId, transactionDate);
+
+  const description = input.description?.trim();
+  const userRef = doc(db, "users", userId);
+  const monthRef = doc(db, "users", userId, "months", monthId);
+
+  const executeWrite = async (
+    fallbackMonth?: Month,
+  ): Promise<{ monthMissing: true } | { monthMissing: false; distribution: Distribution }> => {
+    const txRef = doc(
+      collection(db, "users", userId, "months", monthId, "transactions"),
+    );
+    return runTransaction(db, async (transaction) => {
+      const monthSnap = await transaction.get(monthRef);
+      const month = monthSnap.exists()
+        ? (monthSnap.data() as Month)
+        : fallbackMonth;
+      if (!month) {
+        return { monthMissing: true };
+      }
+      if (month.closed) {
+        throw new Error("No se puede modificar un mes cerrado");
+      }
+
+      if (isDirectSavings) {
+        // Va entero al ahorro: no toca los topes ni totalIncomeCents, para no
+        // alterar los porcentajes del mes con plata que nunca se repartió.
+        const distribution: Distribution = {
+          necesidad: 0,
+          ocio: 0,
+          ahorro: input.amountCents,
+        };
+        const tx: WithFieldValue<IncomeTransaction> = {
+          type: "income",
+          source: DIRECT_SAVINGS_LABEL,
+          transactionDate,
+          amountCents: input.amountCents,
+          distribution,
+          isDirectSavings: true,
+          serverDate: serverTimestamp(),
+          localDate: new Date().toISOString(),
+          ...(description ? { description } : {}),
+        };
+        transaction.set(txRef, tx);
+
+        const monthUpdate: UpdateData<Month> = {
+          directSavingsCents: increment(input.amountCents),
+          incomeCount: increment(1),
+          ahorroContributedCents: increment(input.amountCents),
+        };
+        transaction.update(monthRef, monthUpdate);
+        transaction.update(userRef, {
+          savingsTotalCents: increment(input.amountCents),
+        });
+        return { monthMissing: false, distribution };
+      }
+
+      const distribution = calculateDistribution(
+        input.amountCents,
+        month.distribution,
+      );
+      const tx: WithFieldValue<IncomeTransaction> = {
+        type: "income",
+        source: input.source ?? "",
+        ...(input.sourceId !== undefined ? { sourceId: input.sourceId } : {}),
+        transactionDate,
+        amountCents: input.amountCents,
+        distribution,
+        serverDate: serverTimestamp(),
+        localDate: new Date().toISOString(),
+        ...(description ? { description } : {}),
+      };
+      transaction.set(txRef, tx);
+
+      const monthUpdate: UpdateData<Month> = {
+        totalIncomeCents: increment(input.amountCents),
+        incomeCount: increment(1),
+        "capsCents.necesidad": increment(distribution.necesidad),
+        "capsCents.ocio": increment(distribution.ocio),
+        ahorroContributedCents: increment(distribution.ahorro),
+      };
+      transaction.update(monthRef, monthUpdate);
+      transaction.update(userRef, {
+        savingsTotalCents: increment(distribution.ahorro),
+      });
+      return { monthMissing: false, distribution };
+    });
+  };
+
+  const firstAttempt = await executeWrite();
+  if (!firstAttempt.monthMissing) {
+    return { distribution: firstAttempt.distribution };
+  }
+
+  const ensuredMonth = await ensureCurrentMonth(userId);
+  const secondAttempt = await executeWrite(ensuredMonth);
+  if (secondAttempt.monthMissing) {
+    throw new Error(`registerIncome: mes ${monthId} no existe`);
+  }
+  return { distribution: secondAttempt.distribution };
+}
+
+export interface RegisterExpenseInput {
+  monthId?: string;
+  category: "necesidad" | "ocio";
+  subcategory: string;
+  paymentMethod: string;
+  amountCents: number;
+  date?: string;
+  description?: string;
+  tags?: string[];
+}
+
+export async function registerExpense(
+  userId: string,
+  input: RegisterExpenseInput,
+): Promise<void> {
+  if (input.amountCents <= 0) {
+    throw new Error("El monto debe ser mayor a 0");
+  }
+  if (!input.subcategory) {
+    throw new Error("Selecciona una subcategoría");
+  }
+  if (!input.paymentMethod) {
+    throw new Error("Selecciona un método de pago");
+  }
+
+  const monthId = input.monthId ?? getMonthId();
+  const transactionDate = input.date || toDateInputValue();
+  validateTransactionTiming(monthId, transactionDate);
+
+  const description = input.description?.trim();
+  const tags = input.tags ?? [];
+  const monthRef = doc(db, "users", userId, "months", monthId);
+
+  const executeWrite = async (
+    fallbackMonth?: Month,
+  ): Promise<{ monthMissing: boolean }> => {
+    const txRef = doc(
+      collection(db, "users", userId, "months", monthId, "transactions"),
+    );
+    return runTransaction(db, async (transaction) => {
+      const monthSnap = await transaction.get(monthRef);
+      const month = monthSnap.exists()
+        ? (monthSnap.data() as Month)
+        : fallbackMonth;
+      if (!month) {
+        return { monthMissing: true };
+      }
+      if (month.closed) {
+        throw new Error("No se puede modificar un mes cerrado");
+      }
+
+      const tx: WithFieldValue<ExpenseTransaction> = {
+        type: "expense",
+        category: input.category,
+        subcategory: input.subcategory,
+        paymentMethod: input.paymentMethod,
+        amountCents: input.amountCents,
+        transactionDate,
+        serverDate: serverTimestamp(),
+        localDate: new Date().toISOString(),
+        ...(description ? { description } : {}),
+        ...(tags.length > 0 ? { tags } : {}),
+      };
+      transaction.set(txRef, tx);
+
+      const monthUpdate: UpdateData<Month> = {
+        [`spentCents.${input.category}`]: increment(input.amountCents),
+      };
+      transaction.update(monthRef, monthUpdate);
+      return { monthMissing: false };
+    });
+  };
+
+  const firstAttempt = await executeWrite();
+  if (!firstAttempt.monthMissing) {
+    return;
+  }
+
+  const ensuredMonth = await ensureCurrentMonth(userId);
+  const secondAttempt = await executeWrite(ensuredMonth);
+  if (secondAttempt.monthMissing) {
+    throw new Error(`registerExpense: mes ${monthId} no existe`);
+  }
 }

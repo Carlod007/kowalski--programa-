@@ -10,7 +10,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getMonthId, toDateInputValue } from "@/utils/date";
-import { calculateDistribution } from "@/utils/distribution";
+import { rememberMonthClosing } from "@/utils/monthClosingNotices";
 import { getUnassignedCents } from "@/utils/savings";
 import { getMonthRemainders } from "@/utils/monthRemainders";
 import type { Month, MonthCaps } from "@/types/month";
@@ -58,188 +58,194 @@ function syncDistributionIfUnused(
   transaction.update(monthRef, { distribution: profileDistribution });
 }
 
-export async function getOrCreateMonth(
+async function applyMonthCloseAndEnsure(
+  transaction: Transaction,
   userId: string,
-  monthId: string,
-): Promise<Month> {
-  const monthRef = doc(db, "users", userId, "months", monthId);
+  currentMonthId: string,
+): Promise<{ closedMonthId: string | null; month: Month }> {
   const userRef = doc(db, "users", userId);
+  const userSnap = await transaction.get(userRef);
+  if (!userSnap.exists()) {
+    throw new Error(`checkAndCloseMonth: perfil ${userId} no existe`);
+  }
+  const userProfile = userSnap.data() as User;
+  const newMonthRef = doc(db, "users", userId, "months", currentMonthId);
 
-  return runTransaction(db, async (transaction) => {
-    const monthSnap = await transaction.get(monthRef);
-    if (monthSnap.exists()) {
-      return monthSnap.data() as Month;
+  // La sincronización va antes de la salida temprana: los meses ya creados
+  // con un reparto desactualizado no vuelven a pasar por la creación, y sin
+  // esto nunca se corregirían.
+  if (userProfile.lastClosedMonth === currentMonthId) {
+    const currentSnap = await transaction.get(newMonthRef);
+    if (currentSnap.exists()) {
+      const currentMonth = currentSnap.data() as Month;
+      syncDistributionIfUnused(
+        transaction,
+        newMonthRef,
+        currentMonth,
+        userProfile.distribution,
+      );
+      return {
+        closedMonthId: null,
+        month:
+          currentMonth.incomeCount === 0
+            ? { ...currentMonth, distribution: userProfile.distribution }
+            : currentMonth,
+      };
     }
-    const userSnap = await transaction.get(userRef);
-    if (!userSnap.exists()) {
-      throw new Error(`getOrCreateMonth: perfil ${userId} no existe`);
+    const newMonth = buildEmptyMonth(userProfile.distribution);
+    transaction.set(newMonthRef, newMonth);
+    return {
+      closedMonthId: null,
+      month: newMonth as Month,
+    };
+  }
+
+  const prevMonthId = userProfile.lastClosedMonth;
+  const prevMonthRef = prevMonthId
+    ? doc(db, "users", userId, "months", prevMonthId)
+    : null;
+  const prevMonthSnap = prevMonthRef
+    ? await transaction.get(prevMonthRef)
+    : null;
+
+  const newMonthSnap = await transaction.get(newMonthRef);
+
+  let ownedInheritedNecesidadCents = 0;
+  let inheritedNecesidadCents = 0;
+  let inheritedBorrowedCents: MonthCaps = { necesidad: 0, ocio: 0 };
+  let closedMonthId: string | null = null;
+
+  if (
+    prevMonthRef &&
+    prevMonthSnap &&
+    prevMonthSnap.exists() &&
+    !prevMonthSnap.data().closed
+  ) {
+    const prevMonth = prevMonthSnap.data() as Month;
+
+    const {
+      ocioToAhorroCents,
+      necesidadToNextMonthCents,
+      netDeficitCents,
+      borrowed: borrowedRemainder,
+    } = getMonthRemainders(prevMonth);
+
+    ownedInheritedNecesidadCents = necesidadToNextMonthCents;
+    inheritedNecesidadCents =
+      necesidadToNextMonthCents + borrowedRemainder.necesidad;
+    inheritedBorrowedCents = borrowedRemainder;
+
+    transaction.update(prevMonthRef, {
+      closed: true,
+      remainder: {
+        ocioToAhorroCents,
+        necesidadToNextMonthCents,
+        netDeficitCents,
+      },
+    });
+    closedMonthId = prevMonthId;
+
+    if (ocioToAhorroCents > 0) {
+      transaction.update(userRef, {
+        savingsTotalCents: increment(ocioToAhorroCents),
+      });
     }
-    const { distribution } = userSnap.data() as User;
-    const newMonth = buildEmptyMonth(distribution);
-    transaction.set(monthRef, newMonth);
-    return newMonth as Month;
-  });
+  }
+
+  let resolvedMonth: Month;
+
+  if (!newMonthSnap.exists()) {
+    const newMonth = buildEmptyMonth(userProfile.distribution);
+    (newMonth.capsCents as MonthCaps).necesidad = inheritedNecesidadCents;
+    (newMonth.capsCents as MonthCaps).ocio = inheritedBorrowedCents.ocio;
+    newMonth.borrowedCapsCents = inheritedBorrowedCents;
+    newMonth.inheritedNecesidadCents = ownedInheritedNecesidadCents;
+    transaction.set(newMonthRef, newMonth);
+    resolvedMonth = newMonth as Month;
+  } else {
+    const existingMonth = newMonthSnap.data() as Month;
+    if (inheritedNecesidadCents > 0 || inheritedBorrowedCents.ocio > 0) {
+      transaction.update(newMonthRef, {
+        "capsCents.necesidad": increment(inheritedNecesidadCents),
+        "capsCents.ocio": increment(inheritedBorrowedCents.ocio),
+        "borrowedCapsCents.necesidad": increment(
+          inheritedBorrowedCents.necesidad,
+        ),
+        "borrowedCapsCents.ocio": increment(inheritedBorrowedCents.ocio),
+        ...(ownedInheritedNecesidadCents > 0
+          ? {
+              inheritedNecesidadCents: increment(ownedInheritedNecesidadCents),
+            }
+          : {}),
+      });
+    }
+    syncDistributionIfUnused(
+      transaction,
+      newMonthRef,
+      existingMonth,
+      userProfile.distribution,
+    );
+    resolvedMonth = {
+      ...existingMonth,
+      distribution:
+        existingMonth.incomeCount === 0
+          ? userProfile.distribution
+          : existingMonth.distribution,
+      capsCents: {
+        necesidad:
+          existingMonth.capsCents.necesidad + inheritedNecesidadCents,
+        ocio: existingMonth.capsCents.ocio + inheritedBorrowedCents.ocio,
+      },
+      borrowedCapsCents: {
+        necesidad:
+          (existingMonth.borrowedCapsCents?.necesidad ?? 0) +
+          inheritedBorrowedCents.necesidad,
+        ocio:
+          (existingMonth.borrowedCapsCents?.ocio ?? 0) +
+          inheritedBorrowedCents.ocio,
+      },
+      ...(ownedInheritedNecesidadCents > 0
+        ? {
+            inheritedNecesidadCents:
+              (existingMonth.inheritedNecesidadCents ?? 0) +
+              ownedInheritedNecesidadCents,
+          }
+        : {}),
+    };
+  }
+
+  transaction.update(userRef, { lastClosedMonth: currentMonthId });
+
+  return { closedMonthId, month: resolvedMonth };
 }
 
 export async function checkAndCloseMonth(
   userId: string,
+  now: Date = new Date(),
 ): Promise<{ closedMonthId: string | null }> {
-  const currentMonthId = getMonthId();
-  const userRef = doc(db, "users", userId);
-
-  const result = await runTransaction(db, async (transaction) => {
-    const userSnap = await transaction.get(userRef);
-    if (!userSnap.exists()) {
-      throw new Error(`checkAndCloseMonth: perfil ${userId} no existe`);
-    }
-    const userProfile = userSnap.data() as User;
-    const newMonthRef = doc(db, "users", userId, "months", currentMonthId);
-
-    // La sincronización va antes de la salida temprana: los meses ya creados
-    // con un reparto desactualizado no vuelven a pasar por la creación, y sin
-    // esto nunca se corregirían.
-    if (userProfile.lastClosedMonth === currentMonthId) {
-      const currentSnap = await transaction.get(newMonthRef);
-      if (currentSnap.exists()) {
-        syncDistributionIfUnused(
-          transaction,
-          newMonthRef,
-          currentSnap.data() as Month,
-          userProfile.distribution,
-        );
-      }
-      return { closedMonthId: null };
-    }
-
-    const prevMonthId = userProfile.lastClosedMonth;
-    const prevMonthRef = prevMonthId
-      ? doc(db, "users", userId, "months", prevMonthId)
-      : null;
-    const prevMonthSnap = prevMonthRef
-      ? await transaction.get(prevMonthRef)
-      : null;
-
-    const newMonthSnap = await transaction.get(newMonthRef);
-
-    let ownedInheritedNecesidadCents = 0;
-    let inheritedNecesidadCents = 0;
-    let inheritedBorrowedCents: MonthCaps = { necesidad: 0, ocio: 0 };
-    let closedMonthId: string | null = null;
-
-    if (
-      prevMonthRef &&
-      prevMonthSnap &&
-      prevMonthSnap.exists() &&
-      !prevMonthSnap.data().closed
-    ) {
-      const prevMonth = prevMonthSnap.data() as Month;
-
-      const {
-        ocioToAhorroCents,
-        necesidadToNextMonthCents,
-        netDeficitCents,
-        borrowed: borrowedRemainder,
-      } = getMonthRemainders(prevMonth);
-
-      ownedInheritedNecesidadCents = necesidadToNextMonthCents;
-      inheritedNecesidadCents =
-        necesidadToNextMonthCents + borrowedRemainder.necesidad;
-      inheritedBorrowedCents = borrowedRemainder;
-
-      transaction.update(prevMonthRef, {
-        closed: true,
-        remainder: {
-          ocioToAhorroCents,
-          necesidadToNextMonthCents,
-          netDeficitCents,
-        },
-      });
-      closedMonthId = prevMonthId;
-
-      if (ocioToAhorroCents > 0) {
-        transaction.update(userRef, {
-          savingsTotalCents: increment(ocioToAhorroCents),
-        });
-      }
-    }
-
-    if (!newMonthSnap.exists()) {
-      const newMonth = buildEmptyMonth(userProfile.distribution);
-      (newMonth.capsCents as MonthCaps).necesidad = inheritedNecesidadCents;
-      (newMonth.capsCents as MonthCaps).ocio = inheritedBorrowedCents.ocio;
-      newMonth.borrowedCapsCents = inheritedBorrowedCents;
-      newMonth.inheritedNecesidadCents = ownedInheritedNecesidadCents;
-      transaction.set(newMonthRef, newMonth);
-    } else {
-      if (inheritedNecesidadCents > 0 || inheritedBorrowedCents.ocio > 0) {
-        transaction.update(newMonthRef, {
-          "capsCents.necesidad": increment(inheritedNecesidadCents),
-          "capsCents.ocio": increment(inheritedBorrowedCents.ocio),
-          "borrowedCapsCents.necesidad": increment(
-            inheritedBorrowedCents.necesidad,
-          ),
-          "borrowedCapsCents.ocio": increment(inheritedBorrowedCents.ocio),
-          ...(ownedInheritedNecesidadCents > 0
-            ? {
-                inheritedNecesidadCents: increment(
-                  ownedInheritedNecesidadCents,
-                ),
-              }
-            : {}),
-        });
-      }
-      syncDistributionIfUnused(
-        transaction,
-        newMonthRef,
-        newMonthSnap.data() as Month,
-        userProfile.distribution,
-      );
-    }
-
-    transaction.update(userRef, { lastClosedMonth: currentMonthId });
-
+  const currentMonthId = getMonthId(now);
+  return runTransaction(db, async (transaction) => {
+    const { closedMonthId } = await applyMonthCloseAndEnsure(
+      transaction,
+      userId,
+      currentMonthId,
+    );
     return { closedMonthId };
   });
-
-  return result;
 }
 
-export async function registerIncomeSplit(
+export async function ensureCurrentMonth(
   userId: string,
-  monthId: string,
-  incomeCents: number,
-  distribution: Distribution,
-): Promise<{ necesidadCents: number; ocioCents: number; ahorroCents: number }> {
-  const split = calculateDistribution(incomeCents, distribution);
-  const userRef = doc(db, "users", userId);
-  const monthRef = doc(db, "users", userId, "months", monthId);
-
-  await runTransaction(db, async (transaction) => {
-    const monthSnap = await transaction.get(monthRef);
-    if (!monthSnap.exists()) {
-      throw new Error(`registerIncomeSplit: mes ${monthId} no existe`);
-    }
-    if (monthSnap.data().closed) {
-      throw new Error("No se puede modificar un mes cerrado");
-    }
-
-    transaction.update(monthRef, {
-      totalIncomeCents: increment(incomeCents),
-      incomeCount: increment(1),
-      "capsCents.necesidad": increment(split.necesidad),
-      "capsCents.ocio": increment(split.ocio),
-      ahorroContributedCents: increment(split.ahorro),
-    });
-    transaction.update(userRef, {
-      savingsTotalCents: increment(split.ahorro),
-    });
-  });
-
-  return {
-    necesidadCents: split.necesidad,
-    ocioCents: split.ocio,
-    ahorroCents: split.ahorro,
-  };
+  now: Date = new Date(),
+): Promise<Month> {
+  const currentMonthId = getMonthId(now);
+  const { closedMonthId, month } = await runTransaction(
+    db,
+    async (transaction) =>
+      applyMonthCloseAndEnsure(transaction, userId, currentMonthId),
+  );
+  rememberMonthClosing(userId, closedMonthId);
+  return month;
 }
 
 export async function updateDistributionNow(

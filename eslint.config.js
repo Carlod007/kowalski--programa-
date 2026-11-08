@@ -19,4 +19,29 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['src/pages/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'firebase/firestore',
+              importNames: [
+                'writeBatch',
+                'runTransaction',
+                'setDoc',
+                'updateDoc',
+                'deleteDoc',
+                'addDoc',
+              ],
+              message:
+                'No realices escrituras directas a Firestore desde páginas. Delega las operaciones a src/services/.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ])
