@@ -4,29 +4,47 @@ import {
   getMonthInitialSplit,
   type MovementWithId,
 } from "@/services/movementService";
+import { getMonthExpenses } from "@/services/analyticsService";
 import { isMixedInitialSplit } from "@/utils/distribution";
-import type { Distribution, IncomeTransaction } from "@/types/transaction";
+import {
+  computeMonthSavingsMetrics,
+  type MonthSavingsMetrics,
+} from "@/utils/savingsMetrics";
+import type { Month } from "@/types/month";
+import type {
+  Distribution,
+  ExpenseTransaction,
+  IncomeTransaction,
+} from "@/types/transaction";
 
 export type AhorroBreakdown = {
   movements: MovementWithId[];
   movementsReady: boolean;
+  expenses: ExpenseTransaction[] | null;
   initialSplitAhorroCents: number;
   isInitialSplitDeterminable: boolean;
   isMixedSplit: boolean;
   movedToAhorroCents: number;
   movedOutOfAhorroCents: number;
+  ahorroExpensesCents: number;
+  closingOcioToAhorroCents: number;
   untrackedCents: number;
   isUntrackedDeterminable: boolean;
+  inflowsCents: number | null;
+  outflowsCents: number | null;
+  netFlowCents: number | null;
   netContributionCents: number;
   ahorroActualPct: string | null;
   isAhorroActualDeterminable: boolean;
+  hasEnvelopeDeficit: boolean;
+  envelopeDeficitWarning: string | null;
+  metrics: MonthSavingsMetrics;
 };
 
 /**
- * Desglose real del aporte a Ahorro de un mes: mezcla el reparto inicial
- * (leído de las transacciones), los movimientos de excedente registrados, y
- * el total ya acreditado en el mes. Compartido entre Dashboard y Movements
- * para no duplicar esta lógica en dos lugares.
+ * Desglose unificado del flujo de Ahorro de un mes basado en
+ * computeMonthSavingsMetrics (src/utils/savingsMetrics.ts). Compartido entre
+ * Dashboard y Movements para garantizar que ambas pantallas coincidan al centavo.
  */
 export function useAhorroBreakdown(
   userId: string,
@@ -35,6 +53,8 @@ export function useAhorroBreakdown(
   totalIncomeCents: number,
   directSavingsCents: number,
   monthDistribution?: Distribution,
+  month?: Month | null,
+  externalExpenses?: ExpenseTransaction[] | null,
 ): AhorroBreakdown {
   const [movements, setMovements] = useState<MovementWithId[]>([]);
   const [loadedMonth, setLoadedMonth] = useState<string | null>(null);
@@ -44,6 +64,9 @@ export function useAhorroBreakdown(
   const [distributedIncomes, setDistributedIncomes] = useState<
     IncomeTransaction[]
   >([]);
+  const [internalExpenses, setInternalExpenses] = useState<
+    ExpenseTransaction[] | null
+  >(null);
 
   useEffect(() => {
     const unsubMovements = getMonthMovements(
@@ -70,61 +93,72 @@ export function useAhorroBreakdown(
     };
   }, [userId, monthId]);
 
+  useEffect(() => {
+    if (externalExpenses !== undefined) return;
+    return getMonthExpenses(
+      userId,
+      monthId,
+      (txs) => setInternalExpenses(txs),
+      () => setInternalExpenses(null),
+    );
+  }, [userId, monthId, externalExpenses]);
+
+  const resolvedExpenses =
+    externalExpenses !== undefined ? externalExpenses : internalExpenses;
+  const movementsReady = loadedMonth === `${userId}/${monthId}`;
+
   const isMixedSplit = Boolean(
     monthDistribution &&
       isInitialSplitDeterminable &&
       isMixedInitialSplit(distributedIncomes, monthDistribution),
   );
 
-  const movedToAhorroCents = movements
-    .filter((m) => m.destination === "ahorro")
-    .reduce((sum, m) => sum + m.amountCents, 0);
-  const movedOutOfAhorroCents = movements
-    .filter((m) => m.origin === "ahorro")
-    .reduce((sum, m) => sum + m.amountCents, 0);
-  // No se infiere por resta: el reparto inicial se lee directo de cada
-  // ingreso. Lo que sobra sin explicar (viejos ajustes anteriores a este
-  // historial, o correcciones de datos) se muestra aparte, nunca se le
-  // atribuye al reparto inicial.
-  // Los aportes directos también entraron a ahorroContributedCents, así que
-  // se descuentan acá: si no, aparecerían como "ajuste no registrado" cuando
-  // en realidad están perfectamente identificados.
-  const untrackedCents =
-    ahorroContributedCents -
-    initialSplitAhorroCents -
-    movedToAhorroCents -
-    directSavingsCents;
-  const isUntrackedDeterminable =
-    isInitialSplitDeterminable && untrackedCents >= 0;
-  // "Aporte neto" sí resta las salidas (a diferencia de ahorroContributedCents,
-  // que el código nunca decrementa cuando se saca plata de Ahorro) - es un
-  // dato adicional más honesto, no reemplaza al de arriba.
+  const metrics = computeMonthSavingsMetrics({
+    month: {
+      ahorroContributedCents,
+      totalIncomeCents,
+      directSavingsCents,
+      closed: month?.closed ?? false,
+      remainder: month?.remainder,
+      capsCents: month?.capsCents ?? { necesidad: 0, ocio: 0 },
+      spentCents: month?.spentCents ?? { necesidad: 0, ocio: 0 },
+      borrowedCapsCents: month?.borrowedCapsCents,
+      loanFundedSpentCents: month?.loanFundedSpentCents,
+    },
+    initialSplitAhorroCents,
+    isInitialSplitDeterminable,
+    movements: movementsReady ? movements : null,
+    expenses: resolvedExpenses,
+  });
+
   const netContributionCents =
-    initialSplitAhorroCents + movedToAhorroCents - movedOutOfAhorroCents;
-  // % actual de Ahorro: siempre desde el aporte neto de ESTE mes, nunca
-  // desde savingsTotalCents (es acumulado de varios meses, no comparable
-  // contra el ingreso de un solo mes). Los aportes directos quedan fuera del
-  // numerador porque tampoco están en el denominador: no se repartieron.
-  // Si hay un ajuste sin rastrear, no se inventa un %: "no determinable".
-  const ahorroActualPct =
-    totalIncomeCents > 0
-      ? ((netContributionCents / totalIncomeCents) * 100).toFixed(1)
-      : null;
-  const isAhorroActualDeterminable =
-    isInitialSplitDeterminable && untrackedCents === 0;
+    metrics.netWithoutDirectCents ??
+    metrics.initialSplitAhorroCents +
+      metrics.movedToAhorroCents -
+      metrics.movedOutOfAhorroCents -
+      metrics.ahorroExpensesCents;
 
   return {
     movements,
-    movementsReady: loadedMonth === `${userId}/${monthId}`,
-    initialSplitAhorroCents,
+    movementsReady,
+    expenses: resolvedExpenses,
+    initialSplitAhorroCents: metrics.initialSplitAhorroCents,
     isInitialSplitDeterminable,
     isMixedSplit,
-    movedToAhorroCents,
-    movedOutOfAhorroCents,
-    untrackedCents,
-    isUntrackedDeterminable,
+    movedToAhorroCents: metrics.movedToAhorroCents,
+    movedOutOfAhorroCents: metrics.movedOutOfAhorroCents,
+    ahorroExpensesCents: metrics.ahorroExpensesCents,
+    closingOcioToAhorroCents: metrics.closingOcioToAhorroCents,
+    untrackedCents: metrics.untrackedCents,
+    isUntrackedDeterminable: metrics.isUntrackedDeterminable,
+    inflowsCents: metrics.inflowsCents,
+    outflowsCents: metrics.outflowsCents,
+    netFlowCents: metrics.netFlowCents,
     netContributionCents,
-    ahorroActualPct,
-    isAhorroActualDeterminable,
+    ahorroActualPct: metrics.effectiveSavingsRatePct,
+    isAhorroActualDeterminable: metrics.isRateDeterminable,
+    hasEnvelopeDeficit: metrics.hasEnvelopeDeficit,
+    envelopeDeficitWarning: metrics.envelopeDeficitWarning,
+    metrics,
   };
 }

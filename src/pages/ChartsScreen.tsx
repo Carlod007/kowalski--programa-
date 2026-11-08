@@ -749,14 +749,21 @@ function TrailingBars({
       </h2>
       <div className="mt-3 overflow-hidden rounded-2xl border border-stone-200 bg-white">
         {months.map((month) => {
+          const inheritedCents = month.inheritedNecesidadCents ?? 0;
+          const totalAvailableBasisCents =
+            month.totalIncomeCents + inheritedCents;
           const percentage =
-            month.totalIncomeCents > 0
+            totalAvailableBasisCents > 0
               ? Math.round(
-                  (month.expenseCents / month.totalIncomeCents) * 100,
+                  (month.expenseCents / totalAvailableBasisCents) * 100,
                 )
               : null;
           const hasConsumptionWithoutIncome =
-            month.totalIncomeCents === 0 && month.expenseCents > 0;
+            totalAvailableBasisCents === 0 && month.expenseCents > 0;
+          const coveredByInheritedCents = Math.min(
+            inheritedCents,
+            Math.max(0, month.expenseCents - month.totalIncomeCents),
+          );
           const barWidth = hasConsumptionWithoutIncome
             ? 100
             : Math.min(100, Math.max(0, percentage ?? 0));
@@ -789,21 +796,36 @@ function TrailingBars({
                   <span className="font-medium text-emerald-600">
                     {formatCents(month.totalIncomeCents)}
                   </span>
+                  {inheritedCents > 0 && (
+                    <span className="block text-[11px] text-stone-400">
+                      + {formatCents(inheritedCents)} heredado
+                    </span>
+                  )}
                 </p>
                 <p className="text-right text-stone-500">
                   Consumo{" "}
                   <span className="font-medium text-red-600">
                     {formatCents(month.expenseCents)}
                   </span>
+                  {coveredByInheritedCents > 0 && (
+                    <span className="block text-[11px] text-teal-700">
+                      {formatCents(coveredByInheritedCents)} cubierto con saldo
+                      heredado
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
                 <div className="flex h-full w-full">
                   <span
-                    className="h-full bg-red-500"
+                    className={`h-full ${
+                      hasConsumptionWithoutIncome || (percentage ?? 0) > 100
+                        ? "bg-red-500"
+                        : "bg-amber-500"
+                    }`}
                     style={{ width: `${barWidth}%` }}
                   />
-                  {month.totalIncomeCents > 0 && barWidth < 100 && (
+                  {totalAvailableBasisCents > 0 && barWidth < 100 && (
                     <span className="h-full flex-1 bg-emerald-500" />
                   )}
                 </div>

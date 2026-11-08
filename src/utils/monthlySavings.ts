@@ -1,20 +1,63 @@
-import type { Month } from '@/types/month';
-import type { ExpenseTransaction } from '@/types/transaction';
-import type { Movement } from '@/types/movement';
+import type { Month } from "@/types/month";
+import type { ExpenseTransaction } from "@/types/transaction";
+import type { Movement } from "@/types/movement";
+import { computeMonthSavingsMetrics } from "@/utils/savingsMetrics";
 
-/** Flujo neto del mes, no saldo gastable ni total acumulado. */
+export type MonthlySavingsMonthInput = Pick<
+  Month,
+  "ahorroContributedCents" | "closed"
+> &
+  Partial<
+    Pick<
+      Month,
+      | "remainder"
+      | "totalIncomeCents"
+      | "directSavingsCents"
+      | "capsCents"
+      | "spentCents"
+      | "borrowedCapsCents"
+      | "loanFundedSpentCents"
+    >
+  >;
+
+/** Flujo neto del mes, no saldo gastable ni total acumulado. Delega en computeMonthSavingsMetrics. */
 export function getMonthlySavingsNet(
-  month: Pick<Month, 'ahorroContributedCents' | 'closed' | 'remainder'>,
+  month: MonthlySavingsMonthInput,
   expenses: ExpenseTransaction[] | null,
   movements: Movement[] | null,
+  initialSplitAhorroCents?: number,
+  isInitialSplitDeterminable = true,
 ): number | null {
   if (!expenses || !movements) return null;
-  const closing = month.closed ? month.remainder?.ocioToAhorroCents : 0;
-  if (!Number.isInteger(month.ahorroContributedCents) || !Number.isInteger(closing)) return null;
-  const withdrawals = expenses.filter((tx) => tx.category === 'ahorro');
-  const transfers = movements.filter((m) => m.origin === 'ahorro');
-  if ([...withdrawals, ...transfers].some((item) => !Number.isInteger(item.amountCents) || item.amountCents < 0)) return null;
-  return month.ahorroContributedCents + closing!
-    - withdrawals.reduce((sum, tx) => sum + tx.amountCents, 0)
-    - transfers.reduce((sum, m) => sum + m.amountCents, 0);
+  if (!Number.isInteger(month.ahorroContributedCents)) return null;
+  const movedToAhorro = movements
+    .filter((m) => m.destination === "ahorro")
+    .reduce(
+      (sum, m) => sum + (Number.isInteger(m.amountCents) ? m.amountCents : 0),
+      0,
+    );
+  const direct = month.directSavingsCents ?? 0;
+  const fallbackInitialSplit =
+    initialSplitAhorroCents ??
+    Math.max(0, month.ahorroContributedCents - movedToAhorro - direct);
+
+  const metrics = computeMonthSavingsMetrics({
+    month: {
+      ahorroContributedCents: month.ahorroContributedCents,
+      totalIncomeCents: month.totalIncomeCents ?? 0,
+      directSavingsCents: month.directSavingsCents ?? 0,
+      closed: month.closed,
+      remainder: month.remainder,
+      capsCents: month.capsCents ?? { necesidad: 0, ocio: 0 },
+      spentCents: month.spentCents ?? { necesidad: 0, ocio: 0 },
+      borrowedCapsCents: month.borrowedCapsCents,
+      loanFundedSpentCents: month.loanFundedSpentCents,
+    },
+    initialSplitAhorroCents: fallbackInitialSplit,
+    isInitialSplitDeterminable,
+    movements,
+    expenses,
+  });
+
+  return metrics.netFlowCents;
 }

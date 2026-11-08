@@ -213,6 +213,7 @@ export function computeTopPaymentMethods(
 export type TrailingMonth = {
   monthId: string;
   totalIncomeCents: number;
+  inheritedNecesidadCents: number;
   expenseCents: number;
 };
 
@@ -268,6 +269,7 @@ export function watchTrailingMonths(
           {
             monthId: id,
             totalIncomeCents: state.month.totalIncomeCents,
+            inheritedNecesidadCents: state.month.inheritedNecesidadCents ?? 0,
             expenseCents: consumption.necesidad + consumption.ocio,
           },
         ];

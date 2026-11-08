@@ -18,6 +18,7 @@ import { formatCents } from "@/utils/currency";
 import {
   CAP_CATEGORY_ORDER,
   CATEGORY_META,
+  getCategoryDisplayBalance,
   getCategoryStatus,
 } from "@/utils/category";
 import type { Month, MonthCaps } from "@/types/month";
@@ -42,7 +43,6 @@ import { summarizeOutflows } from "@/utils/expenseClassification";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
 import CategoryIcon from "@/components/CategoryIcon";
-import { getMonthlySavingsNet } from "@/utils/monthlySavings";
 import MaskIcon from "@/components/MaskIcon";
 import loanIcon from "@/assets/icons/loan.svg";
 import creditCardIcon from "@/assets/icons/credit-card.svg";
@@ -257,13 +257,15 @@ function MonthSummary({
 
   const {
     movements,
-    movementsReady,
     initialSplitAhorroCents,
     isInitialSplitDeterminable,
     isMixedSplit,
+    inflowsCents,
+    netFlowCents,
     netContributionCents,
     ahorroActualPct,
     isAhorroActualDeterminable,
+    envelopeDeficitWarning,
   } = useAhorroBreakdown(
     userId,
     monthId,
@@ -271,6 +273,8 @@ function MonthSummary({
     month?.totalIncomeCents ?? 0,
     month?.directSavingsCents ?? 0,
     month?.distribution,
+    month,
+    expenses,
   );
 
   return (
@@ -381,6 +385,7 @@ function MonthSummary({
                 initialSplit={initialSplit}
                 initialSplitDeterminable={initialSplitDeterminable}
                 isMixedSplit={isMixedSplit}
+                movements={movements}
                 expenses={expenses}
                 outflowSyncing={outflowSyncing}
               />
@@ -394,8 +399,8 @@ function MonthSummary({
               accumulatedCents={accumulatedCents}
               unassignedCents={unassignedCents}
               assignableCents={assignableCents}
-              monthlyNetCents={getMonthlySavingsNet(month, expenses, movementsReady ? movements : null)}
-              contributedThisMonth={month.ahorroContributedCents}
+              monthlyNetCents={netFlowCents}
+              contributedThisMonth={inflowsCents ?? month.ahorroContributedCents}
               percentage={month.distribution.ahorro}
               initialSplitAhorroCents={initialSplitAhorroCents}
               isInitialSplitDeterminable={isInitialSplitDeterminable}
@@ -403,6 +408,7 @@ function MonthSummary({
               netContributionCents={netContributionCents}
               ahorroActualPct={ahorroActualPct}
               isAhorroActualDeterminable={isAhorroActualDeterminable}
+              envelopeDeficitWarning={envelopeDeficitWarning}
             />
             <button
               type="button"
@@ -439,6 +445,7 @@ function CategoryRow({
   initialSplit,
   initialSplitDeterminable,
   isMixedSplit,
+  movements,
   expenses,
   outflowSyncing,
 }: {
@@ -452,6 +459,7 @@ function CategoryRow({
   initialSplit: Distribution | null;
   initialSplitDeterminable: boolean;
   isMixedSplit: boolean;
+  movements: MovementWithId[];
   expenses: ExpenseTransaction[] | null;
   outflowSyncing: boolean;
 }) {
@@ -465,6 +473,7 @@ function CategoryRow({
   const movableSurplus = ownedCap - ownedSpent;
   const pct = month.distribution[category];
   const status = getCategoryStatus(ownedCap, ownedSpent);
+  const displayBalance = getCategoryDisplayBalance(category, month);
   const [showMove, setShowMove] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const infoRef = useRef<HTMLDivElement>(null);
@@ -496,6 +505,31 @@ function CategoryRow({
   // nunca una suposición por redondeo.
   const realInitialCap = initialSplit ? initialSplit[category] : null;
   const capWasAdjusted = realInitialCap !== null && ownedCap !== realInitialCap;
+  const inheritedNecesidadCents =
+    category === "necesidad" ? (month.inheritedNecesidadCents ?? 0) : 0;
+  const categoryMovementsDelta = movements.reduce((sum, m) => {
+    if (m.destination === category) return sum + m.amountCents;
+    if (m.origin === category) return sum - m.amountCents;
+    return sum;
+  }, 0);
+  const hasCategoryMovements = movements.some(
+    (m) => m.destination === category || m.origin === category,
+  );
+  const resolvedInheritedNecesidadCents =
+    category === "necesidad"
+      ? month.inheritedNecesidadCents !== undefined
+        ? month.inheritedNecesidadCents
+        : realInitialCap !== null
+          ? Math.max(0, ownedCap - realInitialCap - categoryMovementsDelta)
+          : 0
+      : 0;
+  const showNecesidadFormula =
+    category === "necesidad" &&
+    initialSplitDeterminable &&
+    realInitialCap !== null &&
+    (resolvedInheritedNecesidadCents > 0 ||
+      hasCategoryMovements ||
+      capWasAdjusted);
   const actualPct =
     month.totalIncomeCents > 0
       ? ((ownedCap / month.totalIncomeCents) * 100).toFixed(1)
@@ -594,14 +628,38 @@ function CategoryRow({
 
           <p
             className={`mt-3 text-center text-2xl font-semibold ${
-              status.isLow ? "text-red-600" : "text-teal-700"
+              month.closed
+                ? displayBalance.isOverCapAtClose
+                  ? "text-red-600"
+                  : "text-teal-700"
+                : status.isLow
+                  ? "text-red-600"
+                  : "text-teal-700"
             }`}
           >
-            {formatCents(status.disponible)}
+            {formatCents(displayBalance.amountCents)}
           </p>
           <p className="text-center text-sm font-normal text-stone-400">
-            disponible
+            {displayBalance.label}
           </p>
+          {month.closed && displayBalance.netDeficitCents > 0 && (
+            <p className="mt-1 text-center text-xs font-medium text-amber-700">
+              Déficit neto del mes: {formatCents(displayBalance.netDeficitCents)}
+            </p>
+          )}
+
+          {showNecesidadFormula && (
+            <div className="mt-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-600">
+              Del reparto de ingresos: {formatCents(realInitialCap ?? 0)} +
+              Heredado del mes anterior:{" "}
+              {formatCents(resolvedInheritedNecesidadCents)}{" "}
+              {categoryMovementsDelta >= 0 ? "+" : "−"} Movimientos:{" "}
+              {formatCents(Math.abs(categoryMovementsDelta))} = Tope propio:{" "}
+              <span className="font-medium text-stone-900">
+                {formatCents(ownedCap)}
+              </span>
+            </div>
+          )}
 
           <div
             className={`mt-3 grid gap-3 rounded-xl bg-stone-50 p-3 text-xs ${
@@ -723,9 +781,9 @@ function CategoryRow({
         <div className="absolute right-4 top-10 z-10 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
           {!initialSplitDeterminable
             ? `Tu tope propio actual es ${formatCents(ownedCap)}. No pudimos determinar si corresponde exactamente a tu ${pct}% inicial de este mes (datos incompletos).`
-            : capWasAdjusted
-            ? `Tu disponible propio parte de un tope de ${formatCents(ownedCap)}. No es solo tu ${pct}% inicial: incluye ingresos recibidos con otro % o movimientos entre categorías.`
-            : `Tu tope propio es ${formatCents(ownedCap)}, según tu ${pct}% inicial. Los fondos de préstamos se muestran por separado.`}
+            : capWasAdjusted || inheritedNecesidadCents > 0
+              ? `Tu disponible propio parte de un tope de ${formatCents(ownedCap)}. No es solo tu ${pct}% inicial: incluye sobrante heredado del mes anterior, ingresos recibidos con otro % o movimientos entre categorías.`
+              : `Tu tope propio es ${formatCents(ownedCap)}, según tu ${pct}% inicial. Los fondos de préstamos se muestran por separado.`}
         </div>
       )}
     </div>
@@ -1082,6 +1140,7 @@ function SavingsRow({
   netContributionCents,
   ahorroActualPct,
   isAhorroActualDeterminable,
+  envelopeDeficitWarning,
 }: {
   userId: string;
   monthId: string;
@@ -1100,6 +1159,7 @@ function SavingsRow({
   netContributionCents: number;
   ahorroActualPct: string | null;
   isAhorroActualDeterminable: boolean;
+  envelopeDeficitWarning: string | null;
 }) {
   const meta = CATEGORY_META.ahorro;
   const [showInfo, setShowInfo] = useState(false);
@@ -1150,6 +1210,12 @@ function SavingsRow({
         {monthlyNetCents === null ? "No determinable" : formatCents(monthlyNetCents)}
       </p>
       <p className="text-center text-xs text-stone-500">Ahorro neto del mes</p>
+
+      {envelopeDeficitWarning && (
+        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+          {envelopeDeficitWarning}
+        </div>
+      )}
 
       <div className="mt-3 grid grid-cols-3 gap-3 rounded-xl bg-stone-50 p-3 text-xs">
         <div>

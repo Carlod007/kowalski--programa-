@@ -449,6 +449,10 @@ function ExpenseDetailStep({
   const projectedCardAvailableCents = selectedCreditCard
     ? getAvailableCreditCents(selectedCreditCard) - enteredAmountCents
     : 0;
+  const exceedsOwnedAvailableByCents =
+    !selectedLoan && capCents > 0 && enteredAmountCents > status.disponible
+      ? enteredAmountCents - status.disponible
+      : 0;
   const subcategoryBudget = userProfile?.subcategoryBudgets?.find(
     (budget) =>
       budget.category === category && budget.subcategory === subcategory,
@@ -908,6 +912,18 @@ function ExpenseDetailStep({
           />
           {errors.amount && (
             <p className="text-xs text-red-600">{errors.amount.message}</p>
+          )}
+          {exceedsOwnedAvailableByCents > 0 && (
+            <div className="mt-1 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+              <p className="font-medium">
+                Este gasto supera tu disponible de {meta.label} por{" "}
+                {formatCents(exceedsOwnedAvailableByCents)} y dejará el sobre en
+                negativo.
+              </p>
+              <p className="mt-1 text-amber-700">
+                Es un aviso informativo: puedes registrar el egreso igualmente.
+              </p>
+            </div>
           )}
         </div>
 

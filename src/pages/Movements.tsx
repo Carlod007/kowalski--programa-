@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
 import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
+import { getMonthRemainders } from "@/utils/monthRemainders";
 import type { Month } from "@/types/month";
 import BackButton from "@/components/BackButton";
 
@@ -104,11 +105,16 @@ function MovementsContent({
     isMixedSplit,
     movedToAhorroCents,
     movedOutOfAhorroCents,
+    ahorroExpensesCents,
+    closingOcioToAhorroCents,
     untrackedCents,
     isUntrackedDeterminable,
+    inflowsCents,
+    netFlowCents,
     netContributionCents,
     ahorroActualPct,
     isAhorroActualDeterminable,
+    envelopeDeficitWarning,
   } = useAhorroBreakdown(
     userId,
     monthId,
@@ -116,10 +122,16 @@ function MovementsContent({
     month?.totalIncomeCents ?? 0,
     month?.directSavingsCents ?? 0,
     month?.distribution,
+    month,
   );
 
   const directSavingsCents = month?.directSavingsCents ?? 0;
-  const ahorroContributedCents = month?.ahorroContributedCents ?? 0;
+  const displayedInflowsCents =
+    inflowsCents ?? month?.ahorroContributedCents ?? 0;
+  const closedNetDeficitCents =
+    month?.closed
+      ? (month.remainder?.netDeficitCents ?? getMonthRemainders(month).netDeficitCents)
+      : 0;
 
   return (
     <>
@@ -136,7 +148,7 @@ function MovementsContent({
               Ahorro aportado este mes
             </p>
             <p className="mt-2 text-2xl font-semibold text-teal-700">
-              {formatCents(ahorroContributedCents)}
+              {formatCents(displayedInflowsCents)}
             </p>
             <div className="mt-3 flex flex-col gap-1 border-t border-stone-100 pt-3 text-sm">
               <div className="flex items-center justify-between">
@@ -162,6 +174,22 @@ function MovementsContent({
                   <span className="text-stone-600">De aportes directos</span>
                   <span className="font-medium text-stone-900">
                     {formatCents(directSavingsCents)}
+                  </span>
+                </div>
+              )}
+              {month.closed && closingOcioToAhorroCents > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-600">Del cierre de Ocio</span>
+                  <span className="font-medium text-stone-900">
+                    {formatCents(closingOcioToAhorroCents)}
+                  </span>
+                </div>
+              )}
+              {month.closed && closedNetDeficitCents > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-amber-800">Déficit neto al cierre</span>
+                  <span className="font-medium text-amber-700">
+                    {formatCents(closedNetDeficitCents)}
                   </span>
                 </div>
               )}
@@ -223,13 +251,30 @@ function MovementsContent({
                   -{formatCents(movedOutOfAhorroCents)}
                 </span>
               </div>
+              {ahorroExpensesCents > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-600">
+                    Compras, retiros y pagos desde Ahorro
+                  </span>
+                  <span className="font-medium text-red-600">
+                    -{formatCents(ahorroExpensesCents)}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between border-t border-stone-100 pt-2">
-                <span className="text-stone-600">Aporte neto del mes</span>
+                <span className="text-stone-600">Ahorro neto del mes</span>
                 <span className="font-medium text-stone-900">
-                  {formatCents(netContributionCents)}
+                  {netFlowCents === null
+                    ? "No determinable"
+                    : formatCents(netFlowCents)}
                 </span>
               </div>
             </div>
+            {envelopeDeficitWarning && (
+              <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+                {envelopeDeficitWarning}
+              </div>
+            )}
             <div className="mt-3 flex items-center justify-between border-t border-stone-100 pt-3">
               <span className="text-sm text-stone-600">
                 Saldo acumulado global

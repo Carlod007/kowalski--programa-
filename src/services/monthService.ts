@@ -374,6 +374,11 @@ export async function moveSurplus(
       monthUpdate[`capsCents.${origin}`] = increment(-amountCents);
     } else {
       savingsTotalDelta -= amountCents;
+      const currentContributed = month.ahorroContributedCents ?? 0;
+      const revertibleContributed = Math.min(amountCents, currentContributed);
+      if (revertibleContributed > 0) {
+        monthUpdate.ahorroContributedCents = increment(-revertibleContributed);
+      }
     }
 
     if (destination === "necesidad" || destination === "ocio") {
