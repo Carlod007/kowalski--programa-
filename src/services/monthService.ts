@@ -83,7 +83,7 @@ export async function getOrCreateMonth(
 
 export async function checkAndCloseMonth(
   userId: string,
-): Promise<{ prevMonthId: string | null }> {
+): Promise<{ closedMonthId: string | null }> {
   const currentMonthId = getMonthId();
   const userRef = doc(db, "users", userId);
 
@@ -108,7 +108,7 @@ export async function checkAndCloseMonth(
           userProfile.distribution,
         );
       }
-      return { prevMonthId: userProfile.lastClosedMonth };
+      return { closedMonthId: null };
     }
 
     const prevMonthId = userProfile.lastClosedMonth;
@@ -121,8 +121,10 @@ export async function checkAndCloseMonth(
 
     const newMonthSnap = await transaction.get(newMonthRef);
 
+    let ownedInheritedNecesidadCents = 0;
     let inheritedNecesidadCents = 0;
     let inheritedBorrowedCents: MonthCaps = { necesidad: 0, ocio: 0 };
+    let closedMonthId: string | null = null;
 
     if (
       prevMonthRef &&
@@ -133,22 +135,30 @@ export async function checkAndCloseMonth(
       const prevMonth = prevMonthSnap.data() as Month;
 
       const {
-        owned: ownedRemainder,
+        ocioToAhorroCents,
+        necesidadToNextMonthCents,
+        netDeficitCents,
         borrowed: borrowedRemainder,
       } = getMonthRemainders(prevMonth);
 
+      ownedInheritedNecesidadCents = necesidadToNextMonthCents;
       inheritedNecesidadCents =
-        ownedRemainder.necesidad + borrowedRemainder.necesidad;
+        necesidadToNextMonthCents + borrowedRemainder.necesidad;
       inheritedBorrowedCents = borrowedRemainder;
 
       transaction.update(prevMonthRef, {
         closed: true,
-        remainder: { ocioToAhorroCents: ownedRemainder.ocio },
+        remainder: {
+          ocioToAhorroCents,
+          necesidadToNextMonthCents,
+          netDeficitCents,
+        },
       });
+      closedMonthId = prevMonthId;
 
-      if (ownedRemainder.ocio > 0) {
+      if (ocioToAhorroCents > 0) {
         transaction.update(userRef, {
-          savingsTotalCents: increment(ownedRemainder.ocio),
+          savingsTotalCents: increment(ocioToAhorroCents),
         });
       }
     }
@@ -158,6 +168,7 @@ export async function checkAndCloseMonth(
       (newMonth.capsCents as MonthCaps).necesidad = inheritedNecesidadCents;
       (newMonth.capsCents as MonthCaps).ocio = inheritedBorrowedCents.ocio;
       newMonth.borrowedCapsCents = inheritedBorrowedCents;
+      newMonth.inheritedNecesidadCents = ownedInheritedNecesidadCents;
       transaction.set(newMonthRef, newMonth);
     } else {
       if (inheritedNecesidadCents > 0 || inheritedBorrowedCents.ocio > 0) {
@@ -168,6 +179,13 @@ export async function checkAndCloseMonth(
             inheritedBorrowedCents.necesidad,
           ),
           "borrowedCapsCents.ocio": increment(inheritedBorrowedCents.ocio),
+          ...(ownedInheritedNecesidadCents > 0
+            ? {
+                inheritedNecesidadCents: increment(
+                  ownedInheritedNecesidadCents,
+                ),
+              }
+            : {}),
         });
       }
       syncDistributionIfUnused(
@@ -180,7 +198,7 @@ export async function checkAndCloseMonth(
 
     transaction.update(userRef, { lastClosedMonth: currentMonthId });
 
-    return { prevMonthId };
+    return { closedMonthId };
   });
 
   return result;

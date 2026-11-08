@@ -5,7 +5,7 @@ qué hace la aplicación, cómo está construida, y **por qué** cada decisión
 importante se tomó así. La sección de invariantes es la más valiosa: explica
 las reglas que no se deben romper.
 
-Última actualización: agosto 2026.
+Última actualización: noviembre 2026.
 
 ---
 
@@ -14,16 +14,19 @@ las reglas que no se deben romper.
 PWA de finanzas personales que aplica **presupuesto por sobres** con tres
 categorías de porcentaje configurable:
 
-| Categoría | Qué es | Tope mensual |
+| Categoría | Qué es | Tope mensual y cierre |
 |---|---|---|
-| **Necesidad** | Gastos indispensables | Sí, se reinicia cada mes |
-| **Ocio** | Gasto discrecional | Sí, se reinicia cada mes |
-| **Ahorro** | Acumulación | No, es acumulado entre meses |
+| **Necesidad** | Gastos indispensables | Sí; al cerrar el mes, el excedente propio neto no usado se hereda al tope de Necesidad del mes siguiente |
+| **Ocio** | Gasto discrecional | Sí; al cerrar el mes, el excedente propio neto no usado pasa al acumulado de Ahorro |
+| **Ahorro** | Acumulación | No; es acumulado entre meses |
 
 Cada ingreso se reparte automáticamente entre las tres según los porcentajes
-del usuario (por ejemplo 18/47/35). Necesidad y Ocio funcionan como topes de
-gasto del mes; Ahorro se acumula indefinidamente y solo baja al comprar una
-meta o retirar de un fondo.
+del usuario (por ejemplo 50/30/20 o 18/47/35). Necesidad y Ocio funcionan como
+topes de gasto del mes; Ahorro se acumula indefinidamente y solo baja al comprar
+una meta, retirar de un fondo, trasladar excedente o pagar deuda desde Ahorro.
+En el cierre de mes, los déficits propios entre Necesidad y Ocio se compensan
+entre sí antes de heredar excedente o enviar sobrante de Ocio a Ahorro (y el
+remanente prestado continúa separado en su misma categoría).
 
 Moneda: soles peruanos (S/). **Todo el dinero se guarda como enteros en
 centavos**, nunca como decimales.
@@ -46,10 +49,28 @@ centavos**, nunca como decimales.
 
 ```bash
 npm run dev      # desarrollo
-npm test         # pruebas una vez
+npm test         # pruebas unitarias una vez
 npm run test:watch
 npm run lint
 npm run build    # tsc -b && vite build
+```
+
+### Desarrollo manual contra Firebase Emulators
+
+`src/lib/firebase.ts` incluye soporte opcional de emulador controlado por
+`VITE_USE_EMULATOR=true`, activo **únicamente** cuando `import.meta.env.DEV` es
+verdadero (nunca se activa en el build de producción).
+
+Comandos en dos terminales (PowerShell en Windows):
+
+```powershell
+# Terminal 1 — Levantar emuladores de Auth (9099) y Firestore (8080)
+$env:JAVA_TOOL_OPTIONS="-Duser.language=en -Duser.country=US"
+npx firebase emulators:start --only auth,firestore --project kowalski-pwa
+
+# Terminal 2 — Levantar la PWA conectada a los emuladores locales
+$env:VITE_USE_EMULATOR="true"
+npm run dev
 ```
 
 ### Estructura
@@ -58,7 +79,7 @@ npm run build    # tsc -b && vite build
 src/
   components/    Piezas reutilizables de UI
   hooks/         useAhorroBreakdown
-  lib/           firebase.ts (inicialización)
+  lib/           firebase.ts (inicialización y conexión opcional a emuladores)
   pages/         Una pantalla por archivo
     auth/        Login
     onboarding/  Pasos del registro inicial
@@ -82,12 +103,12 @@ directamente, salvo dos excepciones históricas (`RegisterIncome` y
 ```
 users/{uid}                                  Perfil
   months/{monthId}                           Mes, id "YYYY-MM"
-    transactions/{txId}                      Ingresos y egresos
+    transactions/{txId}                      Ingresos, egresos y recibos de préstamo
     movements/{movementId}                   Traslados entre categorías
   goalAllocations/{allocationId}             Asignaciones a metas
   loans/{loanId}                             Préstamos recibidos y sus cuotas
     payments/{paymentId}                     Pagos confirmados por el usuario
-    fundMovements/{movementId}               Reasignaciones de saldo prestado
+    fundMovements/{movementId}               Reasignaciones históricas (solo lectura/limpieza)
   creditCards/{cardId}                       Tarjetas de crédito registradas
     statements/{statementId}                 Estados de cuenta confirmados
     payments/{paymentId}                     Pagos de tarjeta confirmados
@@ -106,7 +127,7 @@ migrationBackups/{...}                       Respaldos de migraciones
   closingNotification: { day, time }         Declarado, sin uso todavía
   onboardingCompleted: boolean
   lastClosedMonth: string | null
-  savingsTotalCents: number                  Ahorro acumulado global
+  savingsTotalCents: number                  Ahorro acumulado global (>= 0)
   savingsGoals: SavingsGoal[]
   fixedIncomes?: { id, name, monthlyAmountCents }[]
   essentialNeeds?: { id, name, monthlyAmountCents }[]
@@ -162,8 +183,17 @@ siempre los helpers de `utils/savings.ts`.
   ahorroContributedCents: number Todo lo que entró a ahorro este mes
   incomeCount: number
   closed: boolean
-  remainder?: { ocioToAhorroCents }
-  directSavingsCents?: number    Aportes directos, sin repartir
+  remainder?: {
+    ocioToAhorroCents: number
+    necesidadToNextMonthCents?: number
+    netDeficitCents?: number
+    borrowedNecesidadCents?: number
+    borrowedOcioCents?: number
+    deficitResolution?: "covered_by_savings" | "carried_forward" | "none"
+    closedAt?: Timestamp | null
+  }
+  inheritedNecesidadCents?: number            Excedente propio heredado del mes previo
+  directSavingsCents?: number                 Aportes directos, sin repartir
   borrowedCapsCents?: { necesidad, ocio }     Parte del tope que es prestada
   loanFundedSpentCents?: { necesidad, ocio }  Gasto ligado a esos fondos
   createdAt
@@ -198,11 +228,16 @@ momento de registro.
   category: "necesidad" | "ocio" | "ahorro",
   subcategory: string,          En ahorro, el nombre de la meta
   paymentMethod: string,
-  goalId?: string,              Solo en compras de meta
+  goalId?: string,              Solo en compras de meta o retiros de fondo
   fundedByLoanId?: string,      Si se pagó explícitamente con un préstamo
   fundedByLoanName?: string,
   loanPaymentId?: string,       Si es una devolución de préstamo
-  loanId?: string
+  loanId?: string,
+  creditCardId?: string,        Si se compró con tarjeta o corresponde a un cargo
+  creditCardName?: string,
+  creditCardStatementId?: string,
+  creditCardChargeKind?: "interest-fees",
+  tags?: string[]
 }
 
 // Préstamo recibido (no es ingreso)
@@ -258,9 +293,9 @@ pero su saldo se incorpora al mes actual: no crea, reabre ni modifica meses
 pasados. El registro tampoco cuenta como ingreso ni altera los porcentajes.
 
 `borrowedAvailableByCategory` separa cuánto saldo prestado sigue disponible en
-Necesidad y cuánto en Ocio. La acción **Reasignar fondos del préstamo** mueve
-solo ese saldo entre ambas categorías y escribe un `fundMovement` inmutable. No
-es un movimiento de excedente, no toca dinero propio y nunca permite Ahorro.
+Necesidad y cuánto en Ocio. Los documentos `fundMovements` solo se conservan
+para registros históricos previos (las reglas actuales ya no admiten crear
+nuevos `fundMovements`).
 
 Los pagos nunca se ejecutan automáticamente. Cada confirmación crea un egreso y
 un `payment` enlazados. Un pago parcial o adelantado cubre primero la cuota
@@ -287,10 +322,10 @@ sin asignar = savingsTotalCents − Σ(goal.allocatedCents)
 ```
 
 **"Sin asignar" nunca se guarda.** Razón: `savingsTotalCents` se modifica desde
-nueve lugares distintos (registrar/editar/borrar ingreso, editar/borrar egreso
-de ahorro, cierre de mes, mover excedente, comprar meta, retirar de fondo). Si
-existiera un campo espejo, esos nueve tendrían que actualizarlo y una sola
-omisión corrompería dinero en silencio.
+múltiples operaciones (registrar/editar/borrar ingreso, borrar egreso de ahorro,
+cierre de mes, mover excedente, comprar meta, retirar de fondo, pagar préstamo
+desde ahorro). Si existiera un campo espejo, todas tendrían que actualizarlo y
+una sola omisión corrompería dinero en silencio.
 
 Asignar y liberar **no mueven dinero**: solo cambian a qué meta está
 etiquetado. Por eso ninguna de las dos toca `savingsTotalCents`.
@@ -302,19 +337,21 @@ habilitara todas las metas a la vez**: con S/2.000 ahorrados, un colchón de
 S/2.000 y una compu de S/1.500 aparecían ambos como alcanzables, aunque solo
 alcanzara para uno.
 
-Comprar valida `goal.allocatedCents >= goal.targetCents`, nunca el total.
+Comprar valida `goal.allocatedCents >= goal.targetCents` y además verifica que
+`savingsTotalCents >= goal.targetCents` (y en retiros de fondos,
+`savingsTotalCents >= amountCents`).
 
 ### 4.4 El reparto de un mes se congela… salvo que el mes esté vacío
 
 `month.distribution` es una copia del perfil hecha al crear el mes. Se congela
 para que los topes ya calculados no cambien a mitad de camino.
 
-**Excepción:** si `incomeCount === 0` no hay nada repartido que proteger, y un
-mes congelado con un valor que el usuario ya cambió mostraría un porcentaje
-distinto al de Ajustes. En ese caso se sincroniza automáticamente
-(`syncDistributionIfUnused`, llamada desde `checkAndCloseMonth` y
-`updateDistributionNow`). Las reglas de Firestore permiten el cambio solo bajo
-esa condición.
+**Excepción actual:** si `incomeCount === 0` no hay ingresos registrados en el
+mes y se sincroniza automáticamente (`syncDistributionIfUnused`, llamada desde
+`checkAndCloseMonth` y `updateDistributionNow`). Las reglas de Firestore
+permiten actualizar `month.distribution` cuando `incomeCount == 0` (nota: hoy
+los aportes directos incrementan `incomeCount`, por lo que también congelan la
+distribución del mes hasta que se separe el contador en una fase posterior).
 
 ### 4.5 Los aportes directos no entran en la base de los porcentajes
 
@@ -333,19 +370,28 @@ Consecuencias que hay que respetar al tocar esto:
 - Borrarlos revierte `directSavingsCents`, no `totalIncomeCents` ni los topes.
 - Su monto **no se puede editar**; hay que borrar y registrar de nuevo.
 
-### 4.6 Nunca dejar saldos negativos
+### 4.6 Nunca dejar saldos negativos ni crear estados sobreasignados
 
-Revertir un ingreso descuenta de ahorro y de los topes. Si ese dinero ya se
-gastó, la resta dejaría saldos negativos: dinero que la app afirma tener en
-contra, lo cual es imposible.
+Revertir o reducir un ingreso descuenta de ahorro y de los topes. Si ese dinero
+ya se gastó en Necesidad/Ocio o está asignado a metas de ahorro, la resta
+dejaría disponibles negativos o metas prometiendo dinero inexistente.
 
 `assertRevertible` (en `deleteTransaction`) y las validaciones equivalentes en
-`updateIncome` **bloquean la operación** y explican qué deshacer primero.
+`updateIncome` **bloquean la operación**:
+- En Necesidad y Ocio validan contra el disponible propio real
+  (`ownedCap − ownedSpent`).
+- En Ahorro validan tanto contra `savingsTotalCents` como contra el ahorro sin
+  asignar (`getUnassignedCents`), indicando exactamente cuánto liberar de las
+  metas primero (`"Libera S/ X.XX de tus metas primero"`).
+- `withdrawFromFund` y `purchaseGoalExpense` validan también contra
+  `savingsTotalCents`, impidiendo que una cuenta histórica sobreasignada deje
+  `savingsTotalCents < 0`.
 
-Estados que sí pueden ocurrir y se muestran con honestidad, sin corregirse
-solos:
-- **Sobreasignado**: `savingsTotalCents < Σ allocatedCents`. Pasa al corregir un
-  ingreso ya registrado. Se muestra el monto exacto a liberar.
+Estados que sí pueden existir en datos históricos y se muestran con honestidad,
+sin corregirse solos:
+- **Sobreasignado histórico**: `savingsTotalCents < Σ allocatedCents`. Se
+  muestra el monto exacto a liberar; las operaciones nuevas nunca crean este
+  estado.
 - **No determinable**: cuando un dato no se pudo leer o no cuadra. **Nunca se
   muestra "0" o "no hay nada" en lugar de "no se pudo leer"** — son cosas
   distintas y confundirlas es mentirle al usuario sobre su propio dinero.
@@ -357,6 +403,29 @@ normal. Se escriben **dentro de la misma transacción** que el cambio que
 registran: o pasan las dos cosas o no pasa ninguna. La única excepción de
 borrado es el proceso explícito "Reiniciar todos mis datos" o "Eliminar mi
 cuenta", iniciado y confirmado por el propietario.
+
+### 4.8 Nunca mover dinero en silencio
+
+Si algo no cuadra, se muestra y se le pide al usuario que decida. No se
+rebalancea automáticamente, no se reparte de nuevo, no se "arregla" solo.
+Única excepción: la sincronización del punto 4.4, que no mueve dinero (el mes
+está vacío) sino que corrige una etiqueta.
+
+### 4.9 El dinero prestado nunca se convierte en ahorro y los déficits propios se netean al cierre
+
+Un préstamo no suma a `totalIncomeCents`, `incomeCount`, los porcentajes ni
+`savingsTotalCents`. El gasto debe seleccionar explícitamente qué préstamo usa.
+En el cierre (`getMonthRemainders`):
+- Se separa el saldo propio (`ownedCap − ownedSpent`) del prestado
+  (`borrowedCaps − loanFundedSpent`).
+- Si Necesidad propia tiene déficit, se cubre primero con el sobrante propio de
+  Ocio antes de enviar nada a Ahorro; si Ocio propio tiene déficit, se cubre con
+  el sobrante propio de Necesidad antes de heredar al mes siguiente.
+- Si ambas categorías combinadas dejan un faltante propio, `ocioToAhorroCents` y
+  `necesidadToNextMonthCents` quedan en `0` y el exceso se registra en
+  `remainder.netDeficitCents`, mostrándose en el resumen de cierre.
+- El remanente prestado nunca absorbe déficits propios ni va a Ahorro: continúa
+  íntegro en la misma categoría al mes siguiente.
 
 ### 4.10 Eliminación completa y reanudable
 
@@ -372,21 +441,6 @@ La eliminación de cuenta limpia también `migrationBackups`, borra el perfil y
 finalmente elimina al usuario de Firebase Authentication después de volver a
 comprobar su contraseña.
 
-### 4.8 Nunca mover dinero en silencio
-
-Si algo no cuadra, se muestra y se le pide al usuario que decida. No se
-rebalancea automáticamente, no se reparte de nuevo, no se "arregla" solo.
-Única excepción: la sincronización del punto 4.4, que no mueve dinero (el mes
-está vacío) sino que corrige una etiqueta.
-
-### 4.9 El dinero prestado nunca se convierte en ahorro
-
-Un préstamo no suma a `totalIncomeCents`, `incomeCount`, los porcentajes ni
-`savingsTotalCents`. El gasto debe seleccionar explícitamente qué préstamo usa.
-En el cierre se separa el remanente propio del prestado: solo el Ocio propio va
-a Ahorro; el prestado continúa en la misma categoría al mes siguiente. Los
-movimientos de excedentes solo pueden usar saldo propio.
-
 ---
 
 ## 5. Servicios
@@ -394,11 +448,14 @@ movimientos de excedentes solo pueden usar saldo propio.
 ### `monthService.ts`
 
 - **`checkAndCloseMonth(userId)`** — Se ejecuta al abrir el Dashboard y
-  RegisterExpense. Cierra el mes anterior si quedó abierto, traspasa el
-  excedente de Ocio al Ahorro, hereda el excedente de Necesidad al mes nuevo, y
-  crea el mes actual si no existe. Además sincroniza el reparto si el mes está
-  vacío. Sale temprano si el mes ya fue procesado, **pero la sincronización va
-  antes de esa salida** (si no, los meses ya creados nunca se corregirían).
+  RegisterExpense. Cierra el mes anterior si quedó abierto usando el cálculo
+  neteado (`getMonthRemainders`), guarda `remainder` (`ocioToAhorroCents`,
+  `necesidadToNextMonthCents`, `netDeficitCents`), traspasa `ocioToAhorroCents`
+  al Ahorro, hereda el excedente de Necesidad al mes nuevo registrando
+  `inheritedNecesidadCents`, y crea el mes actual si no existe. Además
+  sincroniza el reparto si el mes está vacío. Sale temprano si el mes ya fue
+  procesado, **pero la sincronización va antes de esa salida** (si no, los meses
+  ya creados nunca se corregirían).
 - **`updateDistributionNow(userId, dist)`** — Cambia el reparto del perfil. Lo
   aplica también al mes actual si está vacío.
 - **`moveSurplus(userId, monthId, cents, origin, destination, reason?)`** —
@@ -411,16 +468,20 @@ movimientos de excedentes solo pueden usar saldo propio.
 ### `transactionService.ts`
 
 - **`deleteTransaction`** — Revierte todo lo que la transacción generó.
-  Bloquea si dejaría saldos negativos. Si era la compra de una meta, decrementa
-  su contador de compras usando `goalId` (no el nombre, que puede cambiar).
-- **`updateExpense`** — El monto de un egreso de ahorro no se puede cambiar.
+  Bloquea si dejaría disponibles propios negativos o ahorro sobreasignado. Si
+  era la compra de una meta, decrementa su contador de compras usando `goalId`
+  (no el nombre, que puede cambiar).
+- **`updateExpense`** — El monto de un egreso de Ahorro o vinculado a un
+  préstamo no se puede cambiar (lanza error si `delta !== 0`).
 - **`updateIncome`** — Reescala el reparto proporcionalmente
-  (`calculateProportionalSplit`). Bloquea si bajar el monto dejaría negativos.
-- **`purchaseGoalExpense`** — Valida contra lo asignado a esa meta. Con
-  `allowAutoAssign` asigna lo que falta y compra en un paso (el "atajo"), pero
-  **nunca por su cuenta**: la pantalla tiene que pedirlo.
+  (`calculateProportionalSplit`). Bloquea si bajar el monto dejaría disponibles
+  propios negativos o ahorro sobreasignado.
+- **`purchaseGoalExpense`** — Valida contra lo asignado a esa meta y contra
+  `savingsTotalCents`. Con `allowAutoAssign` asigna lo que falta y compra en un
+  paso (el "atajo"), pero **nunca por su cuenta**: la pantalla tiene que
+  pedirlo.
 - **`withdrawFromFund`** — Retiro parcial, solo en metas tipo `fondo`, con tope
-  en lo asignado a ese fondo.
+  en lo asignado a ese fondo y en `savingsTotalCents`.
 - Al borrar un gasto financiado o un pago de préstamo, revierte también el saldo
   del préstamo y las cuotas afectadas. Sus montos no se editan: se borran y se
   registran nuevamente mientras el mes siga abierto.
@@ -437,9 +498,6 @@ movimientos de excedentes solo pueden usar saldo propio.
 - **`cancelUnusedLoan`** — Solo elimina préstamos sin usos ni pagos y cuyo mes
   de recepción continúa abierto.
 - **`watchLoans`** — Suscripción en vivo para Dashboard, formulario y detalle.
-- **`reassignLoanFunds`** — Traslada saldo prestado entre Necesidad y Ocio sin
-  modificar el total del préstamo; registra el movimiento en la misma
-  transacción.
 
 ### `savingsGoalService.ts`
 
@@ -497,7 +555,7 @@ de `App.tsx`.
 | `/movements` | Movements | Desglose del ahorro del mes y sus movimientos |
 | `/goals` | SavingsGoals | Metas: asignar, liberar, historial de asignaciones |
 | `/loans` | Loans | Préstamos, cuotas, vencimientos y pagos confirmados |
-| `/close-month/:monthId?` | CloseMonth | Resumen del cierre. **Solo informa, no ejecuta** |
+| `/close-month/:monthId?` | CloseMonth | Resumen del cierre o proyección en vivo (incluye déficit neto). **Solo informa, no ejecuta** |
 | `/settings` | Settings | Perfil, reparto, fuentes, subcategorías, metas, métodos |
 | `/subcategory-budgets` | SubcategoryBudgets | Objetivos mensuales informativos por subcategoría |
 | `/admin` | AdminOnboarding | Reeditar el perfil. Restringido por `VITE_ADMIN_UID` |
@@ -525,35 +583,37 @@ usó.
 ## 7. Reglas de Firestore (`firestore.rules`)
 
 - Todo exige `request.auth.uid == userId`. Sin acceso entre cuentas.
-- **`months`**: no se pueden borrar. El reparto solo cambia si `incomeCount ==
-  0`. Un mes cerrado solo admite escribir `remainder`, y una sola vez.
-- **`transactions`**: crear, editar y borrar solo si el mes no está cerrado.
-- **Pendiente conocido en `months` y `transactions`**: las reglas actuales son
-  más permisivas que la convención de esta guía. En `months`, la creación no
-  valida forma, tipos ni montos. En `transactions`, la creación no valida forma,
-  tipos, montos ni fechas; la actualización tampoco conserva explícitamente la
-  identidad y los campos inmutables ni limita los campos mutables. El control
-  por propietario y la excepción de eliminación de datos siguen vigentes.
-- **`loans`**: crear y actualizar con montos enteros, fechas y categorías
-  válidas. Solo se elimina si nunca se usó ni pagó y el mes sigue abierto.
-- **`loans/{loanId}/payments`**: crear pagos positivos en meses abiertos; no se
-  editan y solo se borran al revertir su egreso desde un mes abierto.
+- **`users/{uid}`**: valida transiciones de `lastClosedMonth` con `getAfter()`
+  contra el cierre real del mes previo y la existencia del mes nuevo, y exige
+  que `savingsTotalCents` (al crearse o modificarse) sea entero `>= 0`. Conserva
+  campos legacy no modificados.
+- **`months`**: creación validada estrictamente (forma, porcentajes que suman
+  100, montos enteros en cero o heredados exactamente desde el mes previo con
+  `getAfter()`, `inheritedNecesidadCents` opcional coherente). Actualizaciones
+  limitadas a los campos permitidos; `distribution` solo cambia si
+  `incomeCount == 0`. Al cerrar un mes se valida `remainder` aceptando tanto el
+  formato nuevo neteado (`ocioToAhorroCents`, `necesidadToNextMonthCents`,
+  `netDeficitCents` y campos opcionales de cierre) como el formato legacy
+  (`{ ocioToAhorroCents }`) para compatibilidad durante despliegues.
+- **`transactions`**: creación, edición y borrado solo con mes abierto
+  (`get` y `getAfter`). Valida forma, tipos, montos positivos, fechas dentro del
+  mes con tolerancia de 3 días respecto a `request.time`, reparto exacto de
+  ingresos y contrapartidas de préstamos y tarjetas con `getAfter()`. En egresos
+  de `category == 'ahorro'`, prohíbe modificar `amountCents`.
+- **`loans` y `loans/{loanId}/payments`**: valida creación, pagos y cancelación
+  con sus recibos, egresos y ajustes de topes mediante `getAfter()`. No admite
+  nuevos `fundMovements`.
+- **`creditCards`, `statements` y `payments`**: valida creación, confirmación y
+  cancelación de estados de cuenta y pagos con sus contrapartidas.
 - **`movements`** y **`goalAllocations`**: crear con validación de forma
   (tipos, montos positivos, fechas `YYYY-MM-DD`, `serverDate == request.time`);
-  **nunca editar ni borrar**.
-- **`users/{uid}`**: escritura libre para el dueño, sin validación de campos.
-  Por eso agregar campos al perfil o a las metas **no requiere desplegar
-  reglas**.
-
-Se evaluó usar `getAfter()` para validación cruzada entre documentos y se
-descartó: alto costo de complejidad y bajo valor en una app donde cada usuario
-solo puede tocar sus propios datos.
+  **nunca editar ni borrar** fuera del flujo de eliminación de datos.
 
 ---
 
 ## 8. Pruebas
 
-Hay pruebas de funciones puras en `src/utils/*.test.ts`, entre ellas:
+Hay pruebas de funciones puras en `src/utils/*.test.ts` y componentes:
 
 - `distribution.test.ts` — reparto, mínimo recomendado, reescalado proporcional
 - `savings.test.ts` — asignado, sin asignar, sobreasignado, fondo vs compra,
@@ -561,19 +621,23 @@ Hay pruebas de funciones puras en `src/utils/*.test.ts`, entre ellas:
 - `category.test.ts` — disponible, excedido, aviso de tope bajo, barra
 - `loans.test.ts` — calendario mensual, residuo, pagos parciales, adelantos,
   reversión exacta y reasignación conservando el total prestado
-- `monthRemainders.test.ts` — separación entre excedente propio y prestado,
-  incluida la compatibilidad con meses antiguos
+- `monthRemainders.test.ts` — neteo de déficits propios entre Necesidad y Ocio,
+  cálculo de `netDeficitCents` y separación intacta del dinero prestado
+- `MonthClosingSummary.test.ts` — proyección y resumen cerrado con déficit neto
 
-Las más valiosas son los bucles que verifican que la suma del reparto dé
-exactamente el monto original para miles de valores: ese es el invariante que
-garantiza que no se pierde ni se inventa un centavo.
-
-También hay pruebas en `src/services/`: `exportService.test.ts` y
-`transactionTimingService.test.ts`, además de
-`accountDataService.integration.test.ts`. Esta última se ejecuta con los
-emuladores de Authentication y Firestore cuando
-`RUN_FIREBASE_EMULATOR_TESTS=true`. Esto no implica cobertura completa de los
-servicios ni de todas las reglas.
+También hay pruebas de servicios y suites de integración contra emuladores en
+`src/services/`:
+- Pruebas sin emulador: `exportService.test.ts`, `historyXlsxService.test.ts`,
+  `transactionTimingService.test.ts`, `creditCardService.test.ts`,
+  `monthClosingNoticeService.test.ts`.
+- Pruebas con emulador de Auth + Firestore (`RUN_FIREBASE_EMULATOR_TESTS=true`):
+  `accountDataService.integration.test.ts`.
+- Pruebas de reglas y servicios contra el emulador de Firestore en puerto 8180
+  (`RUN_MONTH_RULES_TESTS=true`):
+  `monthTransactionRules.integration.test.ts`,
+  `userLastClosedMonthRules.integration.test.ts`,
+  `loanCardLocalRules.integration.test.ts`,
+  `loanCardLinkedRules.integration.test.ts`.
 
 ---
 
@@ -591,8 +655,9 @@ firebase deploy --only firestore:rules
 ```
 
 Razón: si el código nuevo escribe en una colección o campo que las reglas
-todavía rechazan, la operación falla entera. Al revés no hay riesgo, porque la
-app vieja no conoce lo nuevo.
+todavía rechazan, la operación falla entera. Las reglas nuevas mantienen
+compatibilidad hacia atrás con el formato anterior de `remainder` mientras el
+cliente previo siga abierto en algún navegador.
 
 ### Actualización de la PWA
 
@@ -642,10 +707,8 @@ Diseño a imitar en futuras migraciones:
 ### Funcionalidad pendiente
 
 - **Monitoreo de errores** (Sentry) — media hora de trabajo, alto valor
-- **Ampliar las pruebas de servicios y reglas con emuladores**; ya existe una
-  prueba de integración del flujo de eliminación de datos.
-- **Endurecer las reglas de `months` y `transactions`** según la convención de
-  creación y actualización descrita en `AGENTS.md`.
+- **Desplegar a producción las reglas endurecidas de `firestore.rules`** cuando
+  se publique la versión correspondiente.
 - `closingNotification` se guarda en el perfil pero no se usa
 
 ### Límites de la plataforma

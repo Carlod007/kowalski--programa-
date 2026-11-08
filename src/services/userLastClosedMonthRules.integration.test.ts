@@ -319,9 +319,43 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
     const next = (await getDoc(currentRef)).data()!;
     expect(next.closed).toBe(false);
     if (state === 'open') {
-      expect((await getDoc(doc(db, monthPath(oldId)))).data()?.remainder).toEqual({ ocioToAhorroCents: 500 });
+      expect((await getDoc(doc(db, monthPath(oldId)))).data()?.remainder).toEqual({
+        ocioToAhorroCents: 500,
+        necesidadToNextMonthCents: 0,
+        netDeficitCents: 0,
+      });
       expect(next.capsCents.ocio).toBe(100);
+      expect(next.inheritedNecesidadCents).toBe(0);
     }
+  });
+  it('F1(h): acepta transición de lastClosedMonth con remainder neteado (déficit neto) y con formato legacy', async () => {
+    // Escenario 2: Nec cap 500, spent 700; Ocio cap 300, spent 200 -> ocioToAhorro 0, necToNext 0, netDeficit 100
+    await seedPrevious(emptyMonth({
+      capsCents: { necesidad: 500, ocio: 300 },
+      spentCents: { necesidad: 700, ocio: 200 },
+    }));
+    const batchNetted = writeBatch(db);
+    batchNetted.update(previousRef, {
+      closed: true,
+      remainder: { ocioToAhorroCents: 0, necesidadToNextMonthCents: 0, netDeficitCents: 100 },
+    });
+    batchNetted.update(profileRef, { lastClosedMonth: currentId });
+    await batchNetted.commit();
+    await assertMarker(currentId);
+
+    // Coexistencia con formato legacy: { ocioToAhorroCents: 100 } (legacyOcio = 300 - 200 = 100)
+    await seedPrevious(emptyMonth({
+      capsCents: { necesidad: 500, ocio: 300 },
+      spentCents: { necesidad: 700, ocio: 200 },
+    }));
+    const batchLegacy = writeBatch(db);
+    batchLegacy.update(previousRef, {
+      closed: true,
+      remainder: { ocioToAhorroCents: 100 },
+    });
+    batchLegacy.update(profileRef, { lastClosedMonth: currentId });
+    await batchLegacy.commit();
+    await assertMarker(currentId);
   });
   it('SERVICIO: actualiza solo el marcador con mes previo cerrado y actual existente', async () => {
     const { checkAndCloseMonth } = await import('./monthService');

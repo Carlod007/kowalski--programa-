@@ -7,7 +7,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
-import { checkAndCloseMonth } from "@/services/monthService";
+import { checkAndRememberMonthClosing } from "@/services/monthClosingNoticeService";
 import {
   cancelUnusedLoan,
   createLoan,
@@ -45,7 +45,7 @@ export default function Loans() {
 
   useEffect(() => {
     if (!user) return;
-    checkAndCloseMonth(user.uid).catch((error) => {
+    checkAndRememberMonthClosing(user.uid).catch((error) => {
       console.error("checkAndCloseMonth falló:", error);
     });
     return watchLoans(
@@ -244,7 +244,7 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
     setSaving(true);
     setError(null);
     try {
-      await checkAndCloseMonth(userId);
+      await checkAndRememberMonthClosing(userId);
       const common = {
         lender: lender.trim() || undefined,
         amountReceivedCents,
@@ -729,7 +729,7 @@ function PaymentForm({
     setSaving(true);
     setError(null);
     try {
-      await checkAndCloseMonth(userId);
+      await checkAndRememberMonthClosing(userId);
       await recordLoanPayment(userId, paymentDate.slice(0, 7), loan.id, {
         amountCents,
         paymentDate,

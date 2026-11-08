@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { checkAndCloseMonth, moveSurplus } from "@/services/monthService";
+import { moveSurplus } from "@/services/monthService";
+import { checkAndRememberMonthClosing } from "@/services/monthClosingNoticeService";
+import AutomaticMonthClosingSummary from "@/components/AutomaticMonthClosingSummary";
 import { getMonthInitialSplit } from "@/services/movementService";
 import { watchLoans } from "@/services/loanService";
 import { watchCreditCards } from "@/services/creditCardService";
@@ -58,7 +60,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user || hasCheckedClose.current) return;
     hasCheckedClose.current = true;
-    checkAndCloseMonth(user.uid).catch((err) => {
+    checkAndRememberMonthClosing(user.uid).catch((err) => {
       console.error("checkAndCloseMonth falló:", err);
     });
   }, [user]);
@@ -98,6 +100,8 @@ export default function Dashboard() {
           </Link>
         </div>
       </header>
+
+      <AutomaticMonthClosingSummary key={user.uid} userId={user.uid} />
 
       <MonthSummary
         key={viewedMonthId}

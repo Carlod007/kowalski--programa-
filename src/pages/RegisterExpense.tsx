@@ -15,7 +15,7 @@ import { z } from "zod";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { checkAndCloseMonth } from "@/services/monthService";
+import { checkAndRememberMonthClosing } from "@/services/monthClosingNoticeService";
 import {
   purchaseGoalExpense,
   withdrawFromFund,
@@ -155,7 +155,7 @@ export default function RegisterExpense() {
   useEffect(() => {
     if (!user) return;
 
-    checkAndCloseMonth(user.uid).catch((err) => {
+    checkAndRememberMonthClosing(user.uid).catch((err) => {
       console.error("checkAndCloseMonth falló:", err);
     });
 

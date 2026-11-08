@@ -1,8 +1,19 @@
 import type { Timestamp } from "firebase/firestore";
 import type { Distribution } from "./transaction";
 
+export type DeficitResolution =
+  | "covered_by_savings"
+  | "carried_forward"
+  | "none";
+
 export type MonthRemainder = {
   ocioToAhorroCents: number;
+  necesidadToNextMonthCents?: number;
+  netDeficitCents?: number;
+  borrowedNecesidadCents?: number;
+  borrowedOcioCents?: number;
+  deficitResolution?: DeficitResolution;
+  closedAt?: Timestamp | null;
 };
 
 export type MonthCaps = {
@@ -25,6 +36,10 @@ export type Month = {
   incomeCount: number;
   closed: boolean;
   remainder?: MonthRemainder;
+  /**
+   * Excedente propio de Necesidad heredado del mes anterior al cerrarse.
+   */
+  inheritedNecesidadCents?: number;
   /**
    * Plata que entró y fue entera al ahorro, sin repartirse. Opcional: los
    * meses anteriores a esta función no lo tienen y valen 0.

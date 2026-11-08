@@ -12,6 +12,66 @@ service cloud.firestore {
                 in ['reset', 'delete-account'];
     }
 
+    function positivePart(value) {
+      return value > 0 ? value : 0;
+    }
+
+    function borrowedRemainder(data, category) {
+      return positivePart(data.get('borrowedCapsCents', {}).get(category, 0)
+        - data.get('loanFundedSpentCents', {}).get(category, 0));
+    }
+
+    function rawOwned(data, category) {
+      return (data.capsCents[category] - data.get('borrowedCapsCents', {}).get(category, 0))
+        - (data.spentCents[category] - data.get('loanFundedSpentCents', {}).get(category, 0));
+    }
+
+    function legacyOcio(data) {
+      return positivePart(rawOwned(data, 'ocio'));
+    }
+
+    function legacyNec(data) {
+      return positivePart(rawOwned(data, 'necesidad'));
+    }
+
+    function nettedOcio(data) {
+      let rOcio = rawOwned(data, 'ocio');
+      let rNec = rawOwned(data, 'necesidad');
+      return positivePart(rNec < 0 ? rOcio + rNec : rOcio);
+    }
+
+    function nettedNec(data) {
+      let rNec = rawOwned(data, 'necesidad');
+      let rOcio = rawOwned(data, 'ocio');
+      return positivePart(rOcio < 0 ? rNec + rOcio : rNec);
+    }
+
+    function netDeficit(data) {
+      return positivePart(-(rawOwned(data, 'necesidad') + rawOwned(data, 'ocio')));
+    }
+
+    function validClosureRemainder(rem, prevData) {
+      return rem is map
+        && 'ocioToAhorroCents' in rem
+        && rem.keys().hasOnly(['ocioToAhorroCents', 'necesidadToNextMonthCents', 'netDeficitCents',
+          'borrowedNecesidadCents', 'borrowedOcioCents', 'deficitResolution', 'closedAt'])
+        && rem.ocioToAhorroCents is int && rem.ocioToAhorroCents >= 0
+        && (rem.keys().hasOnly(['ocioToAhorroCents'])
+          ? (rem.ocioToAhorroCents == nettedOcio(prevData) || rem.ocioToAhorroCents == legacyOcio(prevData))
+          : (rem.ocioToAhorroCents == nettedOcio(prevData)
+            && (!('necesidadToNextMonthCents' in rem)
+              || (rem.necesidadToNextMonthCents is int && rem.necesidadToNextMonthCents == nettedNec(prevData)))
+            && (!('netDeficitCents' in rem)
+              || (rem.netDeficitCents is int && rem.netDeficitCents == netDeficit(prevData)))
+            && (!('borrowedNecesidadCents' in rem)
+              || (rem.borrowedNecesidadCents is int && rem.borrowedNecesidadCents == borrowedRemainder(prevData, 'necesidad')))
+            && (!('borrowedOcioCents' in rem)
+              || (rem.borrowedOcioCents is int && rem.borrowedOcioCents == borrowedRemainder(prevData, 'ocio')))
+            && (!('deficitResolution' in rem)
+              || rem.deficitResolution in ['covered_by_savings', 'carried_forward', 'none'])
+            && (!('closedAt' in rem) || rem.closedAt == null || rem.closedAt is timestamp)));
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
@@ -28,13 +88,8 @@ service cloud.firestore {
         let path = /databases/$(database)/documents/users/$(userId)/months/$(previousId);
         let previous = get(path).data;
         let after = getAfter(path).data;
-        let ownedCap = previous.capsCents.ocio - previous.get('borrowedCapsCents', {}).get('ocio', 0);
-        let ownedSpent = previous.spentCents.ocio - previous.get('loanFundedSpentCents', {}).get('ocio', 0);
-        let remainder = (ownedCap > 0 ? ownedCap : 0) - (ownedSpent > 0 ? ownedSpent : 0);
         return previous.closed == false && after.closed == true
-          && after.remainder is map && after.remainder.keys().hasOnly(['ocioToAhorroCents'])
-          && after.remainder.ocioToAhorroCents is int && after.remainder.ocioToAhorroCents >= 0
-          && after.remainder.ocioToAhorroCents == (remainder > 0 ? remainder : 0);
+          && validClosureRemainder(after.remainder, previous);
       }
       function previousMonthProcessed(previousId) {
         let path = /databases/$(database)/documents/users/$(userId)/months/$(previousId);
@@ -56,9 +111,19 @@ service cloud.firestore {
                 && existsAfter(/databases/$(database)/documents/users/$(userId)/months/$(nextId))
                 && (previousId == null || previousMonthProcessed(previousId)))));
       }
+      function validSavingsTotal(data, creating) {
+        return (creating
+            ? !('savingsTotalCents' in data)
+            : !data.diff(resource.data).affectedKeys().hasAny(['savingsTotalCents']))
+          || (data.savingsTotalCents is int && data.savingsTotalCents >= 0);
+      }
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && request.resource.data.lastClosedMonth == null;
-      allow update: if isOwner(userId) && validLastClosedMonth(request.resource.data);
+      allow create: if isOwner(userId)
+                    && request.resource.data.lastClosedMonth == null
+                    && validSavingsTotal(request.resource.data, true);
+      allow update: if isOwner(userId)
+                    && validLastClosedMonth(request.resource.data)
+                    && validSavingsTotal(request.resource.data, false);
       allow delete: if isOwner(userId)
                     && resource.data.get('dataDeletionMode', '') == 'delete-account';
     }
@@ -85,18 +150,6 @@ service cloud.firestore {
           && key >= low.year() * 12 + low.month()
           && key <= high.year() * 12 + high.month();
       }
-      function positivePart(value) {
-        return value > 0 ? value : 0;
-      }
-      function borrowedRemainder(data, category) {
-        return positivePart(data.get('borrowedCapsCents', {}).get(category, 0)
-          - data.get('loanFundedSpentCents', {}).get(category, 0));
-      }
-      function ownedRemainder(data, category) {
-        return positivePart(
-          positivePart(data.capsCents[category] - data.get('borrowedCapsCents', {}).get(category, 0))
-          - positivePart(data.spentCents[category] - data.get('loanFundedSpentCents', {}).get(category, 0)));
-      }
       function inheritedCaps(data) {
         let previousId = get(/databases/$(database)/documents/users/$(userId)).data.lastClosedMonth;
         let previousPath = /databases/$(database)/documents/users/$(userId)/months/$(previousId);
@@ -104,18 +157,24 @@ service cloud.firestore {
         let after = getAfter(previousPath).data;
         return previousId is string && previousId < monthId
           && previous.closed == false && after.closed == true
-          && after.remainder.ocioToAhorroCents == ownedRemainder(previous, 'ocio')
-          && data.capsCents.necesidad == ownedRemainder(previous, 'necesidad') + borrowedRemainder(previous, 'necesidad')
-          && data.capsCents.ocio == borrowedRemainder(previous, 'ocio')
           && data.borrowedCapsCents.necesidad == borrowedRemainder(previous, 'necesidad')
-          && data.borrowedCapsCents.ocio == borrowedRemainder(previous, 'ocio');
+          && data.borrowedCapsCents.ocio == borrowedRemainder(previous, 'ocio')
+          && data.capsCents.ocio == data.borrowedCapsCents.ocio
+          && (('necesidadToNextMonthCents' in after.remainder
+              && data.capsCents.necesidad == after.remainder.necesidadToNextMonthCents + data.borrowedCapsCents.necesidad)
+            || (after.remainder.keys().hasOnly(['ocioToAhorroCents'])
+              && after.remainder.ocioToAhorroCents == legacyOcio(previous)
+              && data.capsCents.necesidad == legacyNec(previous) + data.borrowedCapsCents.necesidad));
       }
       function validNewMonth(data) {
         return currentMonth()
           && data.keys().hasOnly(['totalIncomeCents', 'distribution', 'capsCents', 'spentCents',
-            'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents', 'incomeCount', 'closed', 'createdAt'])
+            'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents', 'incomeCount',
+            'closed', 'createdAt', 'inheritedNecesidadCents'])
           && percentage(data.distribution) && pair(data.capsCents) && pair(data.borrowedCapsCents)
-          && pair(data.spentCents) && pair(data.loanFundedSpentCents)
+          && (!('inheritedNecesidadCents' in data)
+            || (nonnegative(data.inheritedNecesidadCents)
+              && data.inheritedNecesidadCents == data.capsCents.necesidad - data.borrowedCapsCents.necesidad))
           && data.totalIncomeCents is int && data.totalIncomeCents == 0
           && data.incomeCount is int && data.incomeCount == 0
           && data.ahorroContributedCents is int && data.ahorroContributedCents == 0
@@ -123,7 +182,8 @@ service cloud.firestore {
           && data.loanFundedSpentCents == {'necesidad': 0, 'ocio': 0}
           && data.closed == false && data.createdAt == request.time
           && ((data.capsCents == {'necesidad': 0, 'ocio': 0}
-              && data.borrowedCapsCents == {'necesidad': 0, 'ocio': 0}) || inheritedCaps(data));
+              && data.borrowedCapsCents == {'necesidad': 0, 'ocio': 0})
+            || inheritedCaps(data));
       }
       // Nested diffs preserve untouched legacy entries such as capsCents.ahorro.
       function changedPair(data, field) {
@@ -138,21 +198,20 @@ service cloud.firestore {
           && (!changed.hasAny(['incomeCount']) || nonnegative(data.incomeCount))
           && (!changed.hasAny(['ahorroContributedCents']) || nonnegative(data.ahorroContributedCents))
           && (!changed.hasAny(['directSavingsCents']) || nonnegative(data.directSavingsCents))
+          && (!changed.hasAny(['inheritedNecesidadCents']) || nonnegative(data.inheritedNecesidadCents))
           && (!changed.hasAny(['capsCents']) || changedPair(data, 'capsCents'))
           && (!changed.hasAny(['spentCents']) || changedPair(data, 'spentCents'))
           && (!changed.hasAny(['borrowedCapsCents']) || changedPair(data, 'borrowedCapsCents'))
           && (!changed.hasAny(['loanFundedSpentCents']) || changedPair(data, 'loanFundedSpentCents'));
       }
       function validRemainder(data) {
-        return data.remainder is map && data.remainder.keys().hasOnly(['ocioToAhorroCents'])
-          && nonnegative(data.remainder.ocioToAhorroCents)
-          && data.remainder.ocioToAhorroCents == ownedRemainder(resource.data, 'ocio');
+        return validClosureRemainder(data.remainder, resource.data);
       }
       function validMonthUpdate(data) {
         let changed = data.diff(resource.data).affectedKeys();
         return changed.hasOnly(['distribution', 'totalIncomeCents', 'capsCents', 'spentCents',
             'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents',
-            'directSavingsCents', 'incomeCount', 'closed', 'remainder'])
+            'directSavingsCents', 'inheritedNecesidadCents', 'incomeCount', 'closed', 'remainder'])
           && changedAmounts(data, changed)
           && (!changed.hasAny(['distribution']) || (resource.data.incomeCount == 0 && percentage(data.distribution)))
           && ((resource.data.closed == false
@@ -325,7 +384,7 @@ service cloud.firestore {
       function editableExpense(data, changed) {
         let old = resource.data;
         return !('creditCardStatementId' in old)
-          && (!changed.hasAny(['amountCents']) || (!('fundedByLoanId' in old) && !('loanPaymentId' in old)))
+          && (!changed.hasAny(['amountCents']) || (old.category != 'ahorro' && !('fundedByLoanId' in old) && !('loanPaymentId' in old)))
           && (!changed.hasAny(['transactionDate']) || (!('loanPaymentId' in old)
             && (!('fundedByLoanId' in old) || data.transactionDate >= get(loanPath(old.fundedByLoanId)).data.receivedDate)))
           && (!('creditCardId' in old) || (unconfirmedCard(old, data.transactionDate)

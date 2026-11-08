@@ -8,6 +8,7 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { formatCents } from "@/utils/currency";
 import { validateTransactionTiming } from "@/utils/transactionTiming";
 import { calculateProportionalSplit } from "@/utils/distribution";
 import {
@@ -33,9 +34,9 @@ import type {
 
 /**
  * Revertir un ingreso descuenta de ahorro y de los topes. Si ese dinero ya se
- * gastó, la resta dejaría saldos negativos: dinero que la app afirma tener en
- * contra, lo cual es imposible. En vez de permitirlo y mostrar un estado roto,
- * se frena y se explica qué deshacer primero.
+ * gastó o está reservado en metas, la resta dejaría saldos negativos o
+ * sobreasignados. En vez de permitirlo y mostrar un estado roto, se frena y se
+ * explica qué deshacer o liberar primero.
  */
 function assertRevertible(
   income: IncomeTransaction,
@@ -46,28 +47,47 @@ function assertRevertible(
     ? income.amountCents
     : income.distribution.ahorro;
 
-  if (ahorroToRevert > (profile?.savingsTotalCents ?? 0)) {
+  const savingsTotal = profile?.savingsTotalCents ?? 0;
+  if (ahorroToRevert > savingsTotal) {
     throw new Error(
       "No se puede borrar: parte de este ingreso ya se usó desde Ahorro. Deshaz primero esa compra o retiro.",
     );
   }
 
-  if (income.isDirectSavings) return;
-
-  const ownedNecesidad =
-    month.capsCents.necesidad -
-    (month.borrowedCapsCents?.necesidad ?? 0);
-  const ownedOcio =
-    month.capsCents.ocio - (month.borrowedCapsCents?.ocio ?? 0);
-
-  if (income.distribution.necesidad > ownedNecesidad) {
+  const unassignedCents = getUnassignedCents(
+    savingsTotal,
+    profile?.savingsGoals ?? [],
+  );
+  if (ahorroToRevert > unassignedCents) {
+    const toReleaseCents = ahorroToRevert - Math.max(0, unassignedCents);
     throw new Error(
-      "No se puede borrar: el tope de Necesidad de este mes ya no cubre este ingreso. Revisa los movimientos de excedente antes de borrarlo.",
+      `No se puede borrar: parte de este ahorro está asignado a metas. Libera ${formatCents(toReleaseCents)} de tus metas primero.`,
     );
   }
-  if (income.distribution.ocio > ownedOcio) {
+
+  if (income.isDirectSavings) return;
+
+  const ownedCapNecesidad =
+    month.capsCents.necesidad - (month.borrowedCapsCents?.necesidad ?? 0);
+  const ownedSpentNecesidad =
+    month.spentCents.necesidad -
+    (month.loanFundedSpentCents?.necesidad ?? 0);
+  const availableOwnedNecesidad = ownedCapNecesidad - ownedSpentNecesidad;
+
+  const ownedCapOcio =
+    month.capsCents.ocio - (month.borrowedCapsCents?.ocio ?? 0);
+  const ownedSpentOcio =
+    month.spentCents.ocio - (month.loanFundedSpentCents?.ocio ?? 0);
+  const availableOwnedOcio = ownedCapOcio - ownedSpentOcio;
+
+  if (income.distribution.necesidad > availableOwnedNecesidad) {
     throw new Error(
-      "No se puede borrar: el tope de Ocio de este mes ya no cubre este ingreso. Revisa los movimientos de excedente antes de borrarlo.",
+      "No se puede borrar: el disponible propio de Necesidad de este mes ya no cubre este ingreso. Revisa los gastos o movimientos de excedente antes de borrarlo.",
+    );
+  }
+  if (income.distribution.ocio > availableOwnedOcio) {
+    throw new Error(
+      "No se puede borrar: el disponible propio de Ocio de este mes ya no cubre este ingreso. Revisa los gastos o movimientos de excedente antes de borrarlo.",
     );
   }
 }
@@ -311,7 +331,6 @@ export async function updateExpense(
     tags?: string[];
   },
 ): Promise<void> {
-  const userRef = doc(db, "users", userId);
   const monthRef = doc(db, "users", userId, "months", monthId);
   const txRef = doc(
     db,
@@ -341,6 +360,12 @@ export async function updateExpense(
 
     const tx = txSnap.data() as ExpenseTransaction;
     const delta = newValues.amountCents - tx.amountCents;
+
+    if (tx.category === "ahorro" && delta !== 0) {
+      throw new Error(
+        "El monto de un egreso de Ahorro no se puede editar. Bórralo y regístralo de nuevo.",
+      );
+    }
 
     const linkedCardRef = tx.creditCardId
       ? doc(db, "users", userId, "creditCards", tx.creditCardId)
@@ -381,11 +406,7 @@ export async function updateExpense(
       });
     }
 
-    if (tx.category === "ahorro") {
-      transaction.update(userRef, {
-        savingsTotalCents: increment(-delta),
-      });
-    } else {
+    if (tx.category !== "ahorro") {
       transaction.update(monthRef, {
         [`spentCents.${tx.category}`]: increment(delta),
       });
@@ -463,30 +484,53 @@ export async function updateIncome(
     );
 
     // Bajar el monto descuenta de ahorro y de los topes, igual que borrarlo.
-    // Si ese dinero ya se gastó, la resta dejaría saldos negativos.
+    // Si ese dinero ya se gastó o está reservado en metas, la resta dejaría
+    // saldos negativos o sobreasignados.
     const month = monthSnap.data() as Month;
     const profile = userSnap.exists() ? (userSnap.data() as User) : null;
+    const savingsTotal = profile?.savingsTotalCents ?? 0;
     const ahorroDelta = newSplit.ahorro - tx.distribution.ahorro;
-    if (ahorroDelta < 0 && -ahorroDelta > (profile?.savingsTotalCents ?? 0)) {
-      throw new Error(
-        "No se puede bajar tanto: parte de este ingreso ya se usó desde Ahorro. Deshaz primero esa compra o retiro.",
+    if (ahorroDelta < 0) {
+      const ahorroReduction = -ahorroDelta;
+      if (ahorroReduction > savingsTotal) {
+        throw new Error(
+          "No se puede bajar tanto: parte de este ingreso ya se usó desde Ahorro. Deshaz primero esa compra o retiro.",
+        );
+      }
+      const unassignedCents = getUnassignedCents(
+        savingsTotal,
+        profile?.savingsGoals ?? [],
       );
+      if (ahorroReduction > unassignedCents) {
+        const toReleaseCents = ahorroReduction - Math.max(0, unassignedCents);
+        throw new Error(
+          `No se puede bajar tanto: parte de este ahorro está asignado a metas. Libera ${formatCents(toReleaseCents)} de tus metas primero.`,
+        );
+      }
     }
+
     const necesidadDelta = newSplit.necesidad - tx.distribution.necesidad;
-    const ownedNecesidad =
-      month.capsCents.necesidad -
-      (month.borrowedCapsCents?.necesidad ?? 0);
-    if (necesidadDelta < 0 && -necesidadDelta > ownedNecesidad) {
+    const ownedCapNecesidad =
+      month.capsCents.necesidad - (month.borrowedCapsCents?.necesidad ?? 0);
+    const ownedSpentNecesidad =
+      month.spentCents.necesidad -
+      (month.loanFundedSpentCents?.necesidad ?? 0);
+    const availableOwnedNecesidad = ownedCapNecesidad - ownedSpentNecesidad;
+    if (necesidadDelta < 0 && -necesidadDelta > availableOwnedNecesidad) {
       throw new Error(
-        "No se puede bajar tanto: el tope de Necesidad de este mes ya no lo cubre.",
+        "No se puede bajar tanto: el disponible propio de Necesidad de este mes ya no lo cubre.",
       );
     }
+
     const ocioDelta = newSplit.ocio - tx.distribution.ocio;
-    const ownedOcio =
+    const ownedCapOcio =
       month.capsCents.ocio - (month.borrowedCapsCents?.ocio ?? 0);
-    if (ocioDelta < 0 && -ocioDelta > ownedOcio) {
+    const ownedSpentOcio =
+      month.spentCents.ocio - (month.loanFundedSpentCents?.ocio ?? 0);
+    const availableOwnedOcio = ownedCapOcio - ownedSpentOcio;
+    if (ocioDelta < 0 && -ocioDelta > availableOwnedOcio) {
       throw new Error(
-        "No se puede bajar tanto: el tope de Ocio de este mes ya no lo cubre.",
+        "No se puede bajar tanto: el disponible propio de Ocio de este mes ya no lo cubre.",
       );
     }
 
@@ -576,6 +620,11 @@ export async function withdrawFromFund(
     const allocated = getGoalAllocated(goal);
     if (input.amountCents > allocated) {
       throw new Error("El monto supera lo asignado a este fondo");
+    }
+    if (input.amountCents > (userProfile.savingsTotalCents ?? 0)) {
+      throw new Error(
+        "El monto supera tu ahorro total disponible. Revisa si tu ahorro está sobreasignado.",
+      );
     }
 
     const tx: WithFieldValue<ExpenseTransaction> = {
@@ -676,6 +725,12 @@ export async function purchaseGoalExpense(
       if (missing > unassigned) {
         throw new Error("No tienes suficiente ahorro sin asignar");
       }
+    }
+
+    if (goal.targetCents > (userProfile.savingsTotalCents ?? 0)) {
+      throw new Error(
+        "El objetivo de la meta supera tu ahorro total disponible. Revisa si tu ahorro está sobreasignado.",
+      );
     }
 
     const tx: WithFieldValue<ExpenseTransaction> = {

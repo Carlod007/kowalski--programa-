@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, CreditCard as CreditCardIcon, Plus } from "lucide-react";
 import BackButton from "@/components/BackButton";
 import { useAuthStore } from "@/store/authStore";
-import { checkAndCloseMonth } from "@/services/monthService";
+import { checkAndRememberMonthClosing } from "@/services/monthClosingNoticeService";
 import {
   cancelLatestCreditCardStatement,
   confirmCreditCardStatement,
@@ -39,7 +39,7 @@ export default function CreditCards() {
 
   useEffect(() => {
     if (!user) return;
-    checkAndCloseMonth(user.uid).catch((error) => {
+    checkAndRememberMonthClosing(user.uid).catch((error) => {
       console.error("checkAndCloseMonth falló:", error);
     });
     return watchCreditCards(
@@ -471,7 +471,7 @@ function StatementForm({
     setSaving(true);
     setError(null);
     try {
-      await checkAndCloseMonth(userId);
+      await checkAndRememberMonthClosing(userId);
       await confirmCreditCardStatement(userId, card.id, {
         closingDate,
         dueDate,

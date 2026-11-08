@@ -502,7 +502,57 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     const next = (await getDoc(doc(db, `users/owner/months/${localMonth}`))).data()!;
     expect(next.capsCents).toEqual({ necesidad: 700, ocio: 200 });
     expect(next.borrowedCapsCents).toEqual({ necesidad: 100, ocio: 200 });
-    expect((await getDoc(doc(db, `users/owner/months/${oldId}`))).data()?.remainder).toEqual({ ocioToAhorroCents: 400 });
+    expect(next.inheritedNecesidadCents).toBe(600);
+    expect((await getDoc(doc(db, `users/owner/months/${oldId}`))).data()?.remainder).toEqual({
+      ocioToAhorroCents: 400,
+      necesidadToNextMonthCents: 600,
+      netDeficitCents: 0,
+    });
+  });
+  it('F1(h): prohíbe cambiar amountCents en egresos de ahorro y permite editar otros campos', async () => {
+    await seedMonth();
+    await seed(txPath, expense({ category: 'ahorro', subcategory: 'Fondo', goalId: 'goal-1', amountCents: 500 }));
+    await deny(updateDoc(txRef, { amountCents: 600 }));
+    await updateDoc(txRef, { description: 'Ajuste de nota', paymentMethod: 'Transferencia' });
+    expect((await getDoc(txRef)).data()?.amountCents).toBe(500);
+  });
+  it('F1(h): valida savingsTotalCents entero >= 0 en /users y conserva legacy sin cambios', async () => {
+    await deny(updateDoc(doc(db, profilePath), { savingsTotalCents: -1 }));
+    await deny(updateDoc(doc(db, profilePath), { savingsTotalCents: 12.5 }));
+    await deny(updateDoc(doc(db, profilePath), { savingsTotalCents: '100' }));
+    await updateDoc(doc(db, profilePath), { savingsTotalCents: 0 });
+    await updateDoc(doc(db, profilePath), { savingsTotalCents: 2500 });
+    await admin.doc(profilePath).delete();
+    await deny(setDoc(doc(db, profilePath), { lastClosedMonth: null, savingsTotalCents: -10 }));
+    await setDoc(doc(db, profilePath), { lastClosedMonth: null, savingsTotalCents: 0 });
+  });
+  it('F1(h): cierre de mes acepta tanto el formato nuevo neteado como el formato legacy de remainder', async () => {
+    // Escenario con déficit en Necesidad (-100) cubierto con Ocio (+300):
+    // legacyOcio = 300, nettedOcio = 200, nettedNec = 0, netDeficit = 0
+    const prevRef = doc(db, `users/owner/months/${previousId}`);
+    await seed(`users/owner/months/${previousId}`, month({
+      capsCents: { necesidad: 500, ocio: 300 },
+      spentCents: { necesidad: 600, ocio: 0 },
+    }));
+    // Formato nuevo neteado válido
+    await updateDoc(prevRef, {
+      closed: true,
+      remainder: { ocioToAhorroCents: 200, necesidadToNextMonthCents: 0, netDeficitCents: 0 },
+    });
+    // Rechaza valores neteados alterados cuando se envían campos nuevos
+    await seed(`users/owner/months/${previousId}`, month({
+      capsCents: { necesidad: 500, ocio: 300 },
+      spentCents: { necesidad: 600, ocio: 0 },
+    }));
+    await deny(updateDoc(prevRef, {
+      closed: true,
+      remainder: { ocioToAhorroCents: 300, necesidadToNextMonthCents: 0, netDeficitCents: 0 },
+    }));
+    // Coexistencia con cliente viejo: acepta { ocioToAhorroCents: 300 } (legacyOcio)
+    await updateDoc(prevRef, {
+      closed: true,
+      remainder: { ocioToAhorroCents: 300 },
+    });
   });
   it('SERVICIO: crear, financiar desde otra categoría, revertir, pagar y cancelar préstamo', async () => {
     const { createLoan, registerLoanFundedExpense, recordLoanPayment, cancelUnusedLoan } = await import('./loanService');
