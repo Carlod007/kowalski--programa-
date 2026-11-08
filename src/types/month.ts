@@ -7,8 +7,14 @@ export type DeficitResolution =
   | "none";
 
 export type MonthRemainder = {
+  /** Sobrante propio de Ocio que efectivamente se barrió a Ahorro. */
   ocioToAhorroCents: number;
+  /** Sobrante propio de Ocio que efectivamente pasó al mes nuevo. */
+  ocioToNextMonthCents?: number;
+  /** Sobrante propio de Necesidad que efectivamente pasó al mes nuevo. */
   necesidadToNextMonthCents?: number;
+  /** Sobrante propio de Necesidad que efectivamente se barrió a Ahorro. */
+  necesidadSweptToAhorroCents?: number;
   netDeficitCents?: number;
   borrowedNecesidadCents?: number;
   borrowedOcioCents?: number;
@@ -49,6 +55,12 @@ export type Month = {
    * Excedente propio de Necesidad heredado del mes anterior al cerrarse.
    */
   inheritedNecesidadCents?: number;
+  /**
+   * Excedente propio de Ocio heredado del mes anterior al cerrarse con la
+   * política rollover_all. Forma parte de capsCents.ocio igual que
+   * inheritedNecesidadCents forma parte de capsCents.necesidad.
+   */
+  inheritedOcioCents?: number;
   /**
    * Déficit neto arrastrado desde el mes anterior cuando el usuario eligió
    * "carried_forward". Reduce el disponible de Necesidad del mes nuevo sin

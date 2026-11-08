@@ -9,7 +9,17 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { getMonthId, shiftMonthId, toDateInputValue } from "@/utils/date";
+import {
+  getMonthId,
+  now,
+  resolveTimeZone,
+  shiftMonthId,
+  toDateInputValue,
+} from "@/utils/date";
+import {
+  applyClosingPolicy,
+  getClosingPolicy,
+} from "@/utils/closingPolicy";
 import {
   distributionsEqual,
   isValidDistributionPercentage,
@@ -82,6 +92,26 @@ type StepProgress = {
 
 const VALID_MONTH_ID_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+type MonthClosePlan = {
+  remainders: ReturnType<typeof getMonthRemainders>;
+  destinations: ReturnType<typeof applyClosingPolicy>;
+};
+
+/**
+ * Netea primero (F1/F5) y después aplica la política elegida. Así una política
+ * nunca puede convertir un déficit en sobrante ni barrer dinero prestado.
+ */
+function planMonthClose(month: Month, user: User): MonthClosePlan {
+  const remainders = getMonthRemainders(month);
+  return {
+    remainders,
+    destinations: applyClosingPolicy(
+      remainders,
+      getClosingPolicy(user.closingPolicy),
+    ),
+  };
+}
+
 /**
  * Ejecuta un paso atómico de cierre y apertura hacia `currentMonthId`.
  *
@@ -105,21 +135,27 @@ const VALID_MONTH_ID_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 async function applyMonthCloseAndEnsure(
   transaction: Transaction,
   userId: string,
-  currentMonthId: string,
-  now: Date,
+  nowDate: Date,
   onStepProgress?: (progress: StepProgress) => void,
-): Promise<{ closedMonthId: string | null; month: Month }> {
+  timeZoneOverride?: string,
+): Promise<{
+  closedMonthId: string | null;
+  month: Month;
+  currentMonthId: string;
+}> {
   const userRef = doc(db, "users", userId);
   const userSnap = await transaction.get(userRef);
   if (!userSnap.exists()) {
     throw new Error(`checkAndCloseMonth: perfil ${userId} no existe`);
   }
   const userProfile = userSnap.data() as User;
+  const timeZone = resolveTimeZone(timeZoneOverride ?? userProfile.timeZone);
+  const currentMonthId = getMonthId(nowDate, timeZone);
   // Alias semántico: lastClosedMonth en Firestore representa el mes activo del cursor.
   const activeMonthId = userProfile.lastClosedMonth;
   const pendingCloseMonthId = userProfile.pendingCloseMonthId ?? null;
   const immediatePrevMonthId = shiftMonthId(currentMonthId, -1);
-  const inGrace = isWithinGraceWindow(now);
+  const inGrace = isWithinGraceWindow(nowDate, timeZone);
 
   const hasValidPendingClose =
     typeof pendingCloseMonthId === "string" &&
@@ -152,32 +188,40 @@ async function applyMonthCloseAndEnsure(
     });
 
     let ownedInheritedNecesidadCents = 0;
+    let ownedInheritedOcioCents = 0;
     let inheritedNecesidadCents = 0;
+    let inheritedOcioCents = 0;
     let inheritedBorrowedCents: MonthCaps = { necesidad: 0, ocio: 0 };
     let closedMonthId: string | null = null;
-    let ocioCreditedCents = 0;
+    let savingsCreditedCents = 0;
 
     if (pendingMonthSnap.exists() && !pendingMonthSnap.data().closed) {
       const pendingMonth = pendingMonthSnap.data() as Month;
-      const {
-        ocioToAhorroCents,
-        necesidadToNextMonthCents,
-        netDeficitCents,
-        borrowed: borrowedRemainder,
-      } = getMonthRemainders(pendingMonth);
+      const { remainders, destinations } = planMonthClose(
+        pendingMonth,
+        userProfile,
+      );
 
-      ownedInheritedNecesidadCents = necesidadToNextMonthCents;
+      ownedInheritedNecesidadCents = destinations.necesidadToNextMonthCents;
+      ownedInheritedOcioCents = destinations.ocioToNextMonthCents;
       inheritedNecesidadCents =
-        necesidadToNextMonthCents + borrowedRemainder.necesidad;
-      inheritedBorrowedCents = borrowedRemainder;
-      ocioCreditedCents = ocioToAhorroCents;
+        ownedInheritedNecesidadCents + remainders.borrowed.necesidad;
+      inheritedOcioCents =
+        ownedInheritedOcioCents + remainders.borrowed.ocio;
+      inheritedBorrowedCents = remainders.borrowed;
+      savingsCreditedCents =
+        destinations.necesidadSweptToAhorroCents +
+        destinations.ocioToAhorroCents;
 
       const remainder: WithFieldValue<MonthRemainder> = {
-        ocioToAhorroCents,
-        necesidadToNextMonthCents,
-        netDeficitCents,
-        borrowedNecesidadCents: borrowedRemainder.necesidad,
-        borrowedOcioCents: borrowedRemainder.ocio,
+        ocioToAhorroCents: destinations.ocioToAhorroCents,
+        ocioToNextMonthCents: destinations.ocioToNextMonthCents,
+        necesidadToNextMonthCents: destinations.necesidadToNextMonthCents,
+        necesidadSweptToAhorroCents:
+          destinations.necesidadSweptToAhorroCents,
+        netDeficitCents: remainders.netDeficitCents,
+        borrowedNecesidadCents: remainders.borrowed.necesidad,
+        borrowedOcioCents: remainders.borrowed.ocio,
         deficitResolution: "none",
         closedAt: serverTimestamp(),
       };
@@ -193,17 +237,18 @@ async function applyMonthCloseAndEnsure(
     if (!nextMonthSnap.exists()) {
       const newMonth = buildEmptyMonth(userProfile.distribution);
       (newMonth.capsCents as MonthCaps).necesidad = inheritedNecesidadCents;
-      (newMonth.capsCents as MonthCaps).ocio = inheritedBorrowedCents.ocio;
+      (newMonth.capsCents as MonthCaps).ocio = inheritedOcioCents;
       newMonth.borrowedCapsCents = inheritedBorrowedCents;
       newMonth.inheritedNecesidadCents = ownedInheritedNecesidadCents;
+      newMonth.inheritedOcioCents = ownedInheritedOcioCents;
       transaction.set(nextMonthRef, newMonth);
       resolvedMonth = newMonth as Month;
     } else {
       const existingMonth = nextMonthSnap.data() as Month;
-      if (inheritedNecesidadCents > 0 || inheritedBorrowedCents.ocio > 0) {
+      if (inheritedNecesidadCents > 0 || inheritedOcioCents > 0) {
         transaction.update(nextMonthRef, {
           "capsCents.necesidad": increment(inheritedNecesidadCents),
-          "capsCents.ocio": increment(inheritedBorrowedCents.ocio),
+          "capsCents.ocio": increment(inheritedOcioCents),
           "borrowedCapsCents.necesidad": increment(
             inheritedBorrowedCents.necesidad,
           ),
@@ -211,6 +256,11 @@ async function applyMonthCloseAndEnsure(
           ...(ownedInheritedNecesidadCents > 0
             ? {
                 inheritedNecesidadCents: increment(ownedInheritedNecesidadCents),
+              }
+            : {}),
+          ...(ownedInheritedOcioCents > 0
+            ? {
+                inheritedOcioCents: increment(ownedInheritedOcioCents),
               }
             : {}),
         });
@@ -229,7 +279,7 @@ async function applyMonthCloseAndEnsure(
         capsCents: {
           necesidad:
             existingMonth.capsCents.necesidad + inheritedNecesidadCents,
-          ocio: existingMonth.capsCents.ocio + inheritedBorrowedCents.ocio,
+          ocio: existingMonth.capsCents.ocio + inheritedOcioCents,
         },
         borrowedCapsCents: {
           necesidad:
@@ -246,14 +296,21 @@ async function applyMonthCloseAndEnsure(
                 ownedInheritedNecesidadCents,
             }
           : {}),
+        ...(ownedInheritedOcioCents > 0
+          ? {
+              inheritedOcioCents:
+                (existingMonth.inheritedOcioCents ?? 0) +
+                ownedInheritedOcioCents,
+            }
+          : {}),
       };
     }
 
     const userUpdate: Record<string, unknown> = {
       pendingCloseMonthId: null,
       ...(closedMonthId ? { unseenClosedMonthId: closedMonthId } : {}),
-      ...(ocioCreditedCents > 0
-        ? { savingsTotalCents: increment(ocioCreditedCents) }
+      ...(savingsCreditedCents > 0
+        ? { savingsTotalCents: increment(savingsCreditedCents) }
         : {}),
     };
     const isActiveValid =
@@ -263,7 +320,7 @@ async function applyMonthCloseAndEnsure(
     }
     transaction.update(userRef, userUpdate);
 
-    return { closedMonthId, month: resolvedMonth };
+    return { closedMonthId, month: resolvedMonth, currentMonthId };
   }
 
   // La sincronización va antes de la salida temprana: los meses ya creados
@@ -289,6 +346,7 @@ async function applyMonthCloseAndEnsure(
         month: !hasDistributedIncomes(currentMonth)
           ? { ...currentMonth, distribution: userProfile.distribution }
           : currentMonth,
+        currentMonthId,
       };
     }
     const newMonth = buildEmptyMonth(userProfile.distribution);
@@ -296,6 +354,7 @@ async function applyMonthCloseAndEnsure(
     return {
       closedMonthId: null,
       month: newMonth as Month,
+      currentMonthId,
     };
   }
 
@@ -335,33 +394,38 @@ async function applyMonthCloseAndEnsure(
     inGrace;
 
   let ownedInheritedNecesidadCents = 0;
+  let ownedInheritedOcioCents = 0;
   let inheritedNecesidadCents = 0;
+  let inheritedOcioCents = 0;
   let inheritedBorrowedCents: MonthCaps = { necesidad: 0, ocio: 0 };
   let closedMonthId: string | null = null;
-  let ocioCreditedCents = 0;
+  let savingsCreditedCents = 0;
 
   if (prevMonthOpen && !shouldKeepOpenInGrace && prevMonthRef && prevMonthSnap) {
     const prevMonth = prevMonthSnap.data() as Month;
+    const { remainders, destinations } = planMonthClose(
+      prevMonth,
+      userProfile,
+    );
 
-    const {
-      ocioToAhorroCents,
-      necesidadToNextMonthCents,
-      netDeficitCents,
-      borrowed: borrowedRemainder,
-    } = getMonthRemainders(prevMonth);
-
-    ownedInheritedNecesidadCents = necesidadToNextMonthCents;
+    ownedInheritedNecesidadCents = destinations.necesidadToNextMonthCents;
+    ownedInheritedOcioCents = destinations.ocioToNextMonthCents;
     inheritedNecesidadCents =
-      necesidadToNextMonthCents + borrowedRemainder.necesidad;
-    inheritedBorrowedCents = borrowedRemainder;
-    ocioCreditedCents = ocioToAhorroCents;
+      ownedInheritedNecesidadCents + remainders.borrowed.necesidad;
+    inheritedOcioCents = ownedInheritedOcioCents + remainders.borrowed.ocio;
+    inheritedBorrowedCents = remainders.borrowed;
+    savingsCreditedCents =
+      destinations.necesidadSweptToAhorroCents +
+      destinations.ocioToAhorroCents;
 
     const remainder: WithFieldValue<MonthRemainder> = {
-      ocioToAhorroCents,
-      necesidadToNextMonthCents,
-      netDeficitCents,
-      borrowedNecesidadCents: borrowedRemainder.necesidad,
-      borrowedOcioCents: borrowedRemainder.ocio,
+      ocioToAhorroCents: destinations.ocioToAhorroCents,
+      ocioToNextMonthCents: destinations.ocioToNextMonthCents,
+      necesidadToNextMonthCents: destinations.necesidadToNextMonthCents,
+      necesidadSweptToAhorroCents: destinations.necesidadSweptToAhorroCents,
+      netDeficitCents: remainders.netDeficitCents,
+      borrowedNecesidadCents: remainders.borrowed.necesidad,
+      borrowedOcioCents: remainders.borrowed.ocio,
       deficitResolution: "none",
       closedAt: serverTimestamp(),
     };
@@ -378,17 +442,18 @@ async function applyMonthCloseAndEnsure(
   if (!newMonthSnap.exists()) {
     const newMonth = buildEmptyMonth(userProfile.distribution);
     (newMonth.capsCents as MonthCaps).necesidad = inheritedNecesidadCents;
-    (newMonth.capsCents as MonthCaps).ocio = inheritedBorrowedCents.ocio;
+    (newMonth.capsCents as MonthCaps).ocio = inheritedOcioCents;
     newMonth.borrowedCapsCents = inheritedBorrowedCents;
     newMonth.inheritedNecesidadCents = ownedInheritedNecesidadCents;
+    newMonth.inheritedOcioCents = ownedInheritedOcioCents;
     transaction.set(newMonthRef, newMonth);
     resolvedMonth = newMonth as Month;
   } else {
     const existingMonth = newMonthSnap.data() as Month;
-    if (inheritedNecesidadCents > 0 || inheritedBorrowedCents.ocio > 0) {
+    if (inheritedNecesidadCents > 0 || inheritedOcioCents > 0) {
       transaction.update(newMonthRef, {
         "capsCents.necesidad": increment(inheritedNecesidadCents),
-        "capsCents.ocio": increment(inheritedBorrowedCents.ocio),
+        "capsCents.ocio": increment(inheritedOcioCents),
         "borrowedCapsCents.necesidad": increment(
           inheritedBorrowedCents.necesidad,
         ),
@@ -396,6 +461,11 @@ async function applyMonthCloseAndEnsure(
         ...(ownedInheritedNecesidadCents > 0
           ? {
               inheritedNecesidadCents: increment(ownedInheritedNecesidadCents),
+            }
+          : {}),
+        ...(ownedInheritedOcioCents > 0
+          ? {
+              inheritedOcioCents: increment(ownedInheritedOcioCents),
             }
           : {}),
       });
@@ -414,7 +484,7 @@ async function applyMonthCloseAndEnsure(
       capsCents: {
         necesidad:
           existingMonth.capsCents.necesidad + inheritedNecesidadCents,
-        ocio: existingMonth.capsCents.ocio + inheritedBorrowedCents.ocio,
+        ocio: existingMonth.capsCents.ocio + inheritedOcioCents,
       },
       borrowedCapsCents: {
         necesidad:
@@ -431,13 +501,20 @@ async function applyMonthCloseAndEnsure(
               ownedInheritedNecesidadCents,
           }
         : {}),
+      ...(ownedInheritedOcioCents > 0
+        ? {
+            inheritedOcioCents:
+              (existingMonth.inheritedOcioCents ?? 0) +
+              ownedInheritedOcioCents,
+          }
+        : {}),
     };
   }
 
   const userUpdate: Record<string, unknown> = {
     lastClosedMonth: targetMonthId,
-    ...(ocioCreditedCents > 0
-      ? { savingsTotalCents: increment(ocioCreditedCents) }
+    ...(savingsCreditedCents > 0
+      ? { savingsTotalCents: increment(savingsCreditedCents) }
       : {}),
   };
 
@@ -452,35 +529,43 @@ async function applyMonthCloseAndEnsure(
 
   transaction.update(userRef, userUpdate);
 
-  return { closedMonthId, month: resolvedMonth };
+  return { closedMonthId, month: resolvedMonth, currentMonthId };
 }
 
 export async function checkAndCloseMonth(
   userId: string,
-  now: Date = new Date(),
+  nowDate: Date = now(),
+  timeZone?: string,
 ): Promise<{ closedMonthId: string | null }> {
-  const currentMonthId = getMonthId(now);
+  let currentMonthId: string | null = null;
   let lastClosedMonthId: string | null = null;
   let previousStepFromMonthId: string | null | undefined = undefined;
 
   while (true) {
     let stepProgress: StepProgress = {
       fromMonthId: null,
-      targetMonthId: currentMonthId,
+      targetMonthId: "",
     };
 
-    const { closedMonthId } = await runTransaction(db, async (transaction) => {
-      const res = await applyMonthCloseAndEnsure(
-        transaction,
-        userId,
-        currentMonthId,
-        now,
-        (progress) => {
-          stepProgress = progress;
-        },
-      );
-      return { closedMonthId: res.closedMonthId };
-    });
+    const { closedMonthId, resolvedCurrentMonthId } = await runTransaction(
+      db,
+      async (transaction) => {
+        const res = await applyMonthCloseAndEnsure(
+          transaction,
+          userId,
+          nowDate,
+          (progress) => {
+            stepProgress = progress;
+          },
+          timeZone,
+        );
+        return {
+          closedMonthId: res.closedMonthId,
+          resolvedCurrentMonthId: res.currentMonthId,
+        };
+      },
+    );
+    currentMonthId = resolvedCurrentMonthId;
 
     if (closedMonthId) {
       lastClosedMonthId = closedMonthId;
@@ -503,32 +588,40 @@ export async function checkAndCloseMonth(
 
 export async function ensureCurrentMonth(
   userId: string,
-  now: Date = new Date(),
+  nowDate: Date = now(),
+  timeZone?: string,
 ): Promise<Month> {
-  const currentMonthId = getMonthId(now);
+  let currentMonthId: string | null = null;
   let latestMonth: Month;
   let previousStepFromMonthId: string | null | undefined = undefined;
 
   while (true) {
     let stepProgress: StepProgress = {
       fromMonthId: null,
-      targetMonthId: currentMonthId,
+      targetMonthId: "",
     };
 
-    const { closedMonthId, month } = await runTransaction(
+    const { closedMonthId, month, resolvedCurrentMonthId } = await runTransaction(
       db,
-      async (transaction) =>
-        applyMonthCloseAndEnsure(
+      async (transaction) => {
+        const result = await applyMonthCloseAndEnsure(
           transaction,
           userId,
-          currentMonthId,
-          now,
+          nowDate,
           (progress) => {
             stepProgress = progress;
           },
-        ),
+          timeZone,
+        );
+        return {
+          closedMonthId: result.closedMonthId,
+          month: result.month,
+          resolvedCurrentMonthId: result.currentMonthId,
+        };
+      },
     );
 
+    currentMonthId = resolvedCurrentMonthId;
     rememberMonthClosing(userId, closedMonthId);
     latestMonth = month;
 

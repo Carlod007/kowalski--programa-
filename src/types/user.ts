@@ -76,6 +76,21 @@ export type DataDeletionMode = "reset" | "delete-account";
 
 export type ClosingMode = "auto_grace";
 
+export type NecesidadSurplusPolicy =
+  | "rollover_all"
+  | "sweep_to_savings"
+  | "rollover_capped";
+
+export type OcioSurplusPolicy = "sweep_to_savings" | "rollover_all";
+
+/** Decide el destino del sobrante propio después del neteo de déficits. */
+export type ClosingPolicy = {
+  necesidadSurplus: NecesidadSurplusPolicy;
+  /** Tope entero en centavos para rollover_capped. */
+  necesidadRolloverCapCents?: number;
+  ocioSurplus: OcioSurplusPolicy;
+};
+
 export type User = {
   name: string;
   email: string;
@@ -103,6 +118,13 @@ export type User = {
    * Modo de cierre mensual. En F5 solo se usa el valor por defecto "auto_grace".
    */
   closingMode?: ClosingMode;
+  /**
+   * Destino del sobrante propio al cerrar. Si falta, se comporta como el
+   * histórico: Necesidad pasa al mes nuevo y Ocio va a Ahorro.
+   */
+  closingPolicy?: ClosingPolicy;
+  /** Zona IANA para meses, cierre, gracia y fechas. Default: America/Lima. */
+  timeZone?: string;
   savingsTotalCents: number;
   savingsGoals: SavingsGoal[];
   fixedIncomes?: FixedIncome[];

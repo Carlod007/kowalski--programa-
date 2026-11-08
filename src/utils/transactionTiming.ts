@@ -1,10 +1,20 @@
 import type { TransactionBase, Transaction } from '@/types/transaction';
-import { getMonthId, shiftMonthId, toDateInputValue } from './date';
+import {
+  DEFAULT_TIME_ZONE,
+  getMonthId,
+  getZonedDateParts,
+  now,
+  shiftMonthId,
+  toDateInputValue,
+} from './date';
 
 export const GRACE_WINDOW_DAYS = 3;
 
-export function isWithinGraceWindow(now = new Date()): boolean {
-  const day = now.getDate();
+export function isWithinGraceWindow(
+  nowDate: Date = now(),
+  timeZone: string = DEFAULT_TIME_ZONE,
+): boolean {
+  const day = getZonedDateParts(nowDate, timeZone).day;
   return day >= 1 && day <= GRACE_WINDOW_DAYS;
 }
 
@@ -16,14 +26,15 @@ export function getGraceDeadlineDate(pendingMonthId: string): string {
 export function resolveTargetMonthIdForDate(
   date: string,
   requestedMonthId?: string,
-  now = new Date(),
+  nowDate: Date = now(),
+  timeZone: string = DEFAULT_TIME_ZONE,
 ): string {
-  const currentMonthId = getMonthId(now);
+  const currentMonthId = getMonthId(nowDate, timeZone);
   const prevMonthId = shiftMonthId(currentMonthId, -1);
   const dateMonthId = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(0, 7) : '';
   if (
     dateMonthId === prevMonthId &&
-    isWithinGraceWindow(now) &&
+    isWithinGraceWindow(nowDate, timeZone) &&
     (!requestedMonthId ||
       requestedMonthId === currentMonthId ||
       requestedMonthId === prevMonthId)
@@ -33,26 +44,37 @@ export function resolveTargetMonthIdForDate(
   return requestedMonthId ?? currentMonthId;
 }
 
+function isValidCalendarDate(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const [year, month, day] = date.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
 export function validateTransactionTiming(
   monthId: string,
   date: string,
-  now = new Date(),
+  nowDate: Date = now(),
+  timeZone: string = DEFAULT_TIME_ZONE,
 ): void {
-  const parsed = new Date(`${date}T12:00:00`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || toDateInputValue(parsed) !== date) {
+  if (!isValidCalendarDate(date)) {
     throw new Error('Selecciona una fecha válida.');
   }
-  const currentMonthId = getMonthId(now);
+  const currentMonthId = getMonthId(nowDate, timeZone);
   const prevMonthId = shiftMonthId(currentMonthId, -1);
   const allowedPreviousMonth =
-    monthId === prevMonthId && isWithinGraceWindow(now);
+    monthId === prevMonthId && isWithinGraceWindow(nowDate, timeZone);
   if (
     (monthId !== currentMonthId && !allowedPreviousMonth) ||
     date.slice(0, 7) !== monthId
   ) {
     throw new Error('La fecha debe pertenecer al mes actual abierto.');
   }
-  if (date > toDateInputValue(now)) {
+  if (date > toDateInputValue(nowDate, timeZone)) {
     throw new Error('La fecha no puede estar en el futuro.');
   }
 }
