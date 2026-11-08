@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { PaymentMethod } from "@/types/user";
+import { hasDuplicateCatalogName } from "@/utils/masterTables";
 
 type Props = {
   data: PaymentMethod[];
@@ -12,12 +13,24 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editType, setEditType] = useState<"cash" | "digital">("digital");
+  const [error, setError] = useState<string | null>(null);
 
   function addMethod() {
-    if (name.trim() === "") return;
+    const trimmed = name.trim();
+    if (trimmed === "") return;
+    if (
+      hasDuplicateCatalogName(
+        data.map((m) => m.name),
+        trimmed,
+      )
+    ) {
+      setError("Ya existe un método de pago con ese nombre.");
+      return;
+    }
+    setError(null);
     const newMethod: PaymentMethod = {
       id: crypto.randomUUID(),
-      name: name.trim(),
+      name: trimmed,
       type,
     };
     onChange([...data, newMethod]);
@@ -26,10 +39,12 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
   }
 
   function removeMethod(id: string) {
+    setError(null);
     onChange(data.filter((m) => m.id !== id));
   }
 
   function startEdit(method: PaymentMethod) {
+    setError(null);
     setEditingId(method.id);
     setEditName(method.name);
     setEditType(method.type);
@@ -38,6 +53,18 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
   function saveEdit() {
     const trimmed = editName.trim();
     if (trimmed === "") return;
+    const existingMethod = data.find((m) => m.id === editingId);
+    if (
+      hasDuplicateCatalogName(
+        data.map((m) => m.name),
+        trimmed,
+        existingMethod?.name,
+      )
+    ) {
+      setError("Ya existe un método de pago con ese nombre.");
+      return;
+    }
+    setError(null);
     onChange(
       data.map((m) =>
         m.id === editingId ? { ...m, name: trimmed, type: editType } : m,
@@ -47,6 +74,7 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
   }
 
   function cancelEdit() {
+    setError(null);
     setEditingId(null);
   }
 
@@ -144,6 +172,7 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
           +
         </button>
       </div>
+      {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   );
 }

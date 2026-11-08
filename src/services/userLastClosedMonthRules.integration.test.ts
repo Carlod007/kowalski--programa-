@@ -396,4 +396,42 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
     await admin.doc(profilePath).delete();
     await deny(setDoc(profileRef, { ...buildInitialUserProfile(identity), distribution: invalidDist }));
   });
+
+  it('F4 SERVICIO: cierre multi-mes en orden cronológico (2 meses de distancia) creando y cerrando el mes intermedio y trasladando Necesidad', async () => {
+    const { ensureCurrentMonth } = await import('./monthService');
+    const twoMonthsAgoId = shiftedMonth(-2);
+
+    // Usuario no abre la app desde hace 2 meses (twoMonthsAgoId):
+    // En twoMonthsAgoId tiene Necesidad +20000 (50000 - 30000) y Ocio -5000 (20000 - 25000)
+    // -> necesidadToNextMonthCents = 15000, ocioToAhorroCents = 0, netDeficitCents = 0.
+    await admin.doc(profilePath).update({ lastClosedMonth: twoMonthsAgoId, savingsTotalCents: 10000 });
+    await seedMonth(twoMonthsAgoId, emptyMonth({
+      capsCents: { necesidad: 50000, ocio: 20000 },
+      spentCents: { necesidad: 30000, ocio: 25000 },
+    }));
+
+    const currentMonthDoc = await ensureCurrentMonth('owner');
+
+    const twoMonthsAgoSnap = (await getDoc(doc(db, monthPath(twoMonthsAgoId)))).data()!;
+    const intermediateSnap = (await getDoc(previousRef)).data()!;
+    const currentSnap = (await getDoc(currentRef)).data()!;
+
+    expect(twoMonthsAgoSnap.closed).toBe(true);
+    expect(twoMonthsAgoSnap.remainder).toEqual({
+      ocioToAhorroCents: 0,
+      necesidadToNextMonthCents: 15000,
+      netDeficitCents: 0,
+    });
+    expect(intermediateSnap.closed).toBe(true);
+    expect(intermediateSnap.capsCents).toEqual({ necesidad: 15000, ocio: 0 });
+    expect(intermediateSnap.remainder).toEqual({
+      ocioToAhorroCents: 0,
+      necesidadToNextMonthCents: 15000,
+      netDeficitCents: 0,
+    });
+    expect(currentSnap.closed).toBe(false);
+    expect(currentSnap.capsCents).toEqual({ necesidad: 15000, ocio: 0 });
+    expect(currentMonthDoc.closed).toBe(false);
+    await assertMarker(currentId);
+  });
 });

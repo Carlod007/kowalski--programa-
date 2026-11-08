@@ -17,6 +17,8 @@ import type {
 import BackButton from "@/components/BackButton";
 import { normalizeExpenseTags } from "@/utils/expenseTags";
 
+const DELETED_SOURCE_SENTINEL_ID = "__deleted_original_source__";
+
 type Tx = ExpenseTransaction | IncomeTransaction;
 
 export default function EditTransaction() {
@@ -81,12 +83,17 @@ export default function EditTransaction() {
         setAmountStr((transaction.amountCents / 100).toString());
 
         if (transaction.type === "income") {
-          const resolvedSourceId =
-            transaction.sourceId ??
-            (userProfile?.sources ?? []).find(
-              (s) => s.name === transaction.source,
-            )?.id ??
-            "";
+          const catalogSources = userProfile?.sources ?? [];
+          const matchedSource = catalogSources.find(
+            (s) =>
+              (transaction.sourceId && s.id === transaction.sourceId) ||
+              s.name === transaction.source,
+          );
+          const resolvedSourceId = matchedSource
+            ? matchedSource.id
+            : transaction.source
+              ? DELETED_SOURCE_SENTINEL_ID
+              : "";
           setSourceId(resolvedSourceId);
         } else {
           setSubcategory(transaction.subcategory);
@@ -249,17 +256,26 @@ export default function EditTransaction() {
 
     try {
       if (isIncome) {
+        const incomeTx = tx as IncomeTransaction;
         const selectedSource = (userProfile?.sources ?? []).find(
           (s) => s.id === sourceId,
         );
+        const isDeletedOriginalSource =
+          sourceId === DELETED_SOURCE_SENTINEL_ID;
         // Un aporte directo conserva su etiqueta: no tiene fuente que
         // seleccionar, y tomar la del formulario la dejaría vacía.
         await updateIncome(user.uid, monthId, txId, {
           amountCents: newAmountCents,
           source: isDirectSavingsIncome
-            ? (tx as IncomeTransaction).source
-            : (selectedSource?.name ?? ""),
-          sourceId: isDirectSavingsIncome ? undefined : sourceId,
+            ? incomeTx.source
+            : isDeletedOriginalSource
+              ? incomeTx.source
+              : (selectedSource?.name ?? ""),
+          sourceId: isDirectSavingsIncome
+            ? undefined
+            : isDeletedOriginalSource
+              ? incomeTx.sourceId
+              : sourceId,
           description: description.trim() || undefined,
         });
       } else {
@@ -307,6 +323,7 @@ export default function EditTransaction() {
               sourceId={sourceId}
               onSourceIdChange={setSourceId}
               sources={userProfile?.sources ?? []}
+              originalSourceName={(tx as IncomeTransaction).source}
             />
           )
         ) : (
@@ -320,10 +337,11 @@ export default function EditTransaction() {
                 selected={subcategory}
                 onSelect={setSubcategory}
                 options={
-              userProfile?.subcategories?.[
-                (tx as ExpenseTransaction).category as "necesidad" | "ocio"
-              ] ?? []
+                  userProfile?.subcategories?.[
+                    (tx as ExpenseTransaction).category as "necesidad" | "ocio"
+                  ] ?? []
                 }
+                originalSubcategory={(tx as ExpenseTransaction).subcategory}
               />
             )}
             {isCreditCardExpense ? (
@@ -340,6 +358,7 @@ export default function EditTransaction() {
                 selected={paymentMethod}
                 onSelect={setPaymentMethod}
                 options={userProfile?.paymentMethods ?? []}
+                originalPaymentMethod={(tx as ExpenseTransaction).paymentMethod}
               />
             )}
           </>
@@ -490,11 +509,16 @@ function IncomeFields({
   sourceId,
   onSourceIdChange,
   sources,
+  originalSourceName,
 }: {
   sourceId: string;
   onSourceIdChange: (v: string) => void;
   sources: { id: string; name: string }[];
+  originalSourceName?: string;
 }) {
+  const hasOriginalInCatalog =
+    !originalSourceName ||
+    sources.some((s) => s.id === sourceId || s.name === originalSourceName);
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor="source" className="text-sm font-medium text-stone-700">
@@ -507,6 +531,11 @@ function IncomeFields({
         className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
       >
         <option value="">Selecciona una fuente</option>
+        {!hasOriginalInCatalog && originalSourceName && (
+          <option value={DELETED_SOURCE_SENTINEL_ID}>
+            {originalSourceName} (eliminada)
+          </option>
+        )}
         {sources.map((s) => (
           <option key={s.id} value={s.id}>
             {s.name}
@@ -540,34 +569,44 @@ function SubcategoryChips({
   selected,
   onSelect,
   options,
+  originalSubcategory,
 }: {
   category: ExpenseTransaction["category"];
   selected: string;
   onSelect: (v: string) => void;
   options: string[];
+  originalSubcategory?: string;
 }) {
   const meta = CATEGORY_META[category];
+  const isOriginalDeleted =
+    !!originalSubcategory && !options.includes(originalSubcategory);
+  const allOptions = isOriginalDeleted
+    ? [
+        { value: originalSubcategory, label: `${originalSubcategory} (eliminada)` },
+        ...options.map((sub) => ({ value: sub, label: sub })),
+      ]
+    : options.map((sub) => ({ value: sub, label: sub }));
   return (
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium text-stone-700">Subcategoría</p>
-      {options.length === 0 ? (
+      {allOptions.length === 0 ? (
         <p className="text-sm text-stone-500">
           No hay subcategorías configuradas para {meta.label}.
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {options.map((sub) => (
+          {allOptions.map((sub) => (
             <button
-              key={sub}
+              key={sub.value}
               type="button"
-              onClick={() => onSelect(sub)}
+              onClick={() => onSelect(sub.value)}
               className={`rounded-full border px-3 py-1.5 text-sm ${
-                selected === sub
+                selected === sub.value
                   ? `${meta.selectedBorder} ${meta.bg} ${meta.text} border-2`
                   : "border-stone-300 text-stone-600"
               }`}
             >
-              {sub}
+              {sub.label}
             </button>
           ))}
         </div>
@@ -580,21 +619,36 @@ function PaymentMethodChips({
   selected,
   onSelect,
   options,
+  originalPaymentMethod,
 }: {
   selected: string;
   onSelect: (v: string) => void;
   options: { id: string; name: string; type: "cash" | "digital" }[];
+  originalPaymentMethod?: string;
 }) {
+  const isOriginalDeleted =
+    !!originalPaymentMethod &&
+    !options.some((pm) => pm.name === originalPaymentMethod);
+  const allOptions = isOriginalDeleted
+    ? [
+        {
+          id: "__deleted_original_pm__",
+          name: originalPaymentMethod,
+          label: `${originalPaymentMethod} (eliminada)`,
+        },
+        ...options.map((pm) => ({ id: pm.id, name: pm.name, label: pm.name })),
+      ]
+    : options.map((pm) => ({ id: pm.id, name: pm.name, label: pm.name }));
   return (
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium text-stone-700">Método de pago</p>
-      {options.length === 0 ? (
+      {allOptions.length === 0 ? (
         <p className="text-sm text-stone-500">
           No hay métodos de pago configurados.
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {options.map((pm) => (
+          {allOptions.map((pm) => (
             <button
               key={pm.id}
               type="button"
@@ -605,7 +659,7 @@ function PaymentMethodChips({
                   : "border-stone-300 text-stone-600"
               }`}
             >
-              {pm.name}
+              {pm.label}
             </button>
           ))}
         </div>

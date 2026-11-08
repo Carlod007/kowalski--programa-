@@ -9,7 +9,7 @@ import {
   type WithFieldValue,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { getMonthId, toDateInputValue } from "@/utils/date";
+import { getMonthId, shiftMonthId, toDateInputValue } from "@/utils/date";
 import {
   distributionsEqual,
   isValidDistributionPercentage,
@@ -66,10 +66,31 @@ function syncDistributionIfUnused(
   transaction.update(monthRef, { distribution: profileDistribution });
 }
 
+type StepProgress = {
+  fromMonthId: string | null;
+  targetMonthId: string;
+};
+
+/**
+ * Ejecuta un paso atómico de cierre y apertura hacia `currentMonthId`.
+ *
+ * Nota sobre `userProfile.lastClosedMonth`:
+ * En Firestore se mantiene el nombre físico `lastClosedMonth` por compatibilidad
+ * con documentos y reglas existentes, pero en realidad almacena el cursor del
+ * mes activo (`activeMonthId`).
+ *
+ * Si entre `activeMonthId` y `currentMonthId` hay más de un mes de distancia,
+ * este paso avanza un solo mes (`shiftMonthId(activeMonthId, 1)`), cerrando
+ * `activeMonthId`, propagando sus remanentes (`ocioToAhorroCents`,
+ * `necesidadToNextMonthCents`, `netDeficitCents`) al mes siguiente y
+ * actualizando el cursor. El llamador repite una transacción por mes hasta
+ * alcanzar `currentMonthId`.
+ */
 async function applyMonthCloseAndEnsure(
   transaction: Transaction,
   userId: string,
   currentMonthId: string,
+  onStepProgress?: (progress: StepProgress) => void,
 ): Promise<{ closedMonthId: string | null; month: Month }> {
   const userRef = doc(db, "users", userId);
   const userSnap = await transaction.get(userRef);
@@ -77,13 +98,19 @@ async function applyMonthCloseAndEnsure(
     throw new Error(`checkAndCloseMonth: perfil ${userId} no existe`);
   }
   const userProfile = userSnap.data() as User;
-  const newMonthRef = doc(db, "users", userId, "months", currentMonthId);
+  // Alias semántico: lastClosedMonth en Firestore representa el mes activo del cursor.
+  const activeMonthId = userProfile.lastClosedMonth;
 
   // La sincronización va antes de la salida temprana: los meses ya creados
   // con un reparto desactualizado no vuelven a pasar por la creación, y sin
   // esto nunca se corregirían.
-  if (userProfile.lastClosedMonth === currentMonthId) {
+  if (activeMonthId === currentMonthId) {
+    const newMonthRef = doc(db, "users", userId, "months", currentMonthId);
     const currentSnap = await transaction.get(newMonthRef);
+    onStepProgress?.({
+      fromMonthId: activeMonthId,
+      targetMonthId: currentMonthId,
+    });
     if (currentSnap.exists()) {
       const currentMonth = currentSnap.data() as Month;
       syncDistributionIfUnused(
@@ -107,15 +134,29 @@ async function applyMonthCloseAndEnsure(
     };
   }
 
-  const prevMonthId = userProfile.lastClosedMonth;
+  const isValidMonthId =
+    typeof activeMonthId === "string" &&
+    /^\d{4}-(0[1-9]|1[0-2])$/.test(activeMonthId);
+  const targetMonthId =
+    isValidMonthId && activeMonthId < currentMonthId
+      ? shiftMonthId(activeMonthId, 1)
+      : currentMonthId;
+
+  onStepProgress?.({
+    fromMonthId: activeMonthId ?? null,
+    targetMonthId,
+  });
+
+  const prevMonthId = activeMonthId;
   const prevMonthRef = prevMonthId
     ? doc(db, "users", userId, "months", prevMonthId)
     : null;
-  const prevMonthSnap = prevMonthRef
-    ? await transaction.get(prevMonthRef)
-    : null;
+  const newMonthRef = doc(db, "users", userId, "months", targetMonthId);
 
-  const newMonthSnap = await transaction.get(newMonthRef);
+  const [prevMonthSnap, newMonthSnap] = await Promise.all([
+    prevMonthRef ? transaction.get(prevMonthRef) : Promise.resolve(null),
+    transaction.get(newMonthRef),
+  ]);
 
   let ownedInheritedNecesidadCents = 0;
   let inheritedNecesidadCents = 0;
@@ -220,7 +261,7 @@ async function applyMonthCloseAndEnsure(
     };
   }
 
-  transaction.update(userRef, { lastClosedMonth: currentMonthId });
+  transaction.update(userRef, { lastClosedMonth: targetMonthId });
 
   return { closedMonthId, month: resolvedMonth };
 }
@@ -230,14 +271,44 @@ export async function checkAndCloseMonth(
   now: Date = new Date(),
 ): Promise<{ closedMonthId: string | null }> {
   const currentMonthId = getMonthId(now);
-  return runTransaction(db, async (transaction) => {
-    const { closedMonthId } = await applyMonthCloseAndEnsure(
-      transaction,
-      userId,
-      currentMonthId,
-    );
-    return { closedMonthId };
-  });
+  let lastClosedMonthId: string | null = null;
+  let previousStepFromMonthId: string | null | undefined = undefined;
+
+  while (true) {
+    let stepProgress: StepProgress = {
+      fromMonthId: null,
+      targetMonthId: currentMonthId,
+    };
+
+    const { closedMonthId } = await runTransaction(db, async (transaction) => {
+      const res = await applyMonthCloseAndEnsure(
+        transaction,
+        userId,
+        currentMonthId,
+        (progress) => {
+          stepProgress = progress;
+        },
+      );
+      return { closedMonthId: res.closedMonthId };
+    });
+
+    if (closedMonthId) {
+      lastClosedMonthId = closedMonthId;
+    }
+
+    if (stepProgress.targetMonthId >= currentMonthId) {
+      break;
+    }
+    if (
+      previousStepFromMonthId !== undefined &&
+      stepProgress.fromMonthId === previousStepFromMonthId
+    ) {
+      break;
+    }
+    previousStepFromMonthId = stepProgress.fromMonthId;
+  }
+
+  return { closedMonthId: lastClosedMonthId };
 }
 
 export async function ensureCurrentMonth(
@@ -245,13 +316,44 @@ export async function ensureCurrentMonth(
   now: Date = new Date(),
 ): Promise<Month> {
   const currentMonthId = getMonthId(now);
-  const { closedMonthId, month } = await runTransaction(
-    db,
-    async (transaction) =>
-      applyMonthCloseAndEnsure(transaction, userId, currentMonthId),
-  );
-  rememberMonthClosing(userId, closedMonthId);
-  return month;
+  let latestMonth: Month;
+  let previousStepFromMonthId: string | null | undefined = undefined;
+
+  while (true) {
+    let stepProgress: StepProgress = {
+      fromMonthId: null,
+      targetMonthId: currentMonthId,
+    };
+
+    const { closedMonthId, month } = await runTransaction(
+      db,
+      async (transaction) =>
+        applyMonthCloseAndEnsure(
+          transaction,
+          userId,
+          currentMonthId,
+          (progress) => {
+            stepProgress = progress;
+          },
+        ),
+    );
+
+    rememberMonthClosing(userId, closedMonthId);
+    latestMonth = month;
+
+    if (stepProgress.targetMonthId >= currentMonthId) {
+      break;
+    }
+    if (
+      previousStepFromMonthId !== undefined &&
+      stepProgress.fromMonthId === previousStepFromMonthId
+    ) {
+      break;
+    }
+    previousStepFromMonthId = stepProgress.fromMonthId;
+  }
+
+  return latestMonth!;
 }
 
 export async function updateDistributionNow(

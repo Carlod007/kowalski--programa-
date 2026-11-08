@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Source, FixedIncome } from "@/types/user";
 import { formatCents } from "@/utils/currency";
+import { hasDuplicateCatalogName } from "@/utils/masterTables";
 
 type Props = {
   sources: Source[];
@@ -72,12 +73,24 @@ export default function StepIncomeSources({
   const [editName, setEditName] = useState("");
   const [editIsFixed, setEditIsFixed] = useState(false);
   const [editAmount, setEditAmount] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   function addRow() {
-    if (nameInput.trim() === "") return;
+    const trimmed = nameInput.trim();
+    if (trimmed === "") return;
+    if (
+      hasDuplicateCatalogName(
+        rows.map((r) => r.name),
+        trimmed,
+      )
+    ) {
+      setError("Ya existe una fuente de ingreso con ese nombre.");
+      return;
+    }
+    setError(null);
     const newRow: IncomeRow = {
       id: crypto.randomUUID(),
-      name: nameInput.trim(),
+      name: trimmed,
       isFixed: isFixedInput,
       monthlyAmountCents: parseAmountCents(amountInput),
     };
@@ -88,6 +101,7 @@ export default function StepIncomeSources({
   }
 
   function removeRow(id: string) {
+    setError(null);
     emitChange(
       rows.filter((r) => r.id !== id),
       onChange,
@@ -95,6 +109,7 @@ export default function StepIncomeSources({
   }
 
   function startEdit(row: IncomeRow) {
+    setError(null);
     setEditingId(row.id);
     setEditName(row.name);
     setEditIsFixed(row.isFixed);
@@ -108,6 +123,18 @@ export default function StepIncomeSources({
   function saveEdit() {
     const trimmed = editName.trim();
     if (trimmed === "") return;
+    const existingRow = rows.find((r) => r.id === editingId);
+    if (
+      hasDuplicateCatalogName(
+        rows.map((r) => r.name),
+        trimmed,
+        existingRow?.name,
+      )
+    ) {
+      setError("Ya existe una fuente de ingreso con ese nombre.");
+      return;
+    }
+    setError(null);
     emitChange(
       rows.map((r) =>
         r.id === editingId
@@ -127,6 +154,7 @@ export default function StepIncomeSources({
   }
 
   function cancelEdit() {
+    setError(null);
     setEditingId(null);
   }
 
@@ -253,6 +281,7 @@ export default function StepIncomeSources({
         >
           + Agregar
         </button>
+        {error && <p className="text-xs text-red-500">{error}</p>}
       </div>
     </div>
   );

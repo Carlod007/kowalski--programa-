@@ -4,20 +4,27 @@ import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
-import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
+import { useCurrentMonthId } from "@/hooks/useCurrentMonthId";
+import { shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import { getMonthRemainders } from "@/utils/monthRemainders";
 import type { Month } from "@/types/month";
 import BackButton from "@/components/BackButton";
-
-const CURRENT_MONTH_ID = getMonthId();
 
 export default function Movements() {
   const user = useAuthStore((s) => s.user);
   const savingsTotalCents = useAuthStore(
     (s) => s.userProfile?.savingsTotalCents ?? 0,
   );
-  const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
+  const currentMonthId = useCurrentMonthId({
+    userId: user?.uid,
+    onMonthChange: (nextMonthId, prevMonthId) => {
+      setViewedMonthId((current) =>
+        current === prevMonthId ? nextMonthId : current,
+      );
+    },
+  });
+  const [viewedMonthId, setViewedMonthId] = useState(currentMonthId);
 
   if (!user) return null;
 
@@ -45,7 +52,7 @@ export default function Movements() {
           <button
             type="button"
             onClick={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
-            disabled={viewedMonthId >= CURRENT_MONTH_ID}
+            disabled={viewedMonthId >= currentMonthId}
             className="flex h-6 w-6 items-center justify-center rounded-full text-stone-500 disabled:opacity-30"
           >
             ›

@@ -86,12 +86,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /users/{userId} {
-      function currentMarker(monthId) {
+      function currentMarker(monthId, allowPastCatchup) {
         let parts = monthId.split('-');
         let low = request.time - duration.value(3, 'd');
         let high = request.time + duration.value(3, 'd');
         let key = int(parts[0]) * 12 + int(parts[1]);
-        return key >= low.year() * 12 + low.month()
+        return (allowPastCatchup || key >= low.year() * 12 + low.month())
           && key <= high.year() * 12 + high.month();
       }
       function validPreviousClosure(previousId) {
@@ -115,7 +115,7 @@ service cloud.firestore {
             && (nextId == null
               ? cleaning
               : (!cleaning && nextId is string && nextId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
-                && currentMarker(nextId)
+                && currentMarker(nextId, previousId != null)
                 && (previousId == null || (previousId is string
                   && previousId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$') && nextId > previousId))
                 && existsAfter(/databases/$(database)/documents/users/$(userId)/months/$(nextId))
@@ -150,15 +150,20 @@ service cloud.firestore {
         return value is map && value.keys().hasOnly(['necesidad', 'ocio'])
           && nonnegative(value.necesidad) && nonnegative(value.ocio);
       }
-      // UTC +/- 3 days covers UTC-12..UTC+14 plus two days of clock margin.
+      // UTC +/- 3 days covers UTC-12..UTC+14 plus two days of clock margin,
+      // or intermediate catch-up months created atomically while advancing lastClosedMonth.
       function currentMonth() {
         let parts = monthId.split('-');
         let low = request.time - duration.value(3, 'd');
         let high = request.time + duration.value(3, 'd');
         let key = int(parts[0]) * 12 + int(parts[1]);
+        let userPath = /databases/$(database)/documents/users/$(userId);
+        let prevMarker = get(userPath).data.get('lastClosedMonth', null);
         return monthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
-          && key >= low.year() * 12 + low.month()
-          && key <= high.year() * 12 + high.month();
+          && key <= high.year() * 12 + high.month()
+          && (key >= low.year() * 12 + low.month()
+            || (prevMarker is string && monthId > prevMarker
+              && getAfter(userPath).data.get('lastClosedMonth', null) == monthId));
       }
       function inheritedCaps(data) {
         let previousId = get(/databases/$(database)/documents/users/$(userId)).data.lastClosedMonth;

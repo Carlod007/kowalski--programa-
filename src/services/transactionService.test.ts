@@ -861,4 +861,258 @@ describe("integridad financiera F1 en servicios", () => {
       expect(mocks.update).not.toHaveBeenCalled();
     });
   });
+
+  describe("F4: cierre multi-mes y purchaseGoalExpense con precio real", () => {
+    it("cierre multi-mes: usuario que no abre la app por 2 meses (2026-07 -> 2026-09) con déficit en el primero y herencia de Necesidad; ningún mes intermedio queda abierto", async () => {
+      // Configurar mocks.set y mocks.update para persistir en mocks.docs entre transacciones del bucle multi-mes
+      const applyPatch = (
+        target: Record<string, unknown>,
+        patch: Record<string, unknown>,
+      ): Record<string, unknown> => {
+        const next: Record<string, unknown> = structuredClone(target);
+        for (const [key, rawVal] of Object.entries(patch)) {
+          const parts = key.split(".");
+          let cursor: Record<string, unknown> = next;
+          for (let i = 0; i < parts.length - 1; i += 1) {
+            const part = parts[i];
+            const existing = cursor[part];
+            cursor[part] =
+              existing && typeof existing === "object"
+                ? { ...(existing as Record<string, unknown>) }
+                : {};
+            cursor = cursor[part] as Record<string, unknown>;
+          }
+          const leaf = parts[parts.length - 1];
+          if (
+            rawVal &&
+            typeof rawVal === "object" &&
+            (rawVal as { __op?: string }).__op === "increment"
+          ) {
+            const currentNum =
+              typeof cursor[leaf] === "number" ? (cursor[leaf] as number) : 0;
+            cursor[leaf] =
+              currentNum + ((rawVal as { value: number }).value ?? 0);
+          } else {
+            cursor[leaf] = rawVal;
+          }
+        }
+        return next;
+      };
+
+      mocks.set.mockImplementation(
+        (path: string, data: Record<string, unknown>) => {
+          mocks.docs.set(path, structuredClone(data));
+        },
+      );
+      mocks.update.mockImplementation(
+        (path: string, patch: Record<string, unknown>) => {
+          const prev = mocks.docs.get(path) ?? {};
+          mocks.docs.set(path, applyPatch(prev, patch));
+        },
+      );
+
+      // Estado inicial en 2026-07:
+      // Necesidad: cap 500 (50_000), spent 350 (35_000) -> +150 (15_000)
+      // Ocio: cap 200 (20_000), spent 400 (40_000) -> -200 (-20_000)
+      // Remanentes de 2026-07: ocioToAhorro = 0, necesidadToNextMonth = 0, netDeficit = 5_000 (S/ 50)
+      mocks.docs.set(userPath, {
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        lastClosedMonth: "2026-07",
+        savingsTotalCents: 100_000,
+      });
+      mocks.docs.set("users/u/months/2026-07", {
+        closed: false,
+        distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+        totalIncomeCents: 100_000,
+        incomeCount: 1,
+        distributedIncomeCount: 1,
+        capsCents: { necesidad: 50_000, ocio: 20_000 },
+        spentCents: { necesidad: 35_000, ocio: 40_000 },
+        ahorroContributedCents: 30_000,
+      });
+
+      // Además probamos el caso en que otro salto sí tiene herencia de Necesidad:
+      // Si el usuario abre en 2026-09 (2 meses después: 2026-07 -> 2026-08 -> 2026-09)
+      vi.setSystemTime(new Date(2026, 8, 15, 12, 0)); // 2026-09-15
+      await ensureCurrentMonth("u");
+
+      const m07 = mocks.docs.get("users/u/months/2026-07")!;
+      const m08 = mocks.docs.get("users/u/months/2026-08")!;
+      const m09 = mocks.docs.get("users/u/months/2026-09")!;
+      const userAfter = mocks.docs.get(userPath)!;
+
+      expect(m07.closed).toBe(true);
+      expect(m07.remainder).toEqual({
+        ocioToAhorroCents: 0,
+        necesidadToNextMonthCents: 0,
+        netDeficitCents: 5_000,
+      });
+      // Mes intermedio 2026-08 fue creado y cerrado en orden cronológico
+      expect(m08.closed).toBe(true);
+      expect(m08.capsCents).toEqual({ necesidad: 0, ocio: 0 });
+      expect(m08.remainder).toEqual({
+        ocioToAhorroCents: 0,
+        necesidadToNextMonthCents: 0,
+        netDeficitCents: 0,
+      });
+      // Mes actual 2026-09 queda abierto y el cursor apunta a 2026-09
+      expect(m09.closed).toBe(false);
+      expect(userAfter.lastClosedMonth).toBe("2026-09");
+      expect(userAfter.savingsTotalCents).toBe(100_000);
+
+      // Segundo escenario: 2 meses sin abrir (2026-09 -> 2026-11) donde 2026-09 deja
+      // sobrante neto de Necesidad (necesidad +25_000, ocio -5_000 -> necesidadToNextMonth = 20_000)
+      // que se hereda a 2026-10 y luego de 2026-10 (sin gastos) pasa íntegro a 2026-11.
+      mocks.docs.set("users/u/months/2026-09", {
+        ...m09,
+        closed: false,
+        capsCents: { necesidad: 50_000, ocio: 20_000 },
+        spentCents: { necesidad: 25_000, ocio: 25_000 },
+      });
+      vi.setSystemTime(new Date(2026, 10, 5, 12, 0)); // 2026-11-05
+      const notice = await checkAndCloseMonth("u");
+
+      const m09Closed = mocks.docs.get("users/u/months/2026-09")!;
+      const m10Closed = mocks.docs.get("users/u/months/2026-10")!;
+      const m11Open = mocks.docs.get("users/u/months/2026-11")!;
+
+      expect(m09Closed.closed).toBe(true);
+      expect(m09Closed.remainder).toEqual({
+        ocioToAhorroCents: 0,
+        necesidadToNextMonthCents: 20_000,
+        netDeficitCents: 0,
+      });
+      expect(m10Closed.closed).toBe(true);
+      expect(m10Closed.capsCents).toEqual({ necesidad: 20_000, ocio: 0 });
+      expect(m10Closed.remainder).toEqual({
+        ocioToAhorroCents: 0,
+        necesidadToNextMonthCents: 20_000,
+        netDeficitCents: 0,
+      });
+      expect(m11Open.closed).toBe(false);
+      expect(m11Open.capsCents).toEqual({ necesidad: 20_000, ocio: 0 });
+      expect(notice?.closedMonthId).toBe("2026-10");
+
+      mocks.set.mockReset();
+      mocks.update.mockReset();
+    });
+
+    it("purchaseGoalExpense: asignado 3,500 y precio real 3,199 -> descuenta 3,199 de savingsTotalCents y libera 301 a sin asignar", async () => {
+      mocks.docs.set(userPath, {
+        savingsTotalCents: 350_000,
+        savingsGoals: [
+          {
+            id: "g-laptop",
+            name: "Laptop",
+            kind: "compra",
+            targetCents: 350_000,
+            allocatedCents: 350_000,
+          },
+        ],
+      });
+      mocks.docs.set(monthPath, {
+        closed: false,
+        capsCents: { necesidad: 0, ocio: 0 },
+        spentCents: { necesidad: 0, ocio: 0 },
+      });
+
+      await purchaseGoalExpense("u", "2026-09", {
+        goalId: "g-laptop",
+        paymentMethod: "Tarjeta débito",
+        date: "2026-09-15",
+        actualAmountCents: 319_900,
+      });
+
+      expect(mocks.set).toHaveBeenCalledWith(
+        `${monthPath}/transactions/generated-1`,
+        expect.objectContaining({
+          type: "expense",
+          category: "ahorro",
+          amountCents: 319_900,
+          goalId: "g-laptop",
+        }),
+      );
+      expect(mocks.update).toHaveBeenCalledWith(userPath, {
+        savingsTotalCents: { __op: "increment", value: -319_900 },
+        savingsGoals: [
+          expect.objectContaining({
+            id: "g-laptop",
+            allocatedCents: 0,
+            purchaseCount: 1,
+            lastPurchasedAt: "2026-09-15",
+          }),
+        ],
+      });
+      // El ahorro restante pasa a ser 350_000 - 319_900 = 30_100 (S/ 301) con allocatedCents = 0 -> S/ 301 sin asignar
+    });
+
+    it("purchaseGoalExpense: asignado 3,500 y precio real 3,600 con 50 sin asignar -> falla por falta de ahorro sin asignar", async () => {
+      mocks.docs.set(userPath, {
+        savingsTotalCents: 355_000, // 3,500 en meta + 50 sin asignar
+        savingsGoals: [
+          {
+            id: "g-laptop",
+            name: "Laptop",
+            kind: "compra",
+            targetCents: 350_000,
+            allocatedCents: 350_000,
+          },
+        ],
+      });
+      mocks.docs.set(monthPath, {
+        closed: false,
+        capsCents: { necesidad: 0, ocio: 0 },
+        spentCents: { necesidad: 0, ocio: 0 },
+      });
+
+      await expect(
+        purchaseGoalExpense("u", "2026-09", {
+          goalId: "g-laptop",
+          paymentMethod: "Tarjeta débito",
+          date: "2026-09-15",
+          actualAmountCents: 360_000,
+        }),
+      ).rejects.toThrow(/ahorro sin asignar/i);
+      expect(mocks.update).not.toHaveBeenCalled();
+    });
+
+    it("purchaseGoalExpense: asignado 3,500 y precio real 3,600 con 200 sin asignar -> pasa y descuenta 3,600", async () => {
+      mocks.docs.set(userPath, {
+        savingsTotalCents: 370_000, // 3,500 en meta + 200 sin asignar
+        savingsGoals: [
+          {
+            id: "g-laptop",
+            name: "Laptop",
+            kind: "compra",
+            targetCents: 350_000,
+            allocatedCents: 350_000,
+          },
+        ],
+      });
+      mocks.docs.set(monthPath, {
+        closed: false,
+        capsCents: { necesidad: 0, ocio: 0 },
+        spentCents: { necesidad: 0, ocio: 0 },
+      });
+
+      await purchaseGoalExpense("u", "2026-09", {
+        goalId: "g-laptop",
+        paymentMethod: "Tarjeta débito",
+        date: "2026-09-15",
+        actualAmountCents: 360_000,
+      });
+
+      expect(mocks.update).toHaveBeenCalledWith(userPath, {
+        savingsTotalCents: { __op: "increment", value: -360_000 },
+        savingsGoals: [
+          expect.objectContaining({
+            id: "g-laptop",
+            allocatedCents: 0,
+            purchaseCount: 1,
+            lastPurchasedAt: "2026-09-15",
+          }),
+        ],
+      });
+    });
+  });
 });

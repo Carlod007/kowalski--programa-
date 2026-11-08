@@ -12,8 +12,9 @@ import { watchLoans } from "@/services/loanService";
 import { watchCreditCards } from "@/services/creditCardService";
 import { getMonthExpenses } from "@/services/analyticsService";
 import { useAhorroBreakdown } from "@/hooks/useAhorroBreakdown";
+import { useCurrentMonthId } from "@/hooks/useCurrentMonthId";
 import { getAssignableCents, getUnassignedCents } from "@/utils/savings";
-import { getMonthId, shiftMonthId, formatMonthLabel } from "@/utils/date";
+import { shiftMonthId, formatMonthLabel } from "@/utils/date";
 import { formatCents } from "@/utils/currency";
 import {
   CAP_CATEGORY_ORDER,
@@ -47,14 +48,25 @@ import MaskIcon from "@/components/MaskIcon";
 import loanIcon from "@/assets/icons/loan.svg";
 import creditCardIcon from "@/assets/icons/credit-card.svg";
 
-const CURRENT_MONTH_ID = getMonthId();
-
 type CategoryKey = "necesidad" | "ocio" | "ahorro";
 
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
-  const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
+  const currentMonthId = useCurrentMonthId({
+    userId: user?.uid,
+    onMonthChange: (nextMonthId, prevMonthId) => {
+      setViewedMonthId((current) =>
+        current === prevMonthId ? nextMonthId : current,
+      );
+      if (user) {
+        checkAndRememberMonthClosing(user.uid).catch((err) => {
+          console.error("checkAndCloseMonth falló:", err);
+        });
+      }
+    },
+  });
+  const [viewedMonthId, setViewedMonthId] = useState(currentMonthId);
 
   const hasCheckedClose = useRef(false);
 
@@ -68,8 +80,8 @@ export default function Dashboard() {
 
   if (!user) return null;
 
-  const canGoForward = viewedMonthId < CURRENT_MONTH_ID;
-  const isViewingCurrentMonth = viewedMonthId === CURRENT_MONTH_ID;
+  const canGoForward = viewedMonthId < currentMonthId;
+  const isViewingCurrentMonth = viewedMonthId === currentMonthId;
   const essentialNeedsTotalCents = (userProfile?.essentialNeeds ?? []).reduce(
     (sum, n) => sum + n.monthlyAmountCents,
     0,

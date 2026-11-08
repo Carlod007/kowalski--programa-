@@ -18,11 +18,11 @@ import {
   type TrailingMonth,
 } from "@/services/analyticsService";
 import {
-  getMonthId,
   shiftMonthId,
   formatMonthLabel,
   formatMonthLongLabel,
 } from "@/utils/date";
+import { useCurrentMonthId } from "@/hooks/useCurrentMonthId";
 import { formatCents } from "@/utils/currency";
 import { CATEGORY_META } from "@/utils/category";
 import type { Month } from "@/types/month";
@@ -55,23 +55,30 @@ import {
   type AnalysisPeriodMode,
 } from "@/utils/analysisPeriod";
 
-const CURRENT_MONTH_ID = getMonthId();
 const TOP_LIMIT = 4;
 /** Debe coincidir con las clases h-36 w-36 del contenedor de la torta (9rem). */
 const PIE_SIZE = 144;
 
 export default function ChartsScreen() {
   const user = useAuthStore((s) => s.user);
-  const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
+  const currentMonthId = useCurrentMonthId({
+    userId: user?.uid,
+    onMonthChange: (nextMonthId, prevMonthId) => {
+      setViewedMonthId((current) =>
+        current === prevMonthId ? nextMonthId : current,
+      );
+    },
+  });
+  const [viewedMonthId, setViewedMonthId] = useState(currentMonthId);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [periodMode, setPeriodMode] = useState<AnalysisPeriodMode>("month");
-  const initialRange = getAnalysisDateRange(CURRENT_MONTH_ID, "month")!;
+  const initialRange = getAnalysisDateRange(currentMonthId, "month")!;
   const [customFromDate, setCustomFromDate] = useState(initialRange.fromDate);
   const [customToDate, setCustomToDate] = useState(initialRange.toDate);
 
   if (!user) return null;
 
-  const canGoForward = viewedMonthId < CURRENT_MONTH_ID;
+  const canGoForward = viewedMonthId < currentMonthId;
   const customRange = { fromDate: customFromDate, toDate: customToDate };
   const customRangeError =
     periodMode === "custom" ? validateAnalysisDateRange(customRange) : null;

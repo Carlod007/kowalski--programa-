@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { EssentialNeed } from "@/types/user";
+import type { SubcategoryRename } from "@/services/userService";
 import { formatCents } from "@/utils/currency";
+import { hasDuplicateCatalogName } from "@/utils/masterTables";
 
 type SubcategoryKey = "necesidad" | "ocio";
 
@@ -10,10 +12,12 @@ type Props = {
   onChange: (
     subcategories: Record<SubcategoryKey, string[]>,
     essentialNeeds: EssentialNeed[],
+    renames?: SubcategoryRename[],
   ) => void;
 };
 
 type NecesidadRow = {
+  id?: string;
   name: string;
   monthlyAmountCents: number;
 };
@@ -28,15 +32,22 @@ function buildNecesidadRows(
   names: string[],
   essentialNeeds: EssentialNeed[],
 ): NecesidadRow[] {
-  const rows: NecesidadRow[] = names.map((name) => ({
-    name,
-    monthlyAmountCents:
-      essentialNeeds.find((n) => n.name === name)?.monthlyAmountCents ?? 0,
-  }));
+  const rows: NecesidadRow[] = names.map((name) => {
+    const matched = essentialNeeds.find((n) => n.name === name);
+    return {
+      id: matched?.id,
+      name,
+      monthlyAmountCents: matched?.monthlyAmountCents ?? 0,
+    };
+  });
   const linkedNames = new Set(names);
   for (const n of essentialNeeds) {
     if (!linkedNames.has(n.name)) {
-      rows.push({ name: n.name, monthlyAmountCents: n.monthlyAmountCents });
+      rows.push({
+        id: n.id,
+        name: n.name,
+        monthlyAmountCents: n.monthlyAmountCents,
+      });
     }
   }
   return rows;
@@ -52,28 +63,47 @@ export default function Step3Subcategories({
   const [ocioInput, setOcioInput] = useState("");
   const [ocioEditingKey, setOcioEditingKey] = useState<string | null>(null);
   const [ocioEditValue, setOcioEditValue] = useState("");
+  const [ocioError, setOcioError] = useState<string | null>(null);
 
   const [necNameInput, setNecNameInput] = useState("");
   const [necAmountInput, setNecAmountInput] = useState("");
   const [necEditingName, setNecEditingName] = useState<string | null>(null);
   const [necEditName, setNecEditName] = useState("");
   const [necEditAmount, setNecEditAmount] = useState("");
+  const [necError, setNecError] = useState<string | null>(null);
 
-  function emitNecesidad(rows: NecesidadRow[]) {
+  function emitNecesidad(rows: NecesidadRow[], renames?: SubcategoryRename[]) {
     const necesidadNames = rows.map((r) => r.name);
     const newEssentialNeeds: EssentialNeed[] = rows
       .filter((r) => r.monthlyAmountCents > 0)
       .map((r) => ({
-        id: essentialNeeds.find((n) => n.name === r.name)?.id ?? crypto.randomUUID(),
+        id:
+          r.id ??
+          essentialNeeds.find((n) => n.name === r.name)?.id ??
+          crypto.randomUUID(),
         name: r.name,
         monthlyAmountCents: r.monthlyAmountCents,
       }));
-    onChange({ ...data, necesidad: necesidadNames }, newEssentialNeeds);
+    onChange(
+      { ...data, necesidad: necesidadNames },
+      newEssentialNeeds,
+      renames,
+    );
   }
 
   function addNecesidad() {
     const name = necNameInput.trim();
     if (name === "") return;
+    if (
+      hasDuplicateCatalogName(
+        necesidadRows.map((r) => r.name),
+        name,
+      )
+    ) {
+      setNecError("Ya existe una subcategoría con ese nombre en Necesidad.");
+      return;
+    }
+    setNecError(null);
     emitNecesidad([
       ...necesidadRows,
       { name, monthlyAmountCents: parseAmountCents(necAmountInput) },
@@ -83,10 +113,12 @@ export default function Step3Subcategories({
   }
 
   function removeNecesidad(name: string) {
+    setNecError(null);
     emitNecesidad(necesidadRows.filter((r) => r.name !== name));
   }
 
   function startEditNecesidad(row: NecesidadRow) {
+    setNecError(null);
     setNecEditingName(row.name);
     setNecEditName(row.name);
     setNecEditAmount(
@@ -98,29 +130,56 @@ export default function Step3Subcategories({
 
   function saveEditNecesidad() {
     const trimmed = necEditName.trim();
-    if (trimmed === "") return;
+    if (trimmed === "" || !necEditingName) return;
+    if (
+      hasDuplicateCatalogName(
+        necesidadRows.map((r) => r.name),
+        trimmed,
+        necEditingName,
+      )
+    ) {
+      setNecError("Ya existe una subcategoría con ese nombre en Necesidad.");
+      return;
+    }
+    setNecError(null);
+    const renames: SubcategoryRename[] | undefined =
+      necEditingName !== trimmed
+        ? [{ category: "necesidad", oldName: necEditingName, newName: trimmed }]
+        : undefined;
     emitNecesidad(
       necesidadRows.map((r) =>
         r.name === necEditingName
-          ? { name: trimmed, monthlyAmountCents: parseAmountCents(necEditAmount) }
+          ? {
+              ...r,
+              name: trimmed,
+              monthlyAmountCents: parseAmountCents(necEditAmount),
+            }
           : r,
       ),
+      renames,
     );
     setNecEditingName(null);
   }
 
   function cancelEditNecesidad() {
+    setNecError(null);
     setNecEditingName(null);
   }
 
   function addOcio() {
     const value = ocioInput.trim();
     if (value === "") return;
+    if (hasDuplicateCatalogName(data.ocio, value)) {
+      setOcioError("Ya existe una subcategoría con ese nombre en Ocio.");
+      return;
+    }
+    setOcioError(null);
     onChange({ ...data, ocio: [...data.ocio, value] }, essentialNeeds);
     setOcioInput("");
   }
 
   function removeOcio(sub: string) {
+    setOcioError(null);
     onChange(
       { ...data, ocio: data.ocio.filter((s) => s !== sub) },
       essentialNeeds,
@@ -128,6 +187,7 @@ export default function Step3Subcategories({
   }
 
   function startEditOcio(sub: string) {
+    setOcioError(null);
     setOcioEditingKey(sub);
     setOcioEditValue(sub);
   }
@@ -135,17 +195,28 @@ export default function Step3Subcategories({
   function saveEditOcio(original: string) {
     const trimmed = ocioEditValue.trim();
     if (trimmed === "") return;
+    if (hasDuplicateCatalogName(data.ocio, trimmed, original)) {
+      setOcioError("Ya existe una subcategoría con ese nombre en Ocio.");
+      return;
+    }
+    setOcioError(null);
+    const renames: SubcategoryRename[] | undefined =
+      original !== trimmed
+        ? [{ category: "ocio", oldName: original, newName: trimmed }]
+        : undefined;
     onChange(
       {
         ...data,
         ocio: data.ocio.map((s) => (s === original ? trimmed : s)),
       },
       essentialNeeds,
+      renames,
     );
     setOcioEditingKey(null);
   }
 
   function cancelEditOcio() {
+    setOcioError(null);
     setOcioEditingKey(null);
   }
 
@@ -253,6 +324,7 @@ export default function Step3Subcategories({
             +
           </button>
         </div>
+        {necError && <p className="text-xs text-red-500">{necError}</p>}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -324,6 +396,7 @@ export default function Step3Subcategories({
             +
           </button>
         </div>
+        {ocioError && <p className="text-xs text-red-500">{ocioError}</p>}
       </div>
     </div>
   );

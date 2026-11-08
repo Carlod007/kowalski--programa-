@@ -708,8 +708,16 @@ export async function purchaseGoalExpense(
     date: string;
     description?: string;
     allowAutoAssign?: boolean;
+    actualAmountCents?: number;
+    releaseRemainder?: boolean;
   },
 ): Promise<void> {
+  if (
+    input.actualAmountCents !== undefined &&
+    (!Number.isInteger(input.actualAmountCents) || input.actualAmountCents <= 0)
+  ) {
+    throw new Error("El monto debe ser mayor a 0");
+  }
   validateTransactionTiming(monthId, input.date);
 
   const userRef = doc(db, "users", userId);
@@ -746,11 +754,16 @@ export async function purchaseGoalExpense(
       );
     }
 
+    const purchaseAmountCents = input.actualAmountCents ?? goal.targetCents;
+    const releaseRemainder = input.releaseRemainder ?? true;
     const allocated = getGoalAllocated(goal);
-    const missing = goal.targetCents - allocated;
+    const missing = Math.max(0, purchaseAmountCents - allocated);
 
     if (missing > 0) {
-      if (!input.allowAutoAssign) {
+      if (input.actualAmountCents === undefined && !input.allowAutoAssign) {
+        throw new Error("Esta meta todavía no tiene asignado su objetivo");
+      }
+      if (input.allowAutoAssign === false) {
         throw new Error("Esta meta todavía no tiene asignado su objetivo");
       }
       const unassigned = getUnassignedCents(
@@ -762,9 +775,9 @@ export async function purchaseGoalExpense(
       }
     }
 
-    if (goal.targetCents > (userProfile.savingsTotalCents ?? 0)) {
+    if (purchaseAmountCents > (userProfile.savingsTotalCents ?? 0)) {
       throw new Error(
-        "El objetivo de la meta supera tu ahorro total disponible. Revisa si tu ahorro está sobreasignado.",
+        "El monto de la meta supera tu ahorro total disponible. Revisa si tu ahorro está sobreasignado.",
       );
     }
 
@@ -773,7 +786,7 @@ export async function purchaseGoalExpense(
       category: "ahorro",
       subcategory: goal.name,
       paymentMethod: input.paymentMethod,
-      amountCents: goal.targetCents,
+      amountCents: purchaseAmountCents,
       transactionDate: input.date,
       serverDate: serverTimestamp(),
       localDate: new Date().toISOString(),
@@ -782,11 +795,18 @@ export async function purchaseGoalExpense(
     };
     transaction.set(txRef, tx);
 
-    // Si sobraba asignado de más, ese resto queda en la meta: liberarlo solo
-    // sería mover plata sin que nadie lo pidiera.
-    const remainingAllocated = Math.max(0, allocated - goal.targetCents);
+    // Si actualAmountCents < allocatedCents y releaseRemainder es true (por defecto),
+    // se pone allocatedCents en 0 y la diferencia (allocated - purchaseAmountCents)
+    // queda liberada automáticamente en "sin asignar" (savingsTotalCents - sum(allocated)).
+    const remainingAllocated =
+      purchaseAmountCents < allocated
+        ? releaseRemainder
+          ? 0
+          : allocated - purchaseAmountCents
+        : 0;
+
     transaction.update(userRef, {
-      savingsTotalCents: increment(-goal.targetCents),
+      savingsTotalCents: increment(-purchaseAmountCents),
       savingsGoals: goals.map((g) =>
         g.id === goal.id
           ? {

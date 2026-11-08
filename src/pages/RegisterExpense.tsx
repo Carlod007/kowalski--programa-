@@ -1163,10 +1163,16 @@ function GoalPurchaseStep({
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const userProfile = useAuthStore((s) => s.userProfile);
+  const allGoals = userProfile?.savingsGoals ?? [];
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(
     initialGoalId,
   );
-  const [amountInput, setAmountInput] = useState("");
+  const [amountInput, setAmountInput] = useState(() => {
+    if (!initialGoalId) return "";
+    const initial = allGoals.find((g) => g.id === initialGoalId);
+    if (!initial || getGoalKind(initial) === "fondo") return "";
+    return (initial.targetCents / 100).toString();
+  });
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [pickError, setPickError] = useState<string | null>(null);
@@ -1174,7 +1180,6 @@ function GoalPurchaseStep({
   const [saving, setSaving] = useState(false);
 
   const [date, setDate] = useState("");
-  const allGoals = userProfile?.savingsGoals ?? [];
   const fundGoals = allGoals.filter((g) => getGoalKind(g) === "fondo");
   const purchaseGoals = allGoals.filter((g) => getGoalKind(g) === "compra");
   const paymentMethods = userProfile?.paymentMethods ?? [];
@@ -1186,26 +1191,51 @@ function GoalPurchaseStep({
   const selectedProgress = selectedGoal ? getGoalProgress(selectedGoal) : null;
   const isFund = selectedProgress?.kind === "fondo";
 
-  // El atajo (solo para compras): la meta no llegó, pero el ahorro sin asignar
-  // cubre lo que falta.
-  const needsAutoAssign =
-    selectedProgress !== null && !isFund && !selectedProgress.isComplete;
-  const canAutoAssign =
-    needsAutoAssign && selectedProgress.missingCents <= assignableCents;
-
-  // Un fondo se retira por el monto que haga falta; una compra siempre va por
-  // su objetivo completo.
+  // Un fondo se retira por el monto que haga falta; una compra se prellena
+  // con su objetivo pero permite editar el precio real pagado.
   const parsedAmount = parseFloat(amountInput);
-  const withdrawCents =
+  const enteredCents =
     Number.isFinite(parsedAmount) && parsedAmount > 0
       ? Math.round(parsedAmount * 100)
       : 0;
+  const withdrawCents = enteredCents;
+  const purchaseCents = enteredCents;
   const maxWithdrawCents = selectedProgress?.allocatedCents ?? 0;
   const exceedsFund = isFund && withdrawCents > maxWithdrawCents;
 
+  const purchaseMissingCents =
+    selectedProgress !== null && !isFund
+      ? Math.max(0, purchaseCents - selectedProgress.allocatedCents)
+      : 0;
+  const purchaseRemainderCents =
+    selectedProgress !== null && !isFund && purchaseCents > 0
+      ? Math.max(0, selectedProgress.allocatedCents - purchaseCents)
+      : 0;
+  const needsAutoAssign = purchaseMissingCents > 0;
+  const canAutoAssign =
+    needsAutoAssign &&
+    purchaseMissingCents <= assignableCents &&
+    purchaseCents <= savingsTotalCents;
+  const exceedsPurchaseAvailable =
+    selectedProgress !== null &&
+    !isFund &&
+    purchaseCents > 0 &&
+    (purchaseMissingCents > assignableCents ||
+      purchaseCents > savingsTotalCents);
+
   function handleSelectGoal(id: string) {
-    setSelectedGoalId((current) => (current === id ? null : id));
-    setAmountInput("");
+    const nextId = selectedGoalId === id ? null : id;
+    setSelectedGoalId(nextId);
+    if (!nextId) {
+      setAmountInput("");
+    } else {
+      const targetGoal = allGoals.find((g) => g.id === nextId);
+      if (targetGoal && getGoalKind(targetGoal) !== "fondo") {
+        setAmountInput((targetGoal.targetCents / 100).toString());
+      } else {
+        setAmountInput("");
+      }
+    }
     setPickError(null);
   }
 
@@ -1223,9 +1253,17 @@ function GoalPurchaseStep({
         setPickError("El monto supera lo asignado a este fondo");
         return;
       }
-    } else if (needsAutoAssign && !canAutoAssign) {
-      setPickError("Todavía no has juntado lo suficiente para esta meta");
-      return;
+    } else {
+      if (purchaseCents <= 0) {
+        setPickError("Ingresa el precio real de la compra");
+        return;
+      }
+      if (exceedsPurchaseAvailable) {
+        setPickError(
+          "No tienes suficiente ahorro sin asignar para cubrir el precio real",
+        );
+        return;
+      }
     }
     setPickError(null);
     setSaving(true);
@@ -1246,6 +1284,8 @@ function GoalPurchaseStep({
           paymentMethod,
           description: description.trim() || undefined,
           date: date || toDateInputValue(),
+          actualAmountCents: purchaseCents,
+          releaseRemainder: true,
           allowAutoAssign: needsAutoAssign,
         });
       }
@@ -1321,18 +1361,19 @@ function GoalPurchaseStep({
           {selectedProgress && needsAutoAssign && canAutoAssign && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
               <p className="text-xs text-amber-800">
-                A esta meta le faltan{" "}
-                {formatCents(selectedProgress.missingCents)} asignados. Al
-                confirmar se asignan desde tu ahorro sin asignar (
-                {formatCents(assignableCents)}) y se compra en un solo paso.
+                El precio ingresado supera lo asignado a esta meta por{" "}
+                {formatCents(purchaseMissingCents)}. Al confirmar se cubrirán
+                desde tu ahorro sin asignar ({formatCents(assignableCents)}) y
+                se compra en un solo paso.
               </p>
             </div>
           )}
 
-          {selectedProgress && !needsAutoAssign && (
+          {selectedProgress && !isFund && (
             <p className="text-xs text-stone-400">
               Asignado: {formatCents(selectedProgress.allocatedCents)} de{" "}
-              {formatCents(selectedProgress.targetCents)}
+              {formatCents(selectedProgress.targetCents)} (sin asignar:{" "}
+              {formatCents(assignableCents)})
             </p>
           )}
 
@@ -1346,6 +1387,43 @@ function GoalPurchaseStep({
             </p>
           )}
         </div>
+
+        {!isFund && selectedProgress && (
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="purchase-amount"
+              className="text-sm font-medium text-stone-700"
+            >
+              Precio real de compra (S/)
+            </label>
+            <input
+              id="purchase-amount"
+              value={amountInput}
+              onChange={(e) => {
+                setAmountInput(e.target.value);
+                setPickError(null);
+              }}
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              placeholder="0.00"
+              className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-stone-900"
+            />
+            {purchaseRemainderCents > 0 && (
+              <p className="text-xs text-emerald-700">
+                Cuesta menos de lo asignado: se liberarán{" "}
+                {formatCents(purchaseRemainderCents)} a tu ahorro sin asignar.
+              </p>
+            )}
+            {exceedsPurchaseAvailable && (
+              <p className="text-xs text-red-600">
+                Supera tu ahorro disponible para esta meta (máx.{" "}
+                {formatCents(selectedProgress.allocatedCents + assignableCents)}
+                ).
+              </p>
+            )}
+          </div>
+        )}
 
         {isFund && selectedProgress && (
           <div className="flex flex-col gap-1">
@@ -1425,7 +1503,7 @@ function GoalPurchaseStep({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={saving || exceedsFund}
+          disabled={saving || exceedsFund || exceedsPurchaseAvailable}
           className="mt-2 rounded-xl bg-stone-900 py-3 font-medium text-white disabled:opacity-50"
         >
           {saving

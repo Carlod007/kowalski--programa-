@@ -3,7 +3,13 @@ import { signOut } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
-import { updateUserProfile } from "@/services/userService";
+import {
+  saveIncomeSourcesCatalog,
+  savePaymentMethodsCatalog,
+  saveSubcategoriesCatalog,
+  updateUserProfile,
+  type SubcategoryRename,
+} from "@/services/userService";
 import StepIncomeSources from "@/pages/onboarding/StepIncomeSources";
 import Step2Distribution from "@/pages/onboarding/Step2Distribution";
 import Step3Subcategories from "@/pages/onboarding/Step3Subcategories";
@@ -487,6 +493,7 @@ function IncomeSourcesSection() {
     FixedIncome[] | null
   >(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!user || !userProfile) return null;
   const currentUser = user;
@@ -495,18 +502,21 @@ function IncomeSourcesSection() {
   function handleExpand() {
     setSourcesDraft(currentProfile.sources);
     setFixedIncomesDraft(currentProfile.fixedIncomes ?? []);
+    setError(null);
     setExpanded(true);
   }
   function handleCancel() {
     setSourcesDraft(null);
     setFixedIncomesDraft(null);
+    setError(null);
     setExpanded(false);
   }
   async function handleSave() {
     if (!sourcesDraft || !fixedIncomesDraft) return;
     setSaving(true);
+    setError(null);
     try {
-      await updateUserProfile(currentUser.uid, {
+      await saveIncomeSourcesCatalog(currentUser.uid, {
         sources: sourcesDraft,
         fixedIncomes: fixedIncomesDraft,
       });
@@ -520,6 +530,11 @@ function IncomeSourcesSection() {
       setExpanded(false);
     } catch (err) {
       console.error("Error al actualizar ingresos:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo guardar. Intenta de nuevo.",
+      );
     } finally {
       setSaving(false);
     }
@@ -552,6 +567,7 @@ function IncomeSourcesSection() {
             El monto fijo solo actualiza el % mínimo de Necesidad sugerido. No
             cambia el mes en curso.
           </p>
+          {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
           <div className="mt-4 flex gap-2">
             <button
               type="button"
@@ -586,7 +602,9 @@ function SubcategoriesSection() {
   const [essentialNeedsDraft, setEssentialNeedsDraft] = useState<
     EssentialNeed[] | null
   >(null);
+  const [renamesDraft, setRenamesDraft] = useState<SubcategoryRename[]>([]);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!user || !userProfile) return null;
   const currentUser = user;
@@ -599,31 +617,45 @@ function SubcategoriesSection() {
   function handleExpand() {
     setSubcategoriesDraft(currentProfile.subcategories);
     setEssentialNeedsDraft(currentProfile.essentialNeeds ?? []);
+    setRenamesDraft([]);
+    setError(null);
     setExpanded(true);
   }
   function handleCancel() {
     setSubcategoriesDraft(null);
     setEssentialNeedsDraft(null);
+    setRenamesDraft([]);
+    setError(null);
     setExpanded(false);
   }
   async function handleSave() {
     if (!subcategoriesDraft || !essentialNeedsDraft) return;
     setSaving(true);
+    setError(null);
     try {
-      await updateUserProfile(currentUser.uid, {
+      const result = await saveSubcategoriesCatalog(currentUser.uid, {
         subcategories: subcategoriesDraft,
         essentialNeeds: essentialNeedsDraft,
+        renames: renamesDraft,
       });
       setUserProfile({
         ...currentProfile,
-        subcategories: subcategoriesDraft,
-        essentialNeeds: essentialNeedsDraft,
+        subcategories: result.subcategories,
+        essentialNeeds: result.essentialNeeds,
+        subcategoryBudgets: result.subcategoryBudgets,
+        expenseTemplates: result.expenseTemplates,
       });
       setSubcategoriesDraft(null);
       setEssentialNeedsDraft(null);
+      setRenamesDraft([]);
       setExpanded(false);
     } catch (err) {
       console.error("Error al actualizar subcategorías:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo guardar. Intenta de nuevo.",
+      );
     } finally {
       setSaving(false);
     }
@@ -645,15 +677,19 @@ function SubcategoriesSection() {
           <Step3Subcategories
             data={subcategoriesDraft!}
             essentialNeeds={essentialNeedsDraft!}
-            onChange={(subcategories, essentialNeeds) => {
+            onChange={(subcategories, essentialNeeds, renames) => {
               setSubcategoriesDraft(subcategories);
               setEssentialNeedsDraft(essentialNeeds);
+              if (renames && renames.length > 0) {
+                setRenamesDraft((prev) => [...prev, ...renames]);
+              }
             }}
           />
           <p className="mt-2 text-xs text-stone-400">
             El monto en Necesidad solo actualiza el % mínimo sugerido. No cambia
             el mes en curso.
           </p>
+          {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
           <div className="mt-4 flex gap-2">
             <button
               type="button"
@@ -683,6 +719,7 @@ function PaymentMethodsSection() {
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState<PaymentMethod[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!user || !userProfile) return null;
   const currentUser = user;
@@ -690,22 +727,36 @@ function PaymentMethodsSection() {
 
   function handleExpand() {
     setDraft(currentProfile.paymentMethods);
+    setError(null);
     setExpanded(true);
   }
   function handleCancel() {
     setDraft(null);
+    setError(null);
     setExpanded(false);
   }
   async function handleSave() {
     if (!draft) return;
     setSaving(true);
+    setError(null);
     try {
-      await updateUserProfile(currentUser.uid, { paymentMethods: draft });
-      setUserProfile({ ...currentProfile, paymentMethods: draft });
+      const result = await savePaymentMethodsCatalog(currentUser.uid, {
+        paymentMethods: draft,
+      });
+      setUserProfile({
+        ...currentProfile,
+        paymentMethods: result.paymentMethods,
+        expenseTemplates: result.expenseTemplates,
+      });
       setDraft(null);
       setExpanded(false);
     } catch (err) {
       console.error("Error al actualizar métodos de pago:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo guardar. Intenta de nuevo.",
+      );
     } finally {
       setSaving(false);
     }
@@ -727,6 +778,7 @@ function PaymentMethodsSection() {
       ) : (
         <div className="p-4">
           <Step4PaymentMethods data={draft!} onChange={setDraft} />
+          {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
           <div className="mt-4 flex gap-2">
             <button
               type="button"

@@ -14,8 +14,8 @@ import {
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/authStore";
+import { useCurrentMonthId } from "@/hooks/useCurrentMonthId";
 import {
-  getMonthId,
   shiftMonthId,
   formatMonthLabel,
   formatDayMonth,
@@ -74,13 +74,19 @@ const SHORT_MONTHS = [
   "Dic",
 ];
 
-const CURRENT_MONTH_ID = getMonthId();
-
 export default function History() {
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
+  const currentMonthId = useCurrentMonthId({
+    userId: user?.uid,
+    onMonthChange: (nextMonthId, prevMonthId) => {
+      setViewedMonthId((current) =>
+        current === prevMonthId ? nextMonthId : current,
+      );
+    },
+  });
 
-  const [viewedMonthId, setViewedMonthId] = useState(CURRENT_MONTH_ID);
+  const [viewedMonthId, setViewedMonthId] = useState(currentMonthId);
   const [month, setMonth] = useState<Month | null>(null);
   const [loadedMonthId, setLoadedMonthId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<TxWithId[]>([]);
@@ -247,7 +253,7 @@ export default function History() {
           <button
             type="button"
             onClick={() => setViewedMonthId((id) => shiftMonthId(id, 1))}
-            disabled={viewedMonthId >= CURRENT_MONTH_ID}
+            disabled={viewedMonthId >= currentMonthId}
             className="flex h-6 w-6 items-center justify-center rounded-full text-stone-500 disabled:opacity-30"
           >
             ›
@@ -324,7 +330,7 @@ export default function History() {
                 {group.items.map((tx) => {
                   const isDeleting = deletingId === tx._id;
                   const isOpen = loadedMonthId === viewedMonthId
-                    && viewedMonthId === getMonthId()
+                    && viewedMonthId === currentMonthId
                     && month?.closed === false;
 
                   if (isDeleting) {
@@ -386,7 +392,7 @@ export default function History() {
       </main>
 
       {timingTx && user && loadedMonthId === viewedMonthId
-        && viewedMonthId === getMonthId() && month?.closed === false && (
+        && viewedMonthId === currentMonthId && month?.closed === false && (
         <TimingEditor key={timingTx._id} tx={timingTx} userId={user.uid}
           monthId={viewedMonthId} onClose={() => setTimingTx(null)} />
       )}
