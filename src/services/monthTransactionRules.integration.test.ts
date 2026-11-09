@@ -619,6 +619,8 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     expect((await getDoc(doc(db, `users/owner/months/${oldId}`))).data()?.remainder).toEqual({
       ocioToAhorroCents: 400,
       necesidadToNextMonthCents: 600,
+      necesidadSweptToAhorroCents: 0,
+      ocioToNextMonthCents: 0,
       netDeficitCents: 0,
       borrowedNecesidadCents: 100,
       borrowedOcioCents: 200,

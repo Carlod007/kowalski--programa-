@@ -346,6 +346,8 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
       expect((await getDoc(doc(db, monthPath(oldId)))).data()?.remainder).toEqual({
         ocioToAhorroCents: 500,
         necesidadToNextMonthCents: 0,
+        necesidadSweptToAhorroCents: 0,
+        ocioToNextMonthCents: 0,
         netDeficitCents: 0,
         borrowedNecesidadCents: 0,
         borrowedOcioCents: 100,
@@ -448,6 +450,8 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
     expect(twoMonthsAgoSnap.remainder).toEqual({
       ocioToAhorroCents: 0,
       necesidadToNextMonthCents: 15000,
+      necesidadSweptToAhorroCents: 0,
+      ocioToNextMonthCents: 0,
       netDeficitCents: 0,
       borrowedNecesidadCents: 0,
       borrowedOcioCents: 0,
@@ -459,6 +463,8 @@ describe.skipIf(!enabled)('users.lastClosedMonth: transiciones reales en emulado
     expect(intermediateSnap.remainder).toEqual({
       ocioToAhorroCents: 0,
       necesidadToNextMonthCents: 15000,
+      necesidadSweptToAhorroCents: 0,
+      ocioToNextMonthCents: 0,
       netDeficitCents: 0,
       borrowedNecesidadCents: 0,
       borrowedOcioCents: 0,
