@@ -84,6 +84,8 @@ import {
   confirmMonthClose,
   ensureCurrentMonth,
 } from "./monthService";
+import { checkAndRememberMonthClosing } from "./monthClosingNoticeService";
+import { getPendingMonthClosings } from "@/utils/monthClosingNotices";
 import { recordClosedMonthAdjustment, registerExpense } from "./transactionService";
 
 const userPath = "users/u";
@@ -141,6 +143,15 @@ describe("F5: cierre revisable, gracia y ajustes", () => {
     mocks.autoId = 0;
     mocks.set.mockClear();
     mocks.update.mockClear();
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      get length() {
+        return values.size;
+      },
+      key: (i: number) => [...values.keys()][i] ?? null,
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
   });
 
   afterEach(() => {
@@ -347,6 +358,45 @@ describe("F5: cierre revisable, gracia y ajustes", () => {
       unseenClosedMonthId: "2026-10",
       savingsTotalCents: 20_000,
     });
+  });
+
+  it("cierre automático pasada la gracia → debe quedar pendiente de mostrar", async () => {
+    // Usuario real con octubre abierto (lastClosedMonth: 2026-10, sin pendingCloseMonthId previo)
+    // que abre la app el día 4 de noviembre (pasada la gracia).
+    const now = new Date(2026, 10, 4, 10, 0);
+    vi.setSystemTime(now);
+    seed(
+      userPath,
+      user({
+        lastClosedMonth: "2026-10",
+        pendingCloseMonthId: null,
+        unseenClosedMonthId: null,
+        savingsTotalCents: 20_000,
+      }),
+    );
+    seed(
+      `${userPath}/months/2026-10`,
+      month({
+        capsCents: { necesidad: 50_000, ocio: 30_000 },
+        spentCents: { necesidad: 40_000, ocio: 20_000 },
+      }),
+    );
+
+    const result = await checkAndRememberMonthClosing("u");
+
+    expect(result.closedMonthId).toBe("2026-10");
+    expect(monthDoc("2026-10").closed).toBe(true);
+    expect(monthDoc("2026-11")).toBeDefined();
+    expect(monthDoc("2026-11").closed).toBe(false);
+
+    const profile = mocks.docs.get(userPath)!;
+    expect(profile.lastClosedMonth).toBe("2026-11");
+    expect(profile.pendingCloseMonthId).toBeNull();
+    expect(profile.unseenClosedMonthId).toBe("2026-10");
+
+    // Comprobamos que el aviso queda pendiente de mostrar tanto en Firestore como en notices locales
+    const pending = getPendingMonthClosings("u", profile.unseenClosedMonthId);
+    expect(pending).toContain("2026-10");
   });
 
   it("cierre multi-mes incluye un pendiente vencido y conserva la gracia del mes inmediato anterior", async () => {

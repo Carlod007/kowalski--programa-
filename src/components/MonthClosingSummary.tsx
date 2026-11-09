@@ -5,7 +5,6 @@ import type { Month } from '@/types/month';
 import { formatMonthLabel } from '@/utils/date';
 import { formatCents } from '@/utils/currency';
 import { getMonthRemainders } from '@/utils/monthRemainders';
-import { acknowledgeClosedMonthSummary } from '@/services/monthService';
 
 /** Mount with a user/month key so a previous response is never shown for another month. */
 export default function MonthClosingSummary({ userId, monthId, closedOnly = false, onPresented, children }: {
@@ -46,11 +45,10 @@ export default function MonthClosingSummary({ userId, monthId, closedOnly = fals
       </div>
     );
   }
-  return <><PresentedSummary userId={userId} monthId={monthId} month={result.month} onPresented={onPresented} />{children}</>;
+  return <><PresentedSummary monthId={monthId} month={result.month} onPresented={onPresented} />{children}</>;
 }
 
-function PresentedSummary({ userId, monthId, month, onPresented }: {
-  userId: string;
+function PresentedSummary({ monthId, month, onPresented }: {
   monthId: string;
   month: Month;
   onPresented?: () => void;
@@ -69,9 +67,6 @@ function PresentedSummary({ userId, monthId, month, onPresented }: {
         if (!intersecting || document.visibilityState !== 'visible' || presented) return;
         presented = true;
         onPresented?.();
-        acknowledgeClosedMonthSummary(userId, monthId).catch((err) => {
-          console.error('No se pudo actualizar unseenClosedMonthId:', err);
-        });
       });
     }
     const observer = new IntersectionObserver(([entry]) => {
@@ -85,7 +80,7 @@ function PresentedSummary({ userId, monthId, month, onPresented }: {
       document.removeEventListener('visibilitychange', present);
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [userId, monthId, month.closed, onPresented]);
+  }, [monthId, month.closed, onPresented]);
   return <div ref={container}><MonthClosingSummaryContent monthId={monthId} month={month} /></div>;
 }
 

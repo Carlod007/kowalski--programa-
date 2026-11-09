@@ -1253,13 +1253,13 @@ function ClosingPolicySection() {
       </button>
 
       {expanded && (
-        <div className="border-t border-stone-100 bg-stone-50/50 p-4">
+        <div className="border-t border-stone-200 p-4">
           <div className="space-y-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">
+              <p className="text-sm font-medium text-stone-900">
                 Sobrante propio de Necesidad
               </p>
-              <p className="mt-0.5 text-xs text-stone-400">
+              <p className="mt-0.5 text-xs text-stone-500">
                 ¿Qué hacer con el dinero propio no gastado de Necesidad al cerrar el mes?
               </p>
               <div className="mt-2 space-y-1.5">
@@ -1294,7 +1294,7 @@ function ClosingPolicySection() {
                           necesidadSurplus: opt.value as NecesidadSurplusPolicy,
                         })
                       }
-                      className="mt-0.5"
+                      className="mt-0.5 accent-teal-600"
                     />
                     <div>
                       <p className="font-medium text-stone-900">{opt.label}</p>
@@ -1324,10 +1324,10 @@ function ClosingPolicySection() {
             </div>
 
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">
+              <p className="text-sm font-medium text-stone-900">
                 Sobrante propio de Ocio
               </p>
-              <p className="mt-0.5 text-xs text-stone-400">
+              <p className="mt-0.5 text-xs text-stone-500">
                 ¿Qué hacer con el dinero propio no gastado de Ocio al cerrar el mes?
               </p>
               <div className="mt-2 space-y-1.5">
@@ -1357,7 +1357,7 @@ function ClosingPolicySection() {
                           ocioSurplus: opt.value as OcioSurplusPolicy,
                         })
                       }
-                      className="mt-0.5"
+                      className="mt-0.5 accent-teal-600"
                     />
                     <div>
                       <p className="font-medium text-stone-900">{opt.label}</p>
@@ -1368,7 +1368,7 @@ function ClosingPolicySection() {
               </div>
             </div>
 
-            <p className="text-[11px] text-stone-400">
+            <p className="text-xs text-stone-500">
               * El neteo de déficits y la resolución elegida se aplican antes que estas políticas. Ningún dinero prestado pasa a Ahorro.
             </p>
 
@@ -1379,7 +1379,7 @@ function ClosingPolicySection() {
                 type="button"
                 onClick={() => setExpanded(false)}
                 disabled={saving}
-                className="flex-1 rounded-xl border border-stone-200 bg-white py-2 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                className="flex-1 rounded-lg border border-stone-300 py-2 text-sm text-stone-600 hover:bg-stone-50"
               >
                 Cancelar
               </button>
@@ -1387,7 +1387,7 @@ function ClosingPolicySection() {
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="flex-1 rounded-xl bg-stone-900 py-2 text-xs font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+                className="flex-1 rounded-lg bg-teal-600 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
                 {saving ? "Guardando..." : "Guardar políticas"}
               </button>

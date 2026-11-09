@@ -15,8 +15,35 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
   const [editType, setEditType] = useState<"cash" | "digital">("digital");
   const [error, setError] = useState<string | null>(null);
 
+  function handleTypeChange(newType: "cash" | "digital") {
+    setType(newType);
+    if (newType === "cash") {
+      if (name.trim() === "") {
+        setName("Efectivo");
+      }
+    } else {
+      if (name.trim().toLowerCase() === "efectivo") {
+        setName("");
+      }
+    }
+  }
+
+  function handleEditTypeChange(newType: "cash" | "digital") {
+    setEditType(newType);
+    if (newType === "cash") {
+      if (editName.trim() === "") {
+        setEditName("Efectivo");
+      }
+    } else {
+      if (editName.trim().toLowerCase() === "efectivo") {
+        setEditName("");
+      }
+    }
+  }
+
   function addMethod() {
-    const trimmed = name.trim();
+    const raw = type === "cash" && name.trim() === "" ? "Efectivo" : name;
+    const trimmed = raw.trim();
     if (trimmed === "") return;
     if (
       hasDuplicateCatalogName(
@@ -51,7 +78,8 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
   }
 
   function saveEdit() {
-    const trimmed = editName.trim();
+    const raw = editType === "cash" && editName.trim() === "" ? "Efectivo" : editName;
+    const trimmed = raw.trim();
     if (trimmed === "") return;
     const existingMethod = data.find((m) => m.id === editingId);
     if (
@@ -105,7 +133,7 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
               <select
                 value={editType}
                 onChange={(e) =>
-                  setEditType(e.target.value as "cash" | "digital")
+                  handleEditTypeChange(e.target.value as "cash" | "digital")
                 }
                 className="rounded-lg border border-gray-300 px-1 text-sm outline-none"
               >
@@ -126,9 +154,14 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
             <>
               <div>
                 <span className="text-sm">{method.name}</span>
-                <span className="ml-2 text-xs text-gray-400">
-                  {method.type === "digital" ? "Digital" : "Efectivo"}
-                </span>
+                {!(
+                  method.type === "cash" &&
+                  method.name.trim().toLowerCase() === "efectivo"
+                ) && (
+                  <span className="ml-2 text-xs text-gray-400">
+                    {method.type === "digital" ? "Digital" : "Efectivo"}
+                  </span>
+                )}
               </div>
               <div className="flex gap-3">
                 <button
@@ -154,12 +187,12 @@ export default function Step4PaymentMethods({ data, onChange }: Props) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addMethod()}
-          placeholder="Nombre del método"
+          placeholder={type === "cash" ? "Efectivo" : "Nombre del método"}
           className="min-w-0 flex-1 rounded-lg bg-gray-50 px-3 py-3 text-sm outline-none"
         />
         <select
           value={type}
-          onChange={(e) => setType(e.target.value as "cash" | "digital")}
+          onChange={(e) => handleTypeChange(e.target.value as "cash" | "digital")}
           className="rounded-lg bg-gray-50 px-2 text-sm outline-none"
         >
           <option value="digital">Digital</option>
