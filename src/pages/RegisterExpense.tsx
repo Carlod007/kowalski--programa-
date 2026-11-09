@@ -55,7 +55,7 @@ import {
 import { getRecentExpenseHistory } from "@/services/expenseSuggestionService";
 import { normalizeExpenseTags } from "@/utils/expenseTags";
 import type { Month, MonthCaps } from "@/types/month";
-import type { ExpenseTemplate, SavingsGoal } from "@/types/user";
+import type { ExpenseTemplate, SavingsGoal, User } from "@/types/user";
 import type { ExpenseTransaction } from "@/types/transaction";
 import type { LoanWithId } from "@/types/loan";
 import type { CreditCardWithId } from "@/types/creditCard";
@@ -235,6 +235,8 @@ export default function RegisterExpense() {
       <GoalPurchaseStep
         initialGoalId={initialGoalId}
         onBack={() => setStep("category")}
+        user={user}
+        userProfile={userProfile}
       />
     );
   }
@@ -1158,16 +1160,22 @@ function SubcategoryGroup({
   );
 }
 
-function GoalPurchaseStep({
+export function GoalPurchaseStep({
   initialGoalId,
   onBack,
+  userProfile: propUserProfile,
+  user: propUser,
 }: {
   initialGoalId: string | null;
   onBack: () => void;
+  userProfile?: User | null;
+  user?: import("firebase/auth").User | null;
 }) {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const userProfile = useAuthStore((s) => s.userProfile);
+  const storeUser = useAuthStore((s) => s.user);
+  const storeUserProfile = useAuthStore((s) => s.userProfile);
+  const user = propUser ?? storeUser;
+  const userProfile = propUserProfile ?? storeUserProfile;
   const allGoals = userProfile?.savingsGoals ?? [];
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(
     initialGoalId,
@@ -1245,6 +1253,12 @@ function GoalPurchaseStep({
   }
 
   async function handleSubmit() {
+    if (paymentMethods.length === 0) {
+      setPickError(
+        `Agrega un método de pago en Ajustes para registrar ${isFund ? "el retiro" : "la compra"}`,
+      );
+      return;
+    }
     if (!user || !selectedGoal || !selectedProgress || !paymentMethod) {
       setPickError("Selecciona una meta y un método de pago");
       return;
@@ -1467,9 +1481,15 @@ function GoalPurchaseStep({
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-stone-700">Método de pago</p>
           {paymentMethods.length === 0 ? (
-            <p className="text-sm text-stone-500">
-              No hay métodos de pago configurados.
-            </p>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <p>
+                No tienes métodos de pago configurados. Agrega uno en{" "}
+                <Link to="/settings" className="font-semibold underline">
+                  Ajustes
+                </Link>{" "}
+                para poder registrar {isFund ? "el retiro" : "la compra"}.
+              </p>
+            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {paymentMethods.map((pm) => (
@@ -1513,7 +1533,12 @@ function GoalPurchaseStep({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={saving || exceedsFund || exceedsPurchaseAvailable}
+          disabled={
+            saving ||
+            exceedsFund ||
+            exceedsPurchaseAvailable ||
+            paymentMethods.length === 0
+          }
           className="mt-2 rounded-xl bg-stone-900 py-3 font-medium text-white disabled:opacity-50"
         >
           {saving
