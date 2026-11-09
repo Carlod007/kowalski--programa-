@@ -43,7 +43,9 @@ describe('resultado real del cierre y consumo posterior al commit', () => {
       closed: true,
       remainder: {
         ocioToAhorroCents: 25000,
+        ocioToNextMonthCents: 0,
         necesidadToNextMonthCents: 30000,
+        necesidadSweptToAhorroCents: 0,
         netDeficitCents: 0,
         borrowedNecesidadCents: 10000,
         borrowedOcioCents: 25000,

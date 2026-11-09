@@ -13,7 +13,17 @@ import {
 } from "@/utils/masterTables";
 
 export type { PaymentMethodRename, SubcategoryKey, SubcategoryRename };
+import {
+  DEFAULT_TIME_ZONE,
+  isValidTimeZone,
+  resolveTimeZone,
+} from "@/utils/date";
+import {
+  DEFAULT_CLOSING_POLICY,
+  getClosingPolicy,
+} from "@/utils/closingPolicy";
 import type {
+  ClosingPolicy,
   EssentialNeed,
   ExpenseTemplate,
   FixedIncome,
@@ -41,6 +51,8 @@ export function buildInitialUserProfile(
     pendingCloseMonthId: null,
     unseenClosedMonthId: null,
     closingMode: "auto_grace",
+    closingPolicy: DEFAULT_CLOSING_POLICY,
+    timeZone: DEFAULT_TIME_ZONE,
     savingsTotalCents: 0,
     savingsGoals: [],
     fixedIncomes: [],
@@ -395,4 +407,38 @@ export async function saveIncomeSourcesCatalog(
     sources: cleanedSources,
     fixedIncomes: cleanedFixedIncomes,
   };
+}
+
+export async function updateClosingPolicy(
+  userId: string,
+  policy: ClosingPolicy,
+): Promise<ClosingPolicy> {
+  const resolved = getClosingPolicy(policy);
+  const userRef = doc(db, "users", userId);
+  const payload: ClosingPolicy = {
+    necesidadSurplus: resolved.necesidadSurplus,
+    ocioSurplus: resolved.ocioSurplus,
+    ...(resolved.necesidadSurplus === "rollover_capped"
+      ? { necesidadRolloverCapCents: resolved.necesidadRolloverCapCents }
+      : {}),
+  };
+  await updateDoc(userRef, {
+    closingPolicy: payload,
+  });
+  return payload;
+}
+
+export async function updateUserTimeZone(
+  userId: string,
+  timeZone: string,
+): Promise<string> {
+  if (!isValidTimeZone(timeZone)) {
+    throw new Error(`Zona horaria inválida: ${timeZone}`);
+  }
+  const resolved = resolveTimeZone(timeZone);
+  const userRef = doc(db, "users", userId);
+  await updateDoc(userRef, {
+    timeZone: resolved,
+  });
+  return resolved;
 }

@@ -67,13 +67,15 @@ service cloud.firestore {
         && 'ocioToAhorroCents' in rem
         && rem.keys().hasOnly(['ocioToAhorroCents', 'necesidadToNextMonthCents', 'netDeficitCents',
           'borrowedNecesidadCents', 'borrowedOcioCents', 'deficitResolution', 'closedAt',
-          'coveredBySavingsCents', 'uncoveredDeficitCents'])
+          'coveredBySavingsCents', 'uncoveredDeficitCents', 'necesidadSweptToAhorroCents', 'ocioToNextMonthCents'])
         && rem.ocioToAhorroCents is int && rem.ocioToAhorroCents >= 0
         && (rem.keys().hasOnly(['ocioToAhorroCents'])
           ? (rem.ocioToAhorroCents == nettedOcio(prevData) || rem.ocioToAhorroCents == legacyOcio(prevData))
-          : (rem.ocioToAhorroCents == nettedOcio(prevData)
-            && (!('necesidadToNextMonthCents' in rem)
-              || (rem.necesidadToNextMonthCents is int && rem.necesidadToNextMonthCents == nettedNec(prevData)))
+          : (rem.ocioToAhorroCents + rem.get('ocioToNextMonthCents', 0) == nettedOcio(prevData)
+            && (!('ocioToNextMonthCents' in rem) || (rem.ocioToNextMonthCents is int && rem.ocioToNextMonthCents >= 0))
+            && rem.get('necesidadToNextMonthCents', 0) + rem.get('necesidadSweptToAhorroCents', 0) == nettedNec(prevData)
+            && (!('necesidadToNextMonthCents' in rem) || (rem.necesidadToNextMonthCents is int && rem.necesidadToNextMonthCents >= 0))
+            && (!('necesidadSweptToAhorroCents' in rem) || (rem.necesidadSweptToAhorroCents is int && rem.necesidadSweptToAhorroCents >= 0))
             && (!('netDeficitCents' in rem)
               || (rem.netDeficitCents is int && rem.netDeficitCents == netDeficit(prevData)))
             && (!('borrowedNecesidadCents' in rem)
@@ -143,7 +145,16 @@ service cloud.firestore {
               && data.unseenClosedMonthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
               && exists(/databases/$(database)/documents/users/$(userId)/months/$(data.unseenClosedMonthId))))
           && (!changed.hasAny(['closingMode'])
-            || data.get('closingMode', 'auto_grace') == 'auto_grace');
+            || data.get('closingMode', 'auto_grace') == 'auto_grace')
+          && (!changed.hasAny(['timeZone'])
+            || (data.timeZone is string && data.timeZone.size() > 0 && data.timeZone.size() <= 100))
+          && (!changed.hasAny(['closingPolicy'])
+            || (data.closingPolicy is map
+              && data.closingPolicy.keys().hasOnly(['necesidadSurplus', 'necesidadRolloverCapCents', 'ocioSurplus'])
+              && data.closingPolicy.necesidadSurplus in ['rollover_all', 'sweep_to_savings', 'rollover_capped']
+              && data.closingPolicy.ocioSurplus in ['sweep_to_savings', 'rollover_all']
+              && (!('necesidadRolloverCapCents' in data.closingPolicy)
+                || (data.closingPolicy.necesidadRolloverCapCents is int && data.closingPolicy.necesidadRolloverCapCents >= 0))));
       }
       function validLastClosedMonth(data) {
         let previousId = resource.data.get('lastClosedMonth', null);
@@ -180,7 +191,16 @@ service cloud.firestore {
                     && validDistribution(request.resource.data, true)
                     && request.resource.data.get('pendingCloseMonthId', null) == null
                     && request.resource.data.get('unseenClosedMonthId', null) == null
-                    && request.resource.data.get('closingMode', 'auto_grace') == 'auto_grace';
+                    && request.resource.data.get('closingMode', 'auto_grace') == 'auto_grace'
+                    && (!('timeZone' in request.resource.data)
+                      || (request.resource.data.timeZone is string && request.resource.data.timeZone.size() > 0 && request.resource.data.timeZone.size() <= 100))
+                    && (!('closingPolicy' in request.resource.data)
+                      || (request.resource.data.closingPolicy is map
+                        && request.resource.data.closingPolicy.keys().hasOnly(['necesidadSurplus', 'necesidadRolloverCapCents', 'ocioSurplus'])
+                        && request.resource.data.closingPolicy.necesidadSurplus in ['rollover_all', 'sweep_to_savings', 'rollover_capped']
+                        && request.resource.data.closingPolicy.ocioSurplus in ['sweep_to_savings', 'rollover_all']
+                        && (!('necesidadRolloverCapCents' in request.resource.data.closingPolicy)
+                          || (request.resource.data.closingPolicy.necesidadRolloverCapCents is int && request.resource.data.closingPolicy.necesidadRolloverCapCents >= 0))));
       allow update: if isOwner(userId)
                     && validLastClosedMonth(request.resource.data)
                     && validSavingsTotal(request.resource.data, false)
@@ -218,7 +238,10 @@ service cloud.firestore {
           && previous.closed == false && after.closed == true
           && data.borrowedCapsCents.necesidad == borrowedRemainder(previous, 'necesidad')
           && data.borrowedCapsCents.ocio == borrowedRemainder(previous, 'ocio')
-          && data.capsCents.ocio == data.borrowedCapsCents.ocio
+          && (('ocioToNextMonthCents' in after.remainder
+              && data.capsCents.ocio == after.remainder.ocioToNextMonthCents + data.borrowedCapsCents.ocio)
+            || (!('ocioToNextMonthCents' in after.remainder)
+              && data.capsCents.ocio == data.borrowedCapsCents.ocio))
           && (('necesidadToNextMonthCents' in after.remainder
               && data.capsCents.necesidad == after.remainder.necesidadToNextMonthCents + data.borrowedCapsCents.necesidad)
             || (after.remainder.keys().hasOnly(['ocioToAhorroCents'])
@@ -230,12 +253,15 @@ service cloud.firestore {
           && data.keys().hasOnly(['totalIncomeCents', 'distribution', 'capsCents', 'spentCents',
             'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents', 'incomeCount',
             'distributedIncomeCount', 'closed', 'createdAt', 'inheritedNecesidadCents',
-            'carriedDeficitCents'])
+            'inheritedOcioCents', 'carriedDeficitCents'])
           && percentage(data.distribution) && pair(data.capsCents) && pair(data.borrowedCapsCents)
           && (!('carriedDeficitCents' in data) || nonnegative(data.carriedDeficitCents))
           && (!('inheritedNecesidadCents' in data)
             || (nonnegative(data.inheritedNecesidadCents)
               && data.inheritedNecesidadCents == data.capsCents.necesidad - data.borrowedCapsCents.necesidad))
+          && (!('inheritedOcioCents' in data)
+            || (nonnegative(data.inheritedOcioCents)
+              && data.inheritedOcioCents == data.capsCents.ocio - data.borrowedCapsCents.ocio))
           && (!('distributedIncomeCount' in data) || (data.distributedIncomeCount is int && data.distributedIncomeCount == 0))
           && data.totalIncomeCents is int && data.totalIncomeCents == 0
           && data.incomeCount is int && data.incomeCount == 0
@@ -262,6 +288,7 @@ service cloud.firestore {
           && (!changed.hasAny(['ahorroContributedCents']) || nonnegative(data.ahorroContributedCents))
           && (!changed.hasAny(['directSavingsCents']) || nonnegative(data.directSavingsCents))
           && (!changed.hasAny(['inheritedNecesidadCents']) || nonnegative(data.inheritedNecesidadCents))
+          && (!changed.hasAny(['inheritedOcioCents']) || nonnegative(data.inheritedOcioCents))
           && (!changed.hasAny(['carriedDeficitCents']) || nonnegative(data.carriedDeficitCents))
           && (!changed.hasAny(['capsCents']) || changedPair(data, 'capsCents'))
           && (!changed.hasAny(['spentCents']) || changedPair(data, 'spentCents'))
@@ -275,7 +302,7 @@ service cloud.firestore {
         let changed = data.diff(resource.data).affectedKeys();
         return changed.hasOnly(['distribution', 'totalIncomeCents', 'capsCents', 'spentCents',
             'borrowedCapsCents', 'loanFundedSpentCents', 'ahorroContributedCents',
-            'directSavingsCents', 'inheritedNecesidadCents', 'carriedDeficitCents', 'incomeCount',
+            'directSavingsCents', 'inheritedNecesidadCents', 'inheritedOcioCents', 'carriedDeficitCents', 'incomeCount',
             'distributedIncomeCount', 'closed', 'remainder'])
           && changedAmounts(data, changed)
           && (!changed.hasAny(['distribution'])

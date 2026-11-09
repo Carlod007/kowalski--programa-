@@ -95,9 +95,15 @@ export function MonthClosingSummaryContent({ monthId, month }: { monthId: string
   const necesidadToNext = isProjection
     ? remainders.necesidadToNextMonthCents
     : (month.remainder?.necesidadToNextMonthCents ?? remainders.necesidadToNextMonthCents);
+  const necesidadSweptToAhorro = isProjection
+    ? 0
+    : (month.remainder?.necesidadSweptToAhorroCents ?? 0);
   const ocioToSavings = isProjection
     ? remainders.ocioToAhorroCents
     : month.remainder?.ocioToAhorroCents;
+  const ocioToNext = isProjection
+    ? 0
+    : (month.remainder?.ocioToNextMonthCents ?? 0);
   const netDeficit = isProjection
     ? remainders.netDeficitCents
     : (month.remainder?.netDeficitCents ?? remainders.netDeficitCents);
@@ -132,9 +138,19 @@ export function MonthClosingSummaryContent({ monthId, month }: { monthId: string
           {isProjection ? 'Qué pasaría con el saldo sobrante si cerrara ahora' : 'Qué pasó con el saldo sobrante'}
         </p>
         <div className="mt-3 flex flex-col gap-2">
-          <Row label={`Necesidad propia no usada → ${isProjection ? 'se sumaría' : 'se sumó'} al mes nuevo`} value={necesidadToNext} />
+          {(necesidadToNext > 0 || necesidadSweptToAhorro === 0) && (
+            <Row label={`Necesidad propia no usada → ${isProjection ? 'se sumaría' : 'se sumó'} al mes nuevo`} value={necesidadToNext} />
+          )}
+          {necesidadSweptToAhorro > 0 && (
+            <Row label={`Necesidad propia no usada → ${isProjection ? 'se sumaría' : 'se sumó'} a tu Ahorro`} value={necesidadSweptToAhorro} valueClassName="text-teal-700" />
+          )}
           <Row label={`Necesidad prestada no usada → ${isProjection ? 'continuaría' : 'continuó'} al mes nuevo`} value={borrowedNecesidad} valueClassName="text-violet-700" />
-          <Row label={`Ocio propio sobrante → ${isProjection ? 'se sumaría' : 'se sumó'} a tu Ahorro`} value={ocioToSavings} valueClassName="text-teal-700" />
+          {ocioToNext > 0 && (
+            <Row label={`Ocio propio sobrante → ${isProjection ? 'se sumaría' : 'se sumó'} al mes nuevo`} value={ocioToNext} />
+          )}
+          {ocioToNext === 0 && (
+            <Row label={`Ocio propio sobrante → ${isProjection ? 'se sumaría' : 'se sumó'} a tu Ahorro`} value={ocioToSavings} valueClassName="text-teal-700" />
+          )}
           {borrowedOcio > 0 && <Row label={`Ocio prestado no usado → ${isProjection ? 'continuaría' : 'continuó'} al mes nuevo`} value={borrowedOcio} valueClassName="text-violet-700" />}
           <Row label="Déficit neto del mes" value={netDeficit} valueClassName={netDeficit > 0 ? 'text-amber-700' : 'text-stone-900'} />
           {!isProjection && netDeficit > 0 && deficitResolution === 'covered_by_savings' && (

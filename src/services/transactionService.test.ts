@@ -331,7 +331,9 @@ describe("integridad financiera F1 en servicios", () => {
         closed: true,
         remainder: {
           ocioToAhorroCents: 0,
+          ocioToNextMonthCents: 0,
           necesidadToNextMonthCents: 0,
+          necesidadSweptToAhorroCents: 0,
           netDeficitCents: 10_000,
           borrowedNecesidadCents: 0,
           borrowedOcioCents: 0,
@@ -950,7 +952,9 @@ describe("integridad financiera F1 en servicios", () => {
       expect(m07.closed).toBe(true);
       expect(m07.remainder).toEqual({
         ocioToAhorroCents: 0,
+        ocioToNextMonthCents: 0,
         necesidadToNextMonthCents: 0,
+        necesidadSweptToAhorroCents: 0,
         netDeficitCents: 5_000,
         borrowedNecesidadCents: 0,
         borrowedOcioCents: 0,
@@ -962,7 +966,9 @@ describe("integridad financiera F1 en servicios", () => {
       expect(m08.capsCents).toEqual({ necesidad: 0, ocio: 0 });
       expect(m08.remainder).toEqual({
         ocioToAhorroCents: 0,
+        ocioToNextMonthCents: 0,
         necesidadToNextMonthCents: 0,
+        necesidadSweptToAhorroCents: 0,
         netDeficitCents: 0,
         borrowedNecesidadCents: 0,
         borrowedOcioCents: 0,
@@ -993,7 +999,9 @@ describe("integridad financiera F1 en servicios", () => {
       expect(m09Closed.closed).toBe(true);
       expect(m09Closed.remainder).toEqual({
         ocioToAhorroCents: 0,
+        ocioToNextMonthCents: 0,
         necesidadToNextMonthCents: 20_000,
+        necesidadSweptToAhorroCents: 0,
         netDeficitCents: 0,
         borrowedNecesidadCents: 0,
         borrowedOcioCents: 0,
@@ -1004,7 +1012,9 @@ describe("integridad financiera F1 en servicios", () => {
       expect(m10Closed.capsCents).toEqual({ necesidad: 20_000, ocio: 0 });
       expect(m10Closed.remainder).toEqual({
         ocioToAhorroCents: 0,
+        ocioToNextMonthCents: 0,
         necesidadToNextMonthCents: 20_000,
+        necesidadSweptToAhorroCents: 0,
         netDeficitCents: 0,
         borrowedNecesidadCents: 0,
         borrowedOcioCents: 0,

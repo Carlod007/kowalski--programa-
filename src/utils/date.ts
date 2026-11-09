@@ -1,5 +1,24 @@
 export const DEFAULT_TIME_ZONE = "America/Lima";
 
+export const COMMON_TIMEZONES = [
+  { value: "America/Lima", label: "América/Lima (Perú - UTC-5)" },
+  { value: "America/Bogota", label: "América/Bogotá (Colombia - UTC-5)" },
+  { value: "America/Santiago", label: "América/Santiago (Chile)" },
+  {
+    value: "America/Argentina/Buenos_Aires",
+    label: "América/Buenos Aires (Argentina)",
+  },
+  { value: "America/Mexico_City", label: "América/Ciudad de México" },
+  { value: "America/New_York", label: "América/Nueva York (EE.UU. Este)" },
+  { value: "America/Chicago", label: "América/Chicago (EE.UU. Centro)" },
+  {
+    value: "America/Los_Angeles",
+    label: "América/Los Ángeles (EE.UU. Pacífico)",
+  },
+  { value: "Europe/Madrid", label: "Europa/Madrid (España)" },
+  { value: "UTC", label: "UTC" },
+];
+
 export type ZonedDateParts = {
   year: number;
   month: number;

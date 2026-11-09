@@ -28,6 +28,7 @@ export type AhorroBreakdown = {
   movedOutOfAhorroCents: number;
   ahorroExpensesCents: number;
   closingOcioToAhorroCents: number;
+  closingNecesidadToAhorroCents: number;
   untrackedCents: number;
   isUntrackedDeterminable: boolean;
   inflowsCents: number | null;
@@ -150,6 +151,7 @@ export function useAhorroBreakdown(
     movedOutOfAhorroCents: metrics.movedOutOfAhorroCents,
     ahorroExpensesCents: metrics.ahorroExpensesCents,
     closingOcioToAhorroCents: metrics.closingOcioToAhorroCents,
+    closingNecesidadToAhorroCents: metrics.closingNecesidadToAhorroCents ?? 0,
     untrackedCents: metrics.untrackedCents,
     isUntrackedDeterminable: metrics.isUntrackedDeterminable,
     inflowsCents: metrics.inflowsCents,

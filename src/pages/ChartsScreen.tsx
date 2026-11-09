@@ -61,8 +61,10 @@ const PIE_SIZE = 144;
 
 export default function ChartsScreen() {
   const user = useAuthStore((s) => s.user);
+  const userProfile = useAuthStore((s) => s.userProfile);
   const currentMonthId = useCurrentMonthId({
     userId: user?.uid,
+    timeZone: userProfile?.timeZone,
     onMonthChange: (nextMonthId, prevMonthId) => {
       setViewedMonthId((current) =>
         current === prevMonthId ? nextMonthId : current,

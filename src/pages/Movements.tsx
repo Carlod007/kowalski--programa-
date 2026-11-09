@@ -13,11 +13,11 @@ import BackButton from "@/components/BackButton";
 
 export default function Movements() {
   const user = useAuthStore((s) => s.user);
-  const savingsTotalCents = useAuthStore(
-    (s) => s.userProfile?.savingsTotalCents ?? 0,
-  );
+  const userProfile = useAuthStore((s) => s.userProfile);
+  const savingsTotalCents = userProfile?.savingsTotalCents ?? 0;
   const currentMonthId = useCurrentMonthId({
     userId: user?.uid,
+    timeZone: userProfile?.timeZone,
     onMonthChange: (nextMonthId, prevMonthId) => {
       setViewedMonthId((current) =>
         current === prevMonthId ? nextMonthId : current,
@@ -114,6 +114,7 @@ function MovementsContent({
     movedOutOfAhorroCents,
     ahorroExpensesCents,
     closingOcioToAhorroCents,
+    closingNecesidadToAhorroCents,
     untrackedCents,
     isUntrackedDeterminable,
     inflowsCents,
@@ -189,6 +190,14 @@ function MovementsContent({
                   <span className="text-stone-600">Del cierre de Ocio</span>
                   <span className="font-medium text-stone-900">
                     {formatCents(closingOcioToAhorroCents)}
+                  </span>
+                </div>
+              )}
+              {month.closed && closingNecesidadToAhorroCents > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-600">Del cierre de Necesidad</span>
+                  <span className="font-medium text-stone-900">
+                    {formatCents(closingNecesidadToAhorroCents)}
                   </span>
                 </div>
               )}

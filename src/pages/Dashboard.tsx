@@ -64,6 +64,7 @@ export default function Dashboard() {
   const userProfile = useAuthStore((s) => s.userProfile);
   const currentMonthId = useCurrentMonthId({
     userId: user?.uid,
+    timeZone: userProfile?.timeZone,
     onMonthChange: (nextMonthId, prevMonthId) => {
       setViewedMonthId((current) =>
         current === prevMonthId ? nextMonthId : current,
@@ -542,8 +543,12 @@ function CategoryRow({
   // nunca una suposición por redondeo.
   const realInitialCap = initialSplit ? initialSplit[category] : null;
   const capWasAdjusted = realInitialCap !== null && ownedCap !== realInitialCap;
-  const inheritedNecesidadCents =
-    category === "necesidad" ? (month.inheritedNecesidadCents ?? 0) : 0;
+  const inheritedCategoryCents =
+    category === "necesidad"
+      ? (month.inheritedNecesidadCents ?? 0)
+      : category === "ocio"
+        ? (month.inheritedOcioCents ?? 0)
+        : 0;
   const categoryMovementsDelta = movements.reduce((sum, m) => {
     if (m.kind === "closed_month_adjustment") {
       return m.category === category ? sum + (m.deltaCents ?? 0) : sum;
@@ -557,19 +562,21 @@ function CategoryRow({
       ? m.category === category
       : m.destination === category || m.origin === category,
   );
-  const resolvedInheritedNecesidadCents =
+  const resolvedInheritedCents =
     category === "necesidad"
       ? month.inheritedNecesidadCents !== undefined
         ? month.inheritedNecesidadCents
         : realInitialCap !== null
           ? Math.max(0, ownedCap - realInitialCap - categoryMovementsDelta)
           : 0
-      : 0;
-  const showNecesidadFormula =
-    category === "necesidad" &&
+      : category === "ocio"
+        ? (month.inheritedOcioCents ?? 0)
+        : 0;
+  const showCategoryFormula =
+    (category === "necesidad" || category === "ocio") &&
     initialSplitDeterminable &&
     realInitialCap !== null &&
-    (resolvedInheritedNecesidadCents > 0 ||
+    (resolvedInheritedCents > 0 ||
       hasCategoryMovements ||
       capWasAdjusted);
   const actualPct =
@@ -696,11 +703,11 @@ function CategoryRow({
             </p>
           )}
 
-          {showNecesidadFormula && (
+          {showCategoryFormula && (
             <div className="mt-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-600">
               Del reparto de ingresos: {formatCents(realInitialCap ?? 0)} +
               Heredado del mes anterior:{" "}
-              {formatCents(resolvedInheritedNecesidadCents)}{" "}
+              {formatCents(resolvedInheritedCents)}{" "}
               {categoryMovementsDelta >= 0 ? "+" : "−"} Movimientos:{" "}
               {formatCents(Math.abs(categoryMovementsDelta))} = Tope propio:{" "}
               <span className="font-medium text-stone-900">
@@ -829,7 +836,7 @@ function CategoryRow({
         <div className="absolute right-4 top-10 z-10 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
           {!initialSplitDeterminable
             ? `Tu tope propio actual es ${formatCents(ownedCap)}. No pudimos determinar si corresponde exactamente a tu ${pct}% inicial de este mes (datos incompletos).`
-            : capWasAdjusted || inheritedNecesidadCents > 0
+            : capWasAdjusted || inheritedCategoryCents > 0
               ? `Tu disponible propio parte de un tope de ${formatCents(ownedCap)}. No es solo tu ${pct}% inicial: incluye sobrante heredado del mes anterior, ingresos recibidos con otro % o movimientos entre categorías.`
               : `Tu tope propio es ${formatCents(ownedCap)}, según tu ${pct}% inicial. Los fondos de préstamos se muestran por separado.`}
         </div>

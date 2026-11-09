@@ -22,6 +22,7 @@ export type MonthSavingsMetrics = {
   movedOutOfAhorroCents: number;
   ahorroExpensesCents: number;
   closingOcioToAhorroCents: number;
+  closingNecesidadToAhorroCents?: number;
   untrackedCents: number;
   isUntrackedDeterminable: boolean;
   /** Déficit pendiente en Necesidad u Ocio (ownedCap - ownedSpent < 0 en alguno o netDeficitCents > 0) */
@@ -154,6 +155,9 @@ export function computeMonthSavingsMetrics(
     : 0;
   const isClosingDeterminable = Number.isInteger(closingOcioRaw);
   const closingOcioToAhorroCents = isClosingDeterminable ? closingOcioRaw! : 0;
+  const closingNecesidadToAhorroCents = month.closed
+    ? (month.remainder?.necesidadSweptToAhorroCents ?? 0)
+    : 0;
 
   // Diferencia entre ahorroContributedCents y las entradas conocidas del mes.
   // - Documentos anteriores a F3 no decrementaban ahorroContributedCents al
@@ -213,6 +217,7 @@ export function computeMonthSavingsMetrics(
       movedOutOfAhorroCents,
       ahorroExpensesCents,
       closingOcioToAhorroCents,
+      closingNecesidadToAhorroCents,
       untrackedCents,
       isUntrackedDeterminable,
       hasEnvelopeDeficit,
@@ -226,6 +231,7 @@ export function computeMonthSavingsMetrics(
     directSavingsCents +
     movedToAhorroCents +
     closingOcioToAhorroCents +
+    closingNecesidadToAhorroCents +
     untrackedCents;
 
   // b) Salidas del mes
@@ -255,6 +261,7 @@ export function computeMonthSavingsMetrics(
     movedOutOfAhorroCents,
     ahorroExpensesCents,
     closingOcioToAhorroCents,
+    closingNecesidadToAhorroCents,
     untrackedCents,
     isUntrackedDeterminable,
     hasEnvelopeDeficit,

@@ -70,8 +70,14 @@ npx firebase emulators:start --only auth,firestore --project kowalski-pwa
 
 # Terminal 2 — Levantar la PWA conectada a los emuladores locales
 $env:VITE_USE_EMULATOR="true"
+# (Opcional) Simulación de fecha para pruebas manuales de cierre y gracia:
+# $env:VITE_FAKE_NOW="2026-11-04T10:00:00"
 npm run dev
 ```
+
+#### Simulación de fecha (`VITE_FAKE_NOW`)
+
+Para pruebas manuales de cierre de mes, ventana de gracia y transiciones cronológicas, `src/utils/date.ts` expone `now()`, que respeta `VITE_FAKE_NOW` **únicamente** cuando `import.meta.env.DEV` es verdadero y `VITE_USE_EMULATOR="true"`. Un build de producción ignora siempre esta variable.
 
 ### Estructura
 

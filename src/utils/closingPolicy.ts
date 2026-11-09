@@ -10,6 +10,11 @@ export const DEFAULT_NECESIDAD_SURPLUS_POLICY: NecesidadSurplusPolicy =
 export const DEFAULT_OCIO_SURPLUS_POLICY: OcioSurplusPolicy =
   "sweep_to_savings";
 
+export const DEFAULT_CLOSING_POLICY: ClosingPolicy = {
+  necesidadSurplus: DEFAULT_NECESIDAD_SURPLUS_POLICY,
+  ocioSurplus: DEFAULT_OCIO_SURPLUS_POLICY,
+};
+
 export type ResolvedClosingPolicy = {
   necesidadSurplus: NecesidadSurplusPolicy;
   necesidadRolloverCapCents: number;

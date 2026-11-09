@@ -7,7 +7,9 @@ import {
   saveIncomeSourcesCatalog,
   savePaymentMethodsCatalog,
   saveSubcategoriesCatalog,
+  updateClosingPolicy,
   updateUserProfile,
+  updateUserTimeZone,
   type SubcategoryRename,
 } from "@/services/userService";
 import StepIncomeSources from "@/pages/onboarding/StepIncomeSources";
@@ -33,11 +35,23 @@ import type {
   GoalKind,
   FixedIncome,
   EssentialNeed,
+  ClosingPolicy,
+  NecesidadSurplusPolicy,
+  OcioSurplusPolicy,
 } from "@/types/user";
 import type { Distribution } from "@/types/transaction";
 import { formatCents } from "@/utils/currency";
 import { getGoalAllocated, getGoalKind, wasPurchased } from "@/utils/savings";
-import { formatDateLabel, getMonthId } from "@/utils/date";
+import {
+  COMMON_TIMEZONES,
+  DEFAULT_TIME_ZONE,
+  formatDateLabel,
+  getMonthId,
+} from "@/utils/date";
+import {
+  getClosingPolicy,
+  type ResolvedClosingPolicy,
+} from "@/utils/closingPolicy";
 import { saveGoalDefinitions } from "@/services/savingsGoalService";
 import BackButton from "@/components/BackButton";
 import DataDangerZone from "@/components/DataDangerZone";
@@ -195,6 +209,29 @@ function ProfileSection() {
           <span className="text-sm tracking-widest text-stone-400">
             ••••••••
           </span>
+        </div>
+
+        <div className="flex items-center justify-between px-4 py-3">
+          <span className="text-sm text-stone-900">Zona horaria</span>
+          <select
+            value={userProfile.timeZone ?? DEFAULT_TIME_ZONE}
+            onChange={async (e) => {
+              const newZone = e.target.value;
+              try {
+                await updateUserTimeZone(user.uid, newZone);
+                setUserProfile({ ...userProfile, timeZone: newZone });
+              } catch (err) {
+                console.error("Error al actualizar zona horaria:", err);
+              }
+            }}
+            className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-stone-700 outline-none"
+          >
+            {COMMON_TIMEZONES.map((z) => (
+              <option key={z.value} value={z.value}>
+                {z.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
     </section>
@@ -1121,6 +1158,247 @@ function SavingsGoalsSection() {
 
 const ADMIN_UID = import.meta.env.VITE_ADMIN_UID;
 
+function ClosingPolicySection() {
+  const { user, userProfile, setUserProfile } = useAuthStore();
+  const [expanded, setExpanded] = useState(false);
+  const currentPolicy = getClosingPolicy(userProfile?.closingPolicy);
+  const [draft, setDraft] = useState<ResolvedClosingPolicy>(currentPolicy);
+  const [capSoles, setCapSoles] = useState<string>(() =>
+    currentPolicy.necesidadRolloverCapCents > 0
+      ? (currentPolicy.necesidadRolloverCapCents / 100).toString()
+      : "",
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!user || !userProfile) return null;
+
+  const currentUser = user;
+  const currentProfile = userProfile;
+
+  function handleStartEdit() {
+    const policy = getClosingPolicy(currentProfile.closingPolicy);
+    setDraft(policy);
+    setCapSoles(
+      policy.necesidadRolloverCapCents > 0
+        ? (policy.necesidadRolloverCapCents / 100).toString()
+        : "",
+    );
+    setError(null);
+    setExpanded(true);
+  }
+
+  async function handleSave() {
+    setError(null);
+    let capCents = 0;
+    if (draft.necesidadSurplus === "rollover_capped") {
+      const parsed = parseFloat(capSoles);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setError("Ingresa un monto válido para el tope de Necesidad.");
+        return;
+      }
+      capCents = Math.round(parsed * 100);
+    }
+
+    const payload: ClosingPolicy = {
+      necesidadSurplus: draft.necesidadSurplus,
+      ...(draft.necesidadSurplus === "rollover_capped"
+        ? { necesidadRolloverCapCents: capCents }
+        : {}),
+      ocioSurplus: draft.ocioSurplus,
+    };
+
+    setSaving(true);
+    try {
+      await updateClosingPolicy(currentUser.uid, payload);
+      setUserProfile({ ...currentProfile, closingPolicy: payload });
+      setExpanded(false);
+    } catch (err) {
+      console.error("Error al guardar políticas de cierre:", err);
+      setError("No se pudieron guardar las políticas. Intenta nuevamente.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const necesidadSummary =
+    currentPolicy.necesidadSurplus === "rollover_all"
+      ? "Necesidad pasa al mes nuevo"
+      : currentPolicy.necesidadSurplus === "sweep_to_savings"
+        ? "Necesidad va a Ahorro"
+        : `Necesidad pasa hasta S/ ${(currentPolicy.necesidadRolloverCapCents / 100).toFixed(2)}`;
+
+  const ocioSummary =
+    currentPolicy.ocioSurplus === "sweep_to_savings"
+      ? "Ocio va a Ahorro"
+      : "Ocio pasa al mes nuevo";
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => {
+          if (!expanded) handleStartEdit();
+          else setExpanded(false);
+        }}
+        className="flex w-full items-center justify-between px-4 py-3"
+      >
+        <div className="text-left">
+          <p className="text-sm text-stone-900">Políticas de cierre de mes</p>
+          <p className="text-xs text-stone-400">
+            {necesidadSummary} · {ocioSummary}
+          </p>
+        </div>
+        <span className="text-sm text-stone-400">{expanded ? "▲" : "›"}</span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-stone-100 bg-stone-50/50 p-4">
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">
+                Sobrante propio de Necesidad
+              </p>
+              <p className="mt-0.5 text-xs text-stone-400">
+                ¿Qué hacer con el dinero propio no gastado de Necesidad al cerrar el mes?
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {[
+                  {
+                    value: "rollover_all",
+                    label: "Pasar todo al mes siguiente (por defecto)",
+                    desc: "Tu disponible de Necesidad arranca con este sobrante.",
+                  },
+                  {
+                    value: "sweep_to_savings",
+                    label: "Barrer todo a Ahorro",
+                    desc: "Pasa a tu ahorro acumulado y no aumenta el mes nuevo.",
+                  },
+                  {
+                    value: "rollover_capped",
+                    label: "Pasar con tope y barrer el resto",
+                    desc: "Pasa hasta un tope al mes nuevo; el excedente va a Ahorro.",
+                  },
+                ].map((opt) => (
+                  <label
+                    key={opt.value}
+                    className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-stone-200 bg-white p-2.5 text-xs text-stone-800"
+                  >
+                    <input
+                      type="radio"
+                      name="necesidadSurplus"
+                      checked={draft.necesidadSurplus === opt.value}
+                      onChange={() =>
+                        setDraft({
+                          ...draft,
+                          necesidadSurplus: opt.value as NecesidadSurplusPolicy,
+                        })
+                      }
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <p className="font-medium text-stone-900">{opt.label}</p>
+                      <p className="text-stone-500">{opt.desc}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              {draft.necesidadSurplus === "rollover_capped" && (
+                <div className="mt-2.5 rounded-xl border border-stone-200 bg-white p-3">
+                  <label className="block text-xs font-medium text-stone-700">
+                    Tope que pasará al mes nuevo (S/)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={capSoles}
+                    onChange={(e) => setCapSoles(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-stone-200 px-3 py-1.5 text-sm outline-none focus:border-stone-400"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">
+                Sobrante propio de Ocio
+              </p>
+              <p className="mt-0.5 text-xs text-stone-400">
+                ¿Qué hacer con el dinero propio no gastado de Ocio al cerrar el mes?
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {[
+                  {
+                    value: "sweep_to_savings",
+                    label: "Barrer todo a Ahorro (por defecto)",
+                    desc: "Pasa a tu ahorro acumulado como premio por ahorrar en ocio.",
+                  },
+                  {
+                    value: "rollover_all",
+                    label: "Pasar todo al mes siguiente",
+                    desc: "Tu disponible de Ocio arranca con este sobrante.",
+                  },
+                ].map((opt) => (
+                  <label
+                    key={opt.value}
+                    className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-stone-200 bg-white p-2.5 text-xs text-stone-800"
+                  >
+                    <input
+                      type="radio"
+                      name="ocioSurplus"
+                      checked={draft.ocioSurplus === opt.value}
+                      onChange={() =>
+                        setDraft({
+                          ...draft,
+                          ocioSurplus: opt.value as OcioSurplusPolicy,
+                        })
+                      }
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <p className="font-medium text-stone-900">{opt.label}</p>
+                      <p className="text-stone-500">{opt.desc}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-[11px] text-stone-400">
+              * El neteo de déficits y la resolución elegida se aplican antes que estas políticas. Ningún dinero prestado pasa a Ahorro.
+            </p>
+
+            {error && <p className="text-xs text-red-500">{error}</p>}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                disabled={saving}
+                className="flex-1 rounded-xl border border-stone-200 bg-white py-2 text-xs font-medium text-stone-600 hover:bg-stone-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 rounded-xl bg-stone-900 py-2 text-xs font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+              >
+                {saving ? "Guardando..." : "Guardar políticas"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const { user } = useAuthStore();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -1184,6 +1462,7 @@ export default function Settings() {
               <span className="text-sm text-stone-400">›</span>
             </Link>
           )}
+          <ClosingPolicySection />
           <Link
             to="/close-month"
             className="flex w-full items-center justify-between px-4 py-3"
