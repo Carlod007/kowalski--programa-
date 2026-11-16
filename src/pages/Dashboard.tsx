@@ -50,10 +50,6 @@ import {
 } from "@/utils/creditCards";
 import { toDateInputValue, formatDateLabel } from "@/utils/date";
 import { summarizeOutflows } from "@/utils/expenseClassification";
-import {
-  getBorrowedEnvelopesCents,
-  getTotalCreditCardsDebtCents,
-} from "@/utils/dashboardChips";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
 import CategoryIcon from "@/components/CategoryIcon";
@@ -202,16 +198,21 @@ function MonthSummary({
   const [showMovementsModal, setShowMovementsModal] = useState(false);
   const [expenses, setExpenses] = useState<ExpenseTransaction[] | null>(null);
   const [outflowSyncing, setOutflowSyncing] = useState(false);
+  const [loans, setLoans] = useState<LoanWithId[]>([]);
   const [cards, setCards] = useState<CreditCardWithId[]>([]);
-  const [activeInfoChip, setActiveInfoChip] = useState<
-    "borrowed" | "cards" | null
-  >(null);
 
   useEffect(() => {
     if (!isCurrentMonth) return;
-    return watchCreditCards(userId, setCards, (error) => {
+    const unsubLoans = watchLoans(userId, setLoans, (error) => {
+      console.error("watchLoans falló:", error);
+    });
+    const unsubCards = watchCreditCards(userId, setCards, (error) => {
       console.error("watchCreditCards falló:", error);
     });
+    return () => {
+      unsubLoans();
+      unsubCards();
+    };
   }, [userId, isCurrentMonth]);
 
   useEffect(() => {
@@ -328,16 +329,6 @@ function MonthSummary({
     expenses,
   );
 
-  const borrowedEnvelopesCents = loading ? 0 : getBorrowedEnvelopesCents(month);
-  const cardsDebtCents =
-    !loading && isCurrentMonth ? getTotalCreditCardsDebtCents(cards) : 0;
-  const visibleInfoChip =
-    activeInfoChip === "borrowed" && borrowedEnvelopesCents > 0
-      ? "borrowed"
-      : activeInfoChip === "cards" && cardsDebtCents > 0
-        ? "cards"
-        : null;
-
   return (
     <>
       {isCurrentMonth && month && (
@@ -392,48 +383,6 @@ function MonthSummary({
         </div>
       </div>
 
-      {(borrowedEnvelopesCents > 0 || cardsDebtCents > 0) && (
-        <div className="mx-5 mt-2.5 flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2">
-            {borrowedEnvelopesCents > 0 && (
-              <button
-                type="button"
-                aria-expanded={visibleInfoChip === "borrowed"}
-                onClick={() =>
-                  setActiveInfoChip((current) =>
-                    current === "borrowed" ? null : "borrowed",
-                  )
-                }
-                className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 transition hover:opacity-90"
-              >
-                Prestado en tus sobres: {formatCents(borrowedEnvelopesCents)}
-              </button>
-            )}
-            {cardsDebtCents > 0 && (
-              <button
-                type="button"
-                aria-expanded={visibleInfoChip === "cards"}
-                onClick={() =>
-                  setActiveInfoChip((current) =>
-                    current === "cards" ? null : "cards",
-                  )
-                }
-                className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700 transition hover:opacity-90"
-              >
-                Deuda en tarjetas: {formatCents(cardsDebtCents)}
-              </button>
-            )}
-          </div>
-          {visibleInfoChip && (
-            <p className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600">
-              {visibleInfoChip === "borrowed"
-                ? "Dinero prestado vigente en los topes de Necesidad y Ocio. No es ingreso ni cuenta para tu tasa de ahorro."
-                : "Suma de la deuda actual de tus tarjetas de crédito. No es ingreso ni cuenta para tu tasa de ahorro."}
-            </p>
-          )}
-        </div>
-      )}
-
       {isCurrentMonth && (
         <>
           <div className="mt-4 flex gap-3 px-5">
@@ -451,18 +400,20 @@ function MonthSummary({
             </Link>
           </div>
 
-          <section className="mt-4 px-5" aria-labelledby="funds-to-pay-title">
-            <h2
-              id="funds-to-pay-title"
-              className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500"
-            >
-              Fondos para pagar
-            </h2>
-            <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
-              <LoanSummaryCard userId={userId} />
-              <CreditCardSummaryCard userId={userId} />
-            </div>
-          </section>
+          {(loans.length > 0 || cards.length > 0) && (
+            <section className="mt-4 px-5" aria-labelledby="funds-to-pay-title">
+              <h2
+                id="funds-to-pay-title"
+                className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500"
+              >
+                Fondos para pagar
+              </h2>
+              <div className="rounded-2xl border border-stone-200 bg-white">
+                <LoanSummaryCard loans={loans} />
+                <CreditCardSummaryCard cards={cards} />
+              </div>
+            </section>
+          )}
         </>
       )}
 
@@ -912,16 +863,20 @@ function CategoryRow({
   );
 }
 
-function LoanSummaryCard({ userId }: { userId: string }) {
-  const [loans, setLoans] = useState<LoanWithId[]>([]);
+function LoanSummaryCard({ loans }: { loans: LoanWithId[] }) {
+  const [showInfo, setShowInfo] = useState(false);
+  const infoRef = useRef<HTMLDivElement>(null);
 
-  useEffect(
-    () =>
-      watchLoans(userId, setLoans, (error) => {
-        console.error("watchLoans falló:", error);
-      }),
-    [userId],
-  );
+  useEffect(() => {
+    if (!showInfo) return;
+    function handleOutside(e: MouseEvent) {
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) {
+        setShowInfo(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [showInfo]);
 
   const today = toDateInputValue();
   const active = loans.filter((loan) => getLoanOutstandingCents(loan) > 0);
@@ -951,20 +906,27 @@ function LoanSummaryCard({ userId }: { userId: string }) {
   );
 
   return (
-    <Link
-      to="/loans"
-      className="block p-4"
-    >
+    <div ref={infoRef} className="relative p-4">
       <div className="flex items-start gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-50 text-violet-600">
           <MaskIcon src={loanIcon} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-stone-900">Préstamos</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-medium text-stone-900">Préstamos</p>
+            <button
+              type="button"
+              onClick={() => setShowInfo((v) => !v)}
+              aria-label="Qué es Préstamos"
+              className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-200 text-[10px] text-stone-500"
+            >
+              ?
+            </button>
+          </div>
           {loans.length === 0 ? (
             <p className="mt-1 text-xs text-stone-400">Sin préstamos registrados</p>
           ) : (
-            <>
+            <Link to="/loans" className="block">
               <p className="mt-1 text-xs text-stone-500">
                 <span className="font-medium text-violet-700">
                   {formatCents(availableFunds)}
@@ -978,25 +940,37 @@ function LoanSummaryCard({ userId }: { userId: string }) {
                     ? `Próxima: ${formatDateLabel(next.installment.dueDate)}`
                     : "Sin cuotas pendientes"}
               </p>
-            </>
+            </Link>
           )}
         </div>
-        <span className="text-xs font-medium text-violet-600">Ver →</span>
+        <Link to="/loans" className="text-xs font-medium text-violet-600">
+          Ver →
+        </Link>
       </div>
-    </Link>
+      {showInfo && (
+        <div className="absolute right-4 top-10 z-20 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
+          El dinero prestado no es ingreso: no cuenta para tu tasa de ahorro ni
+          para el reparto 50/30/20.
+        </div>
+      )}
+    </div>
   );
 }
 
-function CreditCardSummaryCard({ userId }: { userId: string }) {
-  const [cards, setCards] = useState<CreditCardWithId[]>([]);
+function CreditCardSummaryCard({ cards }: { cards: CreditCardWithId[] }) {
+  const [showInfo, setShowInfo] = useState(false);
+  const infoRef = useRef<HTMLDivElement>(null);
 
-  useEffect(
-    () =>
-      watchCreditCards(userId, setCards, (error) => {
-        console.error("watchCreditCards falló:", error);
-      }),
-    [userId],
-  );
+  useEffect(() => {
+    if (!showInfo) return;
+    function handleOutside(e: MouseEvent) {
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) {
+        setShowInfo(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [showInfo]);
 
   const today = toDateInputValue();
   const totalDebt = cards.reduce((sum, card) => sum + card.currentDebtCents, 0);
@@ -1019,22 +993,29 @@ function CreditCardSummaryCard({ userId }: { userId: string }) {
     .sort((a, b) => a.statement.dueDate.localeCompare(b.statement.dueDate))[0];
 
   return (
-    <Link
-      to="/credit-cards"
-      className="block border-t border-stone-200 p-4"
-    >
+    <div ref={infoRef} className="relative border-t border-stone-200 p-4">
       <div className="flex items-start gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sky-600">
           <MaskIcon src={creditCardIcon} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-stone-900">
-            Tarjetas de crédito
-          </p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-medium text-stone-900">
+              Tarjetas de crédito
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowInfo((v) => !v)}
+              aria-label="Qué es Tarjetas de crédito"
+              className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-200 text-[10px] text-stone-500"
+            >
+              ?
+            </button>
+          </div>
           {cards.length === 0 ? (
             <p className="mt-1 text-xs text-stone-400">Sin tarjetas registradas</p>
           ) : (
-            <>
+            <Link to="/credit-cards" className="block">
               <p className="mt-1 text-xs text-stone-500">
                 <span className="font-medium text-sky-700">
                   {formatCents(totalAvailable)}
@@ -1052,12 +1033,20 @@ function CreditCardSummaryCard({ userId }: { userId: string }) {
                     ? `Próximo vencimiento: ${formatDateLabel(nextStatement.statement.dueDate)}`
                     : "Sin estados de cuenta pendientes"}
               </p>
-            </>
+            </Link>
           )}
         </div>
-        <span className="text-xs font-medium text-sky-600">Ver →</span>
+        <Link to="/credit-cards" className="text-xs font-medium text-sky-600">
+          Ver →
+        </Link>
       </div>
-    </Link>
+      {showInfo && (
+        <div className="absolute right-4 top-10 z-20 w-56 rounded-xl bg-stone-900 px-3 py-2 text-xs text-white shadow-lg">
+          Una tarjeta no te da dinero, solo aplaza el pago. La deuda no cuenta
+          como ingreso.
+        </div>
+      )}
+    </div>
   );
 }
 
