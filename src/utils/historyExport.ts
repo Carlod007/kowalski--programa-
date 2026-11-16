@@ -29,7 +29,15 @@ function calendarDate(day: string): Date | null {
 }
 
 export function buildHistoryRows(transactions: Transaction[]): HistoryExportRow[] {
-  return transactions.map((tx) => {
+  return transactions
+    .filter(
+      (tx) =>
+        !(
+          tx.type === "loan" &&
+          tx.description === "Préstamo anterior incorporado"
+        ),
+    )
+    .map((tx) => {
     const recorded = getRecordedDate(tx);
     const recordedDay = recorded ? toDateInputValue(recorded) : "";
     const base = {

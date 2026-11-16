@@ -515,7 +515,9 @@ service cloud.firestore {
         let path = loanPath(data.loanId);
         let loan = get(path).data;
         return loan.receiptTransactionId == txId && loan.receivedMonthId == monthId
-          && loan.paidCents == 0 && loan.borrowedAvailableCents == loan.amountReceivedCents
+          && loan.paidCents == 0
+          && (loan.borrowedAvailableCents == loan.amountReceivedCents
+            || (loan.get('importedExisting', false) == true && loan.borrowedAvailableCents == 0))
           && !existsAfter(path);
       }
       function reverseLoanPayment(data) {
@@ -582,12 +584,17 @@ service cloud.firestore {
         let path = /databases/$(database)/documents/users/$(userId)/months/$(data.receivedMonthId);
         let before = get(path).data;
         let after = getAfter(path).data;
+        let imported = data.get('importedExisting', false) == true;
         let balances = data.get('borrowedAvailableByCategory', {
           'necesidad': data.destinationCategory == 'necesidad' ? data.amountReceivedCents : 0,
           'ocio': data.destinationCategory == 'ocio' ? data.amountReceivedCents : 0
         });
-        let n = creating ? (data.destinationCategory == 'necesidad' ? data.amountReceivedCents : 0) : -balances.necesidad;
-        let o = creating ? (data.destinationCategory == 'ocio' ? data.amountReceivedCents : 0) : -balances.ocio;
+        let n = creating
+          ? (!imported && data.destinationCategory == 'necesidad' ? data.amountReceivedCents : 0)
+          : -balances.necesidad;
+        let o = creating
+          ? (!imported && data.destinationCategory == 'ocio' ? data.amountReceivedCents : 0)
+          : -balances.ocio;
         return before.closed == false && after.closed == false
           && after.capsCents.necesidad == before.capsCents.necesidad + n
           && after.capsCents.ocio == before.capsCents.ocio + o
@@ -613,7 +620,7 @@ service cloud.firestore {
                     && request.resource.data.totalToRepayCents >= request.resource.data.amountReceivedCents
                     && request.resource.data.scheduleType in ['fixed-known', 'total-known', 'custom']
                     && request.resource.data.get('importedExisting', false) is bool
-                    && request.resource.data.borrowedAvailableCents == request.resource.data.amountReceivedCents
+                    && request.resource.data.borrowedAvailableCents == (request.resource.data.get('importedExisting', false) ? 0 : request.resource.data.amountReceivedCents)
                     && request.resource.data.borrowedAvailableByCategory is map
                     && request.resource.data.borrowedAvailableByCategory.necesidad is int
                     && request.resource.data.borrowedAvailableByCategory.ocio is int
@@ -674,7 +681,8 @@ service cloud.firestore {
                       && request.auth.uid == userId
                       && resource.data.userId == userId
                       && resource.data.paidCents == 0
-                      && resource.data.borrowedAvailableCents == resource.data.amountReceivedCents
+                      && (resource.data.borrowedAvailableCents == resource.data.amountReceivedCents
+                        || (resource.data.get('importedExisting', false) == true && resource.data.borrowedAvailableCents == 0))
                       && loanReceipt(resource.data, false)
                       && !get(/databases/$(database)/documents/users/$(userId)/months/$(resource.data.receivedMonthId)).data.closed
                     );

@@ -145,8 +145,15 @@ describe.skipIf(process.env.RUN_MONTH_RULES_TESTS !== 'true')('préstamos y tarj
     await createLoanBatch({ loan: { destinationCategory: category, borrowedAvailableByCategory: amounts },
       tx: { destinationCategory: category }, caps: { capsCents: amounts, borrowedCapsCents: amounts } }).commit();
   });
-  it('alta importada conserva fecha antigua y recibo en mes actual', async () => {
-    await createLoanBatch({ loan: { importedExisting: true, receivedDate: '2020-01-01' } }).commit();
+  it('alta importada conserva fecha antigua y recibo en mes actual sin variar topes, y puede borrarse sin pagos', async () => {
+    await createLoanBatch({
+      loan: { importedExisting: true, receivedDate: '2020-01-01', borrowedAvailableCents: 0, borrowedAvailableByCategory: zero },
+      omitCaps: true,
+    }).commit();
+    await cancelLoanBatch(false, true).commit();
+  });
+  it('rechaza alta importada que intente aumentar topes o fondo disponible', async () => {
+    await deny(createLoanBatch({ loan: { importedExisting: true, receivedDate: '2020-01-01' } }).commit());
   });
   it.each([
     ['sin recibo', { omitTx: true }], ['sin topes', { omitCaps: true }],

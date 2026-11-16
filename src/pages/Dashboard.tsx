@@ -50,6 +50,10 @@ import {
 } from "@/utils/creditCards";
 import { toDateInputValue, formatDateLabel } from "@/utils/date";
 import { summarizeOutflows } from "@/utils/expenseClassification";
+import {
+  getBorrowedEnvelopesCents,
+  getTotalCreditCardsDebtCents,
+} from "@/utils/dashboardChips";
 import BottomNav from "@/components/BottomNav";
 import MovementRow from "@/components/MovementRow";
 import CategoryIcon from "@/components/CategoryIcon";
@@ -198,6 +202,17 @@ function MonthSummary({
   const [showMovementsModal, setShowMovementsModal] = useState(false);
   const [expenses, setExpenses] = useState<ExpenseTransaction[] | null>(null);
   const [outflowSyncing, setOutflowSyncing] = useState(false);
+  const [cards, setCards] = useState<CreditCardWithId[]>([]);
+  const [activeInfoChip, setActiveInfoChip] = useState<
+    "borrowed" | "cards" | null
+  >(null);
+
+  useEffect(() => {
+    if (!isCurrentMonth) return;
+    return watchCreditCards(userId, setCards, (error) => {
+      console.error("watchCreditCards falló:", error);
+    });
+  }, [userId, isCurrentMonth]);
 
   useEffect(() => {
     let latestMonth: Month | null | undefined;
@@ -313,6 +328,16 @@ function MonthSummary({
     expenses,
   );
 
+  const borrowedEnvelopesCents = loading ? 0 : getBorrowedEnvelopesCents(month);
+  const cardsDebtCents =
+    !loading && isCurrentMonth ? getTotalCreditCardsDebtCents(cards) : 0;
+  const visibleInfoChip =
+    activeInfoChip === "borrowed" && borrowedEnvelopesCents > 0
+      ? "borrowed"
+      : activeInfoChip === "cards" && cardsDebtCents > 0
+        ? "cards"
+        : null;
+
   return (
     <>
       {isCurrentMonth && month && (
@@ -366,6 +391,48 @@ function MonthSummary({
           </div>
         </div>
       </div>
+
+      {(borrowedEnvelopesCents > 0 || cardsDebtCents > 0) && (
+        <div className="mx-5 mt-2.5 flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
+            {borrowedEnvelopesCents > 0 && (
+              <button
+                type="button"
+                aria-expanded={visibleInfoChip === "borrowed"}
+                onClick={() =>
+                  setActiveInfoChip((current) =>
+                    current === "borrowed" ? null : "borrowed",
+                  )
+                }
+                className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 transition hover:opacity-90"
+              >
+                Prestado en tus sobres: {formatCents(borrowedEnvelopesCents)}
+              </button>
+            )}
+            {cardsDebtCents > 0 && (
+              <button
+                type="button"
+                aria-expanded={visibleInfoChip === "cards"}
+                onClick={() =>
+                  setActiveInfoChip((current) =>
+                    current === "cards" ? null : "cards",
+                  )
+                }
+                className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700 transition hover:opacity-90"
+              >
+                Deuda en tarjetas: {formatCents(cardsDebtCents)}
+              </button>
+            )}
+          </div>
+          {visibleInfoChip && (
+            <p className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600">
+              {visibleInfoChip === "borrowed"
+                ? "Dinero prestado vigente en los topes de Necesidad y Ocio. No es ingreso ni cuenta para tu tasa de ahorro."
+                : "Suma de la deuda actual de tus tarjetas de crédito. No es ingreso ni cuenta para tu tasa de ahorro."}
+            </p>
+          )}
+        </div>
+      )}
 
       {isCurrentMonth && (
         <>

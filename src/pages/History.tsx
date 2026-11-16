@@ -469,6 +469,8 @@ function TransactionRow({
 }) {
   const isIncome = tx.type === "income";
   const isLoanReceipt = tx.type === "loan";
+  const isImportedLoanReceipt =
+    isLoanReceipt && tx.description === "Préstamo anterior incorporado";
   const isLoanExpense =
     tx.type === "expense" && !!(tx.loanId || tx.fundedByLoanId);
   const isCardStatementCharge =
@@ -477,13 +479,14 @@ function TransactionRow({
   const name = isIncome
     ? tx.source
     : isLoanReceipt
-      ? tx.lender?.trim() || "Préstamo recibido"
+      ? tx.lender?.trim() ||
+        (isImportedLoanReceipt ? "Préstamo anterior" : "Préstamo recibido")
       : tx.subcategory;
   const detail = isIncome
     ? tx.description
     : isLoanReceipt
-      ? tx.description === "Préstamo anterior incorporado"
-        ? "Préstamo anterior incorporado"
+      ? isImportedLoanReceipt
+        ? "Préstamo anterior incorporado · sin ingreso este mes"
         : "Préstamo recibido"
       : tx.fundedByLoanId
         ? `${CATEGORY_META[tx.category].label} · financiado con ${tx.fundedByLoanName ?? "préstamo"}${tx.description ? ` · ${tx.description}` : ""}`
@@ -496,7 +499,7 @@ function TransactionRow({
           : tx.description
             ? `${CATEGORY_META[tx.category].label} - ${tx.description}`
             : CATEGORY_META[tx.category].label;
-  const isPositive = isIncome || isLoanReceipt;
+  const isPositive = isIncome || (isLoanReceipt && !isImportedLoanReceipt);
   const recorded = getRecordedDate(tx);
   const recordedDay = recorded ? toDateInputValue(recorded) : null;
   const isPastDated = recordedDay === null || tx.transactionDate !== recordedDay;
@@ -506,12 +509,20 @@ function TransactionRow({
       <div className="flex items-start gap-3">
         <span
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
-            isPositive
-              ? "bg-emerald-50 text-emerald-600"
-              : "bg-red-50 text-red-600"
+            isImportedLoanReceipt
+              ? "bg-stone-100 text-stone-600"
+              : isPositive
+                ? "bg-emerald-50 text-emerald-600"
+                : "bg-red-50 text-red-600"
           }`}
         >
-          {isPositive ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
+          {isImportedLoanReceipt ? (
+            <Calendar size={16} />
+          ) : isPositive ? (
+            <ArrowUp size={16} />
+          ) : (
+            <ArrowDown size={16} />
+          )}
         </span>
 
         <div className="flex-1 min-w-0">
@@ -549,11 +560,16 @@ function TransactionRow({
         <div className="grid shrink-0 grid-cols-[auto_1.5rem] items-start gap-2">
           <span
             className={`whitespace-nowrap pt-0.5 text-right text-sm font-medium ${
-              isPositive ? "text-emerald-600" : "text-red-600"
+              isImportedLoanReceipt
+                ? "text-stone-600"
+                : isPositive
+                  ? "text-emerald-600"
+                  : "text-red-600"
             }`}
           >
-            {isPositive ? "+ " : "- "}
-            {formatCents(tx.amountCents)}
+            {isImportedLoanReceipt
+              ? `Saldo: ${formatCents(tx.amountCents)}`
+              : `${isPositive ? "+ " : "- "}${formatCents(tx.amountCents)}`}
           </span>
           <div
             className="relative h-6 w-6"

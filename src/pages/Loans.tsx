@@ -12,12 +12,13 @@ import {
   cancelUnusedLoan,
   createLoan,
   recordLoanPayment,
+  watchLoanMonths,
   watchLoans,
 } from "@/services/loanService";
 import {
   addMonthsToDate,
   allocateLoanPayment,
-  canCancelUnusedLoan,
+  getLoanDeletionBlockReason,
   getLoanInstallmentStatus,
   getLoanOutstandingCents,
   getNextPendingInstallment,
@@ -28,6 +29,7 @@ import {
   formatMonthLabel,
   toDateInputValue,
 } from "@/utils/date";
+import type { Month } from "@/types/month";
 import type {
   LoanPaymentSource,
   LoanScheduleType,
@@ -39,9 +41,18 @@ export default function Loans() {
   const user = useAuthStore((state) => state.user);
   const userProfile = useAuthStore((state) => state.userProfile);
   const [loans, setLoans] = useState<LoanWithId[]>([]);
+  const [monthsById, setMonthsById] = useState<Record<string, Month>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+
+  const receivedMonthIdsKey = useMemo(
+    () =>
+      Array.from(new Set(loans.map((loan) => loan.receivedMonthId)))
+        .sort()
+        .join(","),
+    [loans],
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -61,6 +72,12 @@ export default function Loans() {
       },
     );
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const monthIds = receivedMonthIdsKey ? receivedMonthIdsKey.split(",") : [];
+    return watchLoanMonths(user.uid, monthIds, setMonthsById);
+  }, [user, receivedMonthIdsKey]);
 
   if (!user || !userProfile) return null;
 
@@ -161,6 +178,7 @@ export default function Loans() {
             <LoanCard
               key={loan.id}
               loan={loan}
+              receivedMonth={monthsById[loan.receivedMonthId]}
               userId={user.uid}
               paymentMethods={userProfile.paymentMethods ?? []}
             />
@@ -233,8 +251,18 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!Number.isInteger(amountReceivedCents) || amountReceivedCents <= 0) {
+    if (
+      !importedExisting &&
+      (!Number.isInteger(amountReceivedCents) || amountReceivedCents <= 0)
+    ) {
       setError("Ingresa un monto recibido o financiado válido.");
+      return;
+    }
+    if (
+      importedExisting &&
+      (!Number.isInteger(totalToRepayCents) || totalToRepayCents <= 0)
+    ) {
+      setError("Ingresa el saldo o cuotas restantes por pagar.");
       return;
     }
     if (scheduleType !== "custom" && !Number.isInteger(installmentCount)) {
@@ -247,7 +275,9 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
       await checkAndRememberMonthClosing(userId);
       const common = {
         lender: lender.trim() || undefined,
-        amountReceivedCents,
+        amountReceivedCents: importedExisting
+          ? totalToRepayCents
+          : amountReceivedCents,
         receivedDate,
         importedExisting,
       };
@@ -331,11 +361,13 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
           className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900"
         />
       </label>
-      <MoneyInput
-        label="Monto recibido / financiado"
-        value={received}
-        onChange={setReceived}
-      />
+      {!importedExisting && (
+        <MoneyInput
+          label="Monto recibido / financiado"
+          value={received}
+          onChange={setReceived}
+        />
+      )}
       <label className="text-sm text-stone-600">
         Tipo de cronograma de pago
         <select
@@ -349,7 +381,9 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
             Cuotas fijas — monto de cuota conocido
           </option>
           <option value="total-known">
-            Cuotas fijas — total a pagar conocido
+            {importedExisting
+              ? "Cuotas fijas — saldo pendiente conocido"
+              : "Cuotas fijas — total a pagar conocido"}
           </option>
           <option value="custom">
             Cuotas variables — cronograma personalizado
@@ -363,13 +397,25 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
             value={installmentAmount}
             onChange={setInstallmentAmount}
           />
-          <InstallmentCountInput value={count} onChange={setCount} />
+          <InstallmentCountInput
+            label={importedExisting ? "Cuotas restantes" : "Número de cuotas"}
+            value={count}
+            onChange={setCount}
+          />
         </div>
       )}
       {scheduleType === "total-known" && (
         <div className="grid grid-cols-2 gap-2">
-          <MoneyInput label="Total a devolver" value={total} onChange={setTotal} />
-          <InstallmentCountInput value={count} onChange={setCount} />
+          <MoneyInput
+            label={importedExisting ? "Saldo pendiente" : "Total a devolver"}
+            value={total}
+            onChange={setTotal}
+          />
+          <InstallmentCountInput
+            label={importedExisting ? "Cuotas restantes" : "Número de cuotas"}
+            value={count}
+            onChange={setCount}
+          />
         </div>
       )}
       {scheduleType !== "custom" && (
@@ -443,12 +489,12 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
       {Number.isFinite(totalToRepayCents) && totalToRepayCents > 0 && (
         <div className="rounded-xl bg-stone-50 p-3 text-sm text-stone-600">
           <p>
-            Total a devolver:{" "}
+            {importedExisting ? "Saldo pendiente a devolver:" : "Total a devolver:"}{" "}
             <strong className="text-stone-900">
               {formatCents(totalToRepayCents)}
             </strong>
           </p>
-          {amountReceivedCents > 0 && loanCostCents >= 0 && (
+          {!importedExisting && amountReceivedCents > 0 && loanCostCents >= 0 && (
             <p>
               Intereses y cargos:{" "}
               <strong className="text-stone-900">
@@ -459,10 +505,10 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
         </div>
       )}
       <p className="text-xs text-stone-400">
-        Fecha de recepción: {formatDateLabel(receivedDate)}. {importedExisting
-          ? "Se incorporará al mes actual sin crear ni reabrir meses anteriores. "
-          : ""}El préstamo queda disponible para gastos de Necesidad u Ocio,
-        no cuenta como ingreso ni altera tus porcentajes.
+        Fecha de recepción: {formatDateLabel(receivedDate)}.{" "}
+        {importedExisting
+          ? "Se incorporará solo el saldo y cuotas pendientes desde este mes, sin crear ni reabrir meses anteriores ni sumar dinero a tus sobres."
+          : "El préstamo queda disponible para gastos de Necesidad u Ocio, no cuenta como ingreso ni altera tus porcentajes."}
       </p>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button
@@ -477,15 +523,17 @@ function NewLoanForm({ userId, onDone }: { userId: string; onDone: () => void })
 }
 
 function InstallmentCountInput({
+  label = "Número de cuotas",
   value,
   onChange,
 }: {
+  label?: string;
   value: string;
   onChange: (value: string) => void;
 }) {
   return (
     <label className="text-sm text-stone-600">
-      Número de cuotas
+      {label}
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -527,10 +575,12 @@ function MoneyInput({
 
 function LoanCard({
   loan,
+  receivedMonth,
   userId,
   paymentMethods,
 }: {
   loan: LoanWithId;
+  receivedMonth?: Month;
   userId: string;
   paymentMethods: { id: string; name: string }[];
 }) {
@@ -545,7 +595,8 @@ function LoanCard({
     loan.totalToRepayCents > 0
       ? Math.min(100, (loan.paidCents / loan.totalToRepayCents) * 100)
       : 0;
-  const canCancel = canCancelUnusedLoan(loan);
+  const blockReason = getLoanDeletionBlockReason(loan, receivedMonth);
+  const canCancel = blockReason === null;
 
   function togglePanel(panel: "schedule" | "payment") {
     setConfirmCancel(false);
@@ -557,7 +608,7 @@ function LoanCard({
     try {
       await cancelUnusedLoan(userId, loan.id);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "No se pudo cancelar");
+      setActionError(error instanceof Error ? error.message : "No se pudo borrar");
       setConfirmCancel(false);
     }
   }
@@ -586,11 +637,14 @@ function LoanCard({
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
         <p className="text-stone-500">
-          Recibido: <span className="font-medium text-stone-800">{formatCents(loan.amountReceivedCents)}</span>
+          {loan.importedExisting ? "Saldo inicial importado:" : "Recibido:"}{" "}
+          <span className="font-medium text-stone-800">{formatCents(loan.amountReceivedCents)}</span>
         </p>
-        <p className="text-stone-500">
-          Intereses y cargos: <span className="font-medium text-stone-800">{formatCents(loan.totalToRepayCents - loan.amountReceivedCents)}</span>
-        </p>
+        {!loan.importedExisting && (
+          <p className="text-stone-500">
+            Intereses y cargos: <span className="font-medium text-stone-800">{formatCents(loan.totalToRepayCents - loan.amountReceivedCents)}</span>
+          </p>
+        )}
         <p className="col-span-2 text-stone-500">
           Fondo prestado disponible: <span className="font-medium text-violet-700">{formatCents(loan.borrowedAvailableCents)}</span>
         </p>
@@ -627,19 +681,24 @@ function LoanCard({
           onDone={() => setOpenPanel(null)}
         />
       )}
-      {canCancel && !confirmCancel && (
+      <div className="mt-3 flex flex-col items-start gap-1">
         <button
           type="button"
+          disabled={!canCancel}
           onClick={() => {
+            if (!canCancel) return;
             setOpenPanel(null);
             setConfirmCancel(true);
           }}
-          className="mt-3 text-xs text-red-600"
+          className="text-xs text-red-600 disabled:cursor-not-allowed disabled:text-stone-400"
         >
-          Cancelar préstamo sin usar
+          Borrar préstamo
         </button>
-      )}
-      {confirmCancel && (
+        {blockReason && (
+          <p className="text-xs text-stone-500">{blockReason}</p>
+        )}
+      </div>
+      {canCancel && confirmCancel && (
         <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
           <p className="text-xs text-amber-800">
             Se quitará el dinero prestado del tope y también su registro de

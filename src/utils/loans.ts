@@ -3,7 +3,7 @@ import type {
   LoanInstallment,
   LoanPaymentAllocation,
 } from "@/types/loan";
-import type { MonthCaps } from "@/types/month";
+import type { Month, MonthCaps } from "@/types/month";
 
 export function getBorrowedAvailableByCategory(loan: Loan): MonthCaps {
   if (loan.borrowedAvailableByCategory) {
@@ -14,15 +14,62 @@ export function getBorrowedAvailableByCategory(loan: Loan): MonthCaps {
     : { necesidad: 0, ocio: loan.borrowedAvailableCents };
 }
 
+export function getLoanDeletionBlockReason(
+  loan: Loan,
+  month?: Month | null,
+): string | null {
+  if (month?.closed) {
+    return "No se puede borrar un préstamo registrado en un mes que ya está cerrado.";
+  }
+  if (
+    loan.paidCents > 0 ||
+    loan.installments.some((item) => item.paidCents > 0)
+  ) {
+    return "Este préstamo tiene pagos registrados.";
+  }
+  const isImportedUnused =
+    Boolean(loan.importedExisting) && loan.borrowedAvailableCents === 0;
+  if (
+    !isImportedUnused &&
+    loan.borrowedAvailableCents < loan.amountReceivedCents
+  ) {
+    return "Este préstamo ya financió gastos.";
+  }
+  if (month) {
+    const availableByCategory = getBorrowedAvailableByCategory(loan);
+    const hasCapAdjustment =
+      availableByCategory.necesidad !== 0 || availableByCategory.ocio !== 0;
+    if (hasCapAdjustment) {
+      const nextCapNecesidad =
+        month.capsCents.necesidad - availableByCategory.necesidad;
+      const nextCapOcio = month.capsCents.ocio - availableByCategory.ocio;
+      const nextBorrowedNecesidad =
+        (month.borrowedCapsCents?.necesidad ?? 0) -
+        availableByCategory.necesidad;
+      const nextBorrowedOcio =
+        (month.borrowedCapsCents?.ocio ?? 0) - availableByCategory.ocio;
+      if (
+        nextCapNecesidad < month.spentCents.necesidad ||
+        nextCapOcio < month.spentCents.ocio ||
+        nextBorrowedNecesidad < (month.loanFundedSpentCents?.necesidad ?? 0) ||
+        nextBorrowedOcio < (month.loanFundedSpentCents?.ocio ?? 0)
+      ) {
+        return "La operación dejaría el tope del mes por debajo de lo ya gastado.";
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Una reasignación no consume dinero prestado. El préstamo sigue siendo
  * cancelable mientras no tenga pagos y todo el monto recibido siga disponible.
  */
-export function canCancelUnusedLoan(loan: Loan): boolean {
-  return (
-    loan.paidCents === 0 &&
-    loan.borrowedAvailableCents === loan.amountReceivedCents
-  );
+export function canCancelUnusedLoan(
+  loan: Loan,
+  month?: Month | null,
+): boolean {
+  return getLoanDeletionBlockReason(loan, month) === null;
 }
 
 export function consumeBorrowedBalance(

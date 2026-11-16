@@ -18,7 +18,6 @@ import { toDateInputValue } from "@/utils/date";
 import {
   allocateLoanPayment,
   buildCustomLoanInstallments,
-  canCancelUnusedLoan,
   generateFixedAmountInstallments,
   generateLoanInstallments,
   getBorrowedAvailableByCategory,
@@ -40,7 +39,7 @@ import type {
 
 type CreateLoanCommon = {
   lender?: string;
-  amountReceivedCents: number;
+  amountReceivedCents?: number;
   receivedDate: string;
   importedExisting?: boolean;
   /** Conservado para compatibilidad; la interfaz nueva usa un fondo compartido. */
@@ -90,13 +89,36 @@ export function watchLoans(
   );
 }
 
+export function watchLoanMonths(
+  userId: string,
+  monthIds: string[],
+  onData: (months: Record<string, Month>) => void,
+): Unsubscribe {
+  const uniqueIds = Array.from(new Set(monthIds.filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    onData({});
+    return () => {};
+  }
+  const latest: Record<string, Month> = {};
+  const unsubscribes = uniqueIds.map((monthId) =>
+    onSnapshot(doc(db, "users", userId, "months", monthId), (snapshot) => {
+      if (snapshot.exists()) {
+        latest[monthId] = snapshot.data() as Month;
+      } else {
+        delete latest[monthId];
+      }
+      onData({ ...latest });
+    }),
+  );
+  return () => {
+    unsubscribes.forEach((unsubscribe) => unsubscribe());
+  };
+}
+
 export async function createLoan(
   userId: string,
   input: CreateLoanInput,
 ): Promise<string> {
-  if (input.amountReceivedCents <= 0) {
-    throw new Error("El monto recibido debe ser mayor a 0");
-  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.receivedDate)) {
     throw new Error("Ingresa una fecha de recepción válida");
   }
@@ -145,7 +167,13 @@ export async function createLoan(
     (sum, item) => sum + item.amountCents,
     0,
   );
-  if (totalToRepayCents < input.amountReceivedCents) {
+  const amountReceivedCents = input.importedExisting
+    ? (input.amountReceivedCents ?? totalToRepayCents)
+    : (input.amountReceivedCents ?? 0);
+  if (amountReceivedCents <= 0) {
+    throw new Error("El monto recibido debe ser mayor a 0");
+  }
+  if (totalToRepayCents < amountReceivedCents) {
     throw new Error("El total a devolver no puede ser menor al recibido");
   }
 
@@ -158,21 +186,27 @@ export async function createLoan(
       throw new Error("No se puede registrar un préstamo en un mes cerrado");
     }
 
+    const borrowedAvailableCents = input.importedExisting
+      ? 0
+      : amountReceivedCents;
+    const borrowedAvailableByCategory = input.importedExisting
+      ? { necesidad: 0, ocio: 0 }
+      : destinationCategory === "necesidad"
+        ? { necesidad: amountReceivedCents, ocio: 0 }
+        : { necesidad: 0, ocio: amountReceivedCents };
+
     const loan: WithFieldValue<Loan> = {
       userId,
       ...(input.lender ? { lender: input.lender } : {}),
-      amountReceivedCents: input.amountReceivedCents,
+      amountReceivedCents,
       totalToRepayCents,
       scheduleType: input.scheduleType,
       ...(input.importedExisting ? { importedExisting: true } : {}),
       receivedDate: input.receivedDate,
       receivedMonthId,
       destinationCategory,
-      borrowedAvailableCents: input.amountReceivedCents,
-      borrowedAvailableByCategory:
-        destinationCategory === "necesidad"
-          ? { necesidad: input.amountReceivedCents, ocio: 0 }
-          : { necesidad: 0, ocio: input.amountReceivedCents },
+      borrowedAvailableCents,
+      borrowedAvailableByCategory,
       paidCents: 0,
       fundMovementCount: 0,
       installments,
@@ -185,7 +219,7 @@ export async function createLoan(
       loanId: loanRef.id,
       ...(input.lender ? { lender: input.lender } : {}),
       destinationCategory,
-      amountCents: input.amountReceivedCents,
+      amountCents: amountReceivedCents,
       transactionDate: input.importedExisting
         ? registrationDate
         : input.receivedDate,
@@ -198,14 +232,13 @@ export async function createLoan(
 
     transaction.set(loanRef, loan);
     transaction.set(receiptRef, receipt);
-    transaction.update(monthRef, {
-      [`capsCents.${destinationCategory}`]: increment(
-        input.amountReceivedCents,
-      ),
-      [`borrowedCapsCents.${destinationCategory}`]: increment(
-        input.amountReceivedCents,
-      ),
-    });
+    if (!input.importedExisting) {
+      transaction.update(monthRef, {
+        [`capsCents.${destinationCategory}`]: increment(amountReceivedCents),
+        [`borrowedCapsCents.${destinationCategory}`]:
+          increment(amountReceivedCents),
+      });
+    }
   });
 
   return loanRef.id;
@@ -250,13 +283,48 @@ export async function cancelUnusedLoan(
     );
     const monthSnapshot = await transaction.get(monthRef);
     if (!monthSnapshot.exists()) throw new Error("El mes de recepción no existe");
-    if ((monthSnapshot.data() as Month).closed) {
-      throw new Error("No se puede cancelar un préstamo de un mes cerrado");
-    }
-    if (!canCancelUnusedLoan(loan)) {
+    const month = monthSnapshot.data() as Month;
+    if (month.closed) {
       throw new Error(
-        "Solo se puede cancelar un préstamo que todavía no tenga usos ni pagos.",
+        "No se puede borrar un préstamo registrado en un mes que ya está cerrado.",
       );
+    }
+    if (
+      loan.paidCents > 0 ||
+      loan.installments.some((item) => item.paidCents > 0)
+    ) {
+      throw new Error("Este préstamo tiene pagos registrados.");
+    }
+    const isImportedUnused =
+      Boolean(loan.importedExisting) && loan.borrowedAvailableCents === 0;
+    if (
+      !isImportedUnused &&
+      loan.borrowedAvailableCents < loan.amountReceivedCents
+    ) {
+      throw new Error("Este préstamo ya financió gastos.");
+    }
+    const availableByCategory = getBorrowedAvailableByCategory(loan);
+    const hasCapAdjustment =
+      availableByCategory.necesidad !== 0 || availableByCategory.ocio !== 0;
+    if (hasCapAdjustment) {
+      const nextCapNecesidad =
+        month.capsCents.necesidad - availableByCategory.necesidad;
+      const nextCapOcio = month.capsCents.ocio - availableByCategory.ocio;
+      const nextBorrowedNecesidad =
+        (month.borrowedCapsCents?.necesidad ?? 0) -
+        availableByCategory.necesidad;
+      const nextBorrowedOcio =
+        (month.borrowedCapsCents?.ocio ?? 0) - availableByCategory.ocio;
+      if (
+        nextCapNecesidad < month.spentCents.necesidad ||
+        nextCapOcio < month.spentCents.ocio ||
+        nextBorrowedNecesidad < (month.loanFundedSpentCents?.necesidad ?? 0) ||
+        nextBorrowedOcio < (month.loanFundedSpentCents?.ocio ?? 0)
+      ) {
+        throw new Error(
+          "La operación dejaría el tope del mes por debajo de lo ya gastado.",
+        );
+      }
     }
     if ((loan.fundMovementCount ?? 0) !== fundMovementsSnapshot.size) {
       throw new Error(
@@ -264,16 +332,16 @@ export async function cancelUnusedLoan(
       );
     }
 
-    const availableByCategory = getBorrowedAvailableByCategory(loan);
-
-    transaction.update(monthRef, {
-      "capsCents.necesidad": increment(-availableByCategory.necesidad),
-      "capsCents.ocio": increment(-availableByCategory.ocio),
-      "borrowedCapsCents.necesidad": increment(
-        -availableByCategory.necesidad,
-      ),
-      "borrowedCapsCents.ocio": increment(-availableByCategory.ocio),
-    });
+    if (hasCapAdjustment) {
+      transaction.update(monthRef, {
+        "capsCents.necesidad": increment(-availableByCategory.necesidad),
+        "capsCents.ocio": increment(-availableByCategory.ocio),
+        "borrowedCapsCents.necesidad": increment(
+          -availableByCategory.necesidad,
+        ),
+        "borrowedCapsCents.ocio": increment(-availableByCategory.ocio),
+      });
+    }
     fundMovementsSnapshot.docs.forEach((movement) => {
       transaction.delete(movement.ref);
     });

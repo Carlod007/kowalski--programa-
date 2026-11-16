@@ -63,6 +63,9 @@ export async function buildHistoryCsv(
       );
     } else if (tx.type === "loan") {
       const loan = tx as LoanReceiptTransaction;
+      if (loan.description === "Préstamo anterior incorporado") {
+        continue;
+      }
       loanRows.push(
         [monthLabel, declaredDate, recordedDay, recordedTime,
           csvEscape(loan.lender ?? ""), centsToPlain(loan.amountCents)].join(","),
