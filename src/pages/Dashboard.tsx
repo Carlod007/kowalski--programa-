@@ -400,20 +400,18 @@ function MonthSummary({
             </Link>
           </div>
 
-          {(loans.length > 0 || cards.length > 0) && (
-            <section className="mt-4 px-5" aria-labelledby="funds-to-pay-title">
-              <h2
-                id="funds-to-pay-title"
-                className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500"
-              >
-                Fondos para pagar
-              </h2>
-              <div className="rounded-2xl border border-stone-200 bg-white">
-                <LoanSummaryCard loans={loans} />
-                <CreditCardSummaryCard cards={cards} />
-              </div>
-            </section>
-          )}
+          <section className="mt-4 px-5" aria-labelledby="funds-to-pay-title">
+            <h2
+              id="funds-to-pay-title"
+              className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500"
+            >
+              Fondos para pagar
+            </h2>
+            <div className="rounded-2xl border border-stone-200 bg-white">
+              <LoanSummaryCard loans={loans} />
+              <CreditCardSummaryCard cards={cards} />
+            </div>
+          </section>
         </>
       )}
 
@@ -924,7 +922,9 @@ function LoanSummaryCard({ loans }: { loans: LoanWithId[] }) {
             </button>
           </div>
           {loans.length === 0 ? (
-            <p className="mt-1 text-xs text-stone-400">Sin préstamos registrados</p>
+            <p className="mt-1 text-xs text-stone-400">
+              Aún no tienes préstamos
+            </p>
           ) : (
             <Link to="/loans" className="block">
               <p className="mt-1 text-xs text-stone-500">
@@ -944,7 +944,7 @@ function LoanSummaryCard({ loans }: { loans: LoanWithId[] }) {
           )}
         </div>
         <Link to="/loans" className="text-xs font-medium text-violet-600">
-          Ver →
+          {loans.length === 0 ? "Agregar →" : "Ver →"}
         </Link>
       </div>
       {showInfo && (
@@ -1013,7 +1013,9 @@ function CreditCardSummaryCard({ cards }: { cards: CreditCardWithId[] }) {
             </button>
           </div>
           {cards.length === 0 ? (
-            <p className="mt-1 text-xs text-stone-400">Sin tarjetas registradas</p>
+            <p className="mt-1 text-xs text-stone-400">
+              Aún no tienes tarjetas
+            </p>
           ) : (
             <Link to="/credit-cards" className="block">
               <p className="mt-1 text-xs text-stone-500">
@@ -1037,7 +1039,7 @@ function CreditCardSummaryCard({ cards }: { cards: CreditCardWithId[] }) {
           )}
         </div>
         <Link to="/credit-cards" className="text-xs font-medium text-sky-600">
-          Ver →
+          {cards.length === 0 ? "Agregar →" : "Ver →"}
         </Link>
       </div>
       {showInfo && (
