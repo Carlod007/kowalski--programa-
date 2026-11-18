@@ -4,6 +4,7 @@ import type {
   OcioSurplusPolicy,
 } from "@/types/user";
 import type { MonthRemainders } from "@/utils/monthRemainders";
+import { toIntCents } from "./currency";
 
 export const DEFAULT_NECESIDAD_SURPLUS_POLICY: NecesidadSurplusPolicy =
   "rollover_all";
@@ -85,12 +86,15 @@ export function applyClosingPolicy(
   }
 
   return {
-    necesidadToNextMonthCents,
-    necesidadSweptToAhorroCents:
+    necesidadToNextMonthCents: toIntCents(necesidadToNextMonthCents),
+    necesidadSweptToAhorroCents: toIntCents(
       necesidadSurplus - necesidadToNextMonthCents,
-    ocioToNextMonthCents:
+    ),
+    ocioToNextMonthCents: toIntCents(
       policy.ocioSurplus === "rollover_all" ? ocioSurplus : 0,
-    ocioToAhorroCents:
+    ),
+    ocioToAhorroCents: toIntCents(
       policy.ocioSurplus === "rollover_all" ? 0 : ocioSurplus,
+    ),
   };
 }

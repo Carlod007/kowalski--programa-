@@ -1,4 +1,5 @@
 import type { Month, MonthCaps } from "@/types/month";
+import { toIntCents } from "./currency";
 
 type RemainderInput = Pick<
   Month,
@@ -46,15 +47,16 @@ export function getMonthRemainders(month: RemainderInput): MonthRemainders {
   const rawNec = rawOwnedFor("necesidad") - carriedDeficit;
   const rawOcio = rawOwnedFor("ocio");
 
-  const ocioToAhorroCents = Math.max(0, rawOcio - Math.max(0, -rawNec));
-  const necesidadToNextMonthCents = Math.max(
-    0,
-    rawNec - Math.max(0, -rawOcio),
+  const ocioToAhorroCents = toIntCents(
+    Math.max(0, rawOcio - Math.max(0, -rawNec)),
   );
-  const netDeficitCents = Math.max(0, -(rawNec + rawOcio));
+  const necesidadToNextMonthCents = toIntCents(
+    Math.max(0, rawNec - Math.max(0, -rawOcio)),
+  );
+  const netDeficitCents = toIntCents(Math.max(0, -(rawNec + rawOcio)));
 
-  const borrowedNecesidad = borrowedFor("necesidad");
-  const borrowedOcio = borrowedFor("ocio");
+  const borrowedNecesidad = toIntCents(borrowedFor("necesidad"));
+  const borrowedOcio = toIntCents(borrowedFor("ocio"));
 
   return {
     owned: {

@@ -4,6 +4,7 @@ import type {
   LoanPaymentAllocation,
 } from "@/types/loan";
 import type { Month, MonthCaps } from "@/types/month";
+import { toIntCents } from "./currency";
 
 export function getBorrowedAvailableByCategory(loan: Loan): MonthCaps {
   if (loan.borrowedAvailableByCategory) {
@@ -90,10 +91,10 @@ export function consumeBorrowedBalance(
   return {
     available: {
       ...available,
-      [category]: available[category] - fromSelectedCategory,
-      [otherCategory]: available[otherCategory] - transferredCents,
+      [category]: toIntCents(available[category] - fromSelectedCategory),
+      [otherCategory]: toIntCents(available[otherCategory] - transferredCents),
     },
-    transferredCents,
+    transferredCents: toIntCents(transferredCents),
   };
 }
 

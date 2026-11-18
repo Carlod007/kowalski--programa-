@@ -11,7 +11,7 @@ import {
 import { db } from "@/lib/firebase";
 import { ensureCurrentMonth } from "@/services/monthService";
 import { getMonthId, toDateInputValue } from "@/utils/date";
-import { formatCents } from "@/utils/currency";
+import { formatCents, toIntCents } from "@/utils/currency";
 import {
   resolveTargetMonthIdForDate,
   validateTransactionTiming,
@@ -311,26 +311,30 @@ export async function deleteTransaction(
         // revierte solo lo que sí movió, o se estaría descontando de un
         // lugar donde nunca se sumó.
         transaction.update(monthRef, {
-          directSavingsCents: increment(-income.amountCents),
+          directSavingsCents: increment(toIntCents(-income.amountCents)),
           incomeCount: increment(-1),
-          ahorroContributedCents: increment(-income.amountCents),
+          ahorroContributedCents: increment(toIntCents(-income.amountCents)),
         });
         transaction.update(userRef, {
-          savingsTotalCents: increment(-income.amountCents),
+          savingsTotalCents: increment(toIntCents(-income.amountCents)),
         });
       } else {
         transaction.update(monthRef, {
-          totalIncomeCents: increment(-income.amountCents),
+          totalIncomeCents: increment(toIntCents(-income.amountCents)),
           incomeCount: increment(-1),
           ...((month.distributedIncomeCount ?? 1) > 0
             ? { distributedIncomeCount: increment(-1) }
             : {}),
-          "capsCents.necesidad": increment(-income.distribution.necesidad),
-          "capsCents.ocio": increment(-income.distribution.ocio),
-          ahorroContributedCents: increment(-income.distribution.ahorro),
+          "capsCents.necesidad": increment(
+            toIntCents(-income.distribution.necesidad),
+          ),
+          "capsCents.ocio": increment(toIntCents(-income.distribution.ocio)),
+          ahorroContributedCents: increment(
+            toIntCents(-income.distribution.ahorro),
+          ),
         });
         transaction.update(userRef, {
-          savingsTotalCents: increment(-income.distribution.ahorro),
+          savingsTotalCents: increment(toIntCents(-income.distribution.ahorro)),
         });
       }
     }
@@ -563,21 +567,27 @@ export async function updateIncome(
 
     if (tx.isDirectSavings) {
       transaction.update(monthRef, {
-        directSavingsCents: increment(newValues.amountCents - tx.amountCents),
-        ahorroContributedCents: increment(ahorroDelta),
+        directSavingsCents: increment(
+          toIntCents(newValues.amountCents - tx.amountCents),
+        ),
+        ahorroContributedCents: increment(toIntCents(ahorroDelta)),
       });
     } else {
       transaction.update(monthRef, {
-        totalIncomeCents: increment(newValues.amountCents - tx.amountCents),
-        "capsCents.necesidad": increment(
-          newSplit.necesidad - tx.distribution.necesidad,
+        totalIncomeCents: increment(
+          toIntCents(newValues.amountCents - tx.amountCents),
         ),
-        "capsCents.ocio": increment(newSplit.ocio - tx.distribution.ocio),
-        ahorroContributedCents: increment(ahorroDelta),
+        "capsCents.necesidad": increment(
+          toIntCents(newSplit.necesidad - tx.distribution.necesidad),
+        ),
+        "capsCents.ocio": increment(
+          toIntCents(newSplit.ocio - tx.distribution.ocio),
+        ),
+        ahorroContributedCents: increment(toIntCents(ahorroDelta)),
       });
     }
     transaction.update(userRef, {
-      savingsTotalCents: increment(ahorroDelta),
+      savingsTotalCents: increment(toIntCents(ahorroDelta)),
     });
 
     transaction.update(txRef, {

@@ -29,6 +29,7 @@ import {
   rememberMonthClosing,
 } from "@/utils/monthClosingNotices";
 import { getUnassignedCents } from "@/utils/savings";
+import { toIntCents } from "@/utils/currency";
 import { getMonthRemainders } from "@/utils/monthRemainders";
 import { isWithinGraceWindow } from "@/utils/transactionTiming";
 import type {
@@ -721,14 +722,18 @@ export async function confirmMonthClose(
         getUnassignedCents(savingsTotal, userProfile.savingsGoals ?? []),
       );
       const maxCoverable = Math.max(0, Math.min(savingsTotal, unassigned));
-      coveredBySavingsCents = Math.min(remainders.netDeficitCents, maxCoverable);
-      uncoveredDeficitCents = remainders.netDeficitCents - coveredBySavingsCents;
-      savingsDelta = -coveredBySavingsCents;
+      coveredBySavingsCents = toIntCents(
+        Math.min(remainders.netDeficitCents, maxCoverable),
+      );
+      uncoveredDeficitCents = toIntCents(
+        remainders.netDeficitCents - coveredBySavingsCents,
+      );
+      savingsDelta = toIntCents(-coveredBySavingsCents);
     } else if (
       remainders.netDeficitCents > 0 &&
       effectiveResolution === "carried_forward"
     ) {
-      carriedDeficitCents = remainders.netDeficitCents;
+      carriedDeficitCents = toIntCents(remainders.netDeficitCents);
       uncoveredDeficitCents = 0;
       savingsDelta = 0;
     } else if (remainders.netDeficitCents > 0) {
@@ -981,27 +986,31 @@ export async function moveSurplus(
     let savingsTotalDelta = 0;
 
     if (origin === "necesidad" || origin === "ocio") {
-      monthUpdate[`capsCents.${origin}`] = increment(-amountCents);
+      monthUpdate[`capsCents.${origin}`] = increment(toIntCents(-amountCents));
     } else {
       savingsTotalDelta -= amountCents;
       const currentContributed = month.ahorroContributedCents ?? 0;
       const revertibleContributed = Math.min(amountCents, currentContributed);
       if (revertibleContributed > 0) {
-        monthUpdate.ahorroContributedCents = increment(-revertibleContributed);
+        monthUpdate.ahorroContributedCents = increment(
+          toIntCents(-revertibleContributed),
+        );
       }
     }
 
     if (destination === "necesidad" || destination === "ocio") {
-      monthUpdate[`capsCents.${destination}`] = increment(amountCents);
+      monthUpdate[`capsCents.${destination}`] = increment(
+        toIntCents(amountCents),
+      );
     } else {
-      monthUpdate.ahorroContributedCents = increment(amountCents);
+      monthUpdate.ahorroContributedCents = increment(toIntCents(amountCents));
       savingsTotalDelta += amountCents;
     }
 
     transaction.update(monthRef, monthUpdate);
     if (savingsTotalDelta !== 0) {
       transaction.update(userRef, {
-        savingsTotalCents: increment(savingsTotalDelta),
+        savingsTotalCents: increment(toIntCents(savingsTotalDelta)),
       });
     }
 

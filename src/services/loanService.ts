@@ -14,6 +14,7 @@ import {
 import { db } from "@/lib/firebase";
 import { validateTransactionTiming } from "@/utils/transactionTiming";
 import { getUnassignedCents } from "@/utils/savings";
+import { toIntCents } from "@/utils/currency";
 import { toDateInputValue } from "@/utils/date";
 import {
   allocateLoanPayment,
@@ -163,13 +164,14 @@ export async function createLoan(
   if (installments.some((item) => item.dueDate < input.receivedDate)) {
     throw new Error("Los vencimientos no pueden ser anteriores a la recepción");
   }
-  const totalToRepayCents = installments.reduce(
-    (sum, item) => sum + item.amountCents,
-    0,
+  const totalToRepayCents = toIntCents(
+    installments.reduce((sum, item) => sum + item.amountCents, 0),
   );
-  const amountReceivedCents = input.importedExisting
-    ? (input.amountReceivedCents ?? totalToRepayCents)
-    : (input.amountReceivedCents ?? 0);
+  const amountReceivedCents = toIntCents(
+    input.importedExisting
+      ? (input.amountReceivedCents ?? totalToRepayCents)
+      : (input.amountReceivedCents ?? 0),
+  );
   if (amountReceivedCents <= 0) {
     throw new Error("El monto recibido debe ser mayor a 0");
   }
@@ -234,9 +236,12 @@ export async function createLoan(
     transaction.set(receiptRef, receipt);
     if (!input.importedExisting) {
       transaction.update(monthRef, {
-        [`capsCents.${destinationCategory}`]: increment(amountReceivedCents),
-        [`borrowedCapsCents.${destinationCategory}`]:
-          increment(amountReceivedCents),
+        [`capsCents.${destinationCategory}`]: increment(
+          toIntCents(amountReceivedCents),
+        ),
+        [`borrowedCapsCents.${destinationCategory}`]: increment(
+          toIntCents(amountReceivedCents),
+        ),
       });
     }
   });
@@ -334,12 +339,16 @@ export async function cancelUnusedLoan(
 
     if (hasCapAdjustment) {
       transaction.update(monthRef, {
-        "capsCents.necesidad": increment(-availableByCategory.necesidad),
-        "capsCents.ocio": increment(-availableByCategory.ocio),
-        "borrowedCapsCents.necesidad": increment(
-          -availableByCategory.necesidad,
+        "capsCents.necesidad": increment(
+          toIntCents(-availableByCategory.necesidad),
         ),
-        "borrowedCapsCents.ocio": increment(-availableByCategory.ocio),
+        "capsCents.ocio": increment(toIntCents(-availableByCategory.ocio)),
+        "borrowedCapsCents.necesidad": increment(
+          toIntCents(-availableByCategory.necesidad),
+        ),
+        "borrowedCapsCents.ocio": increment(
+          toIntCents(-availableByCategory.ocio),
+        ),
       });
     }
     fundMovementsSnapshot.docs.forEach((movement) => {
@@ -394,13 +403,14 @@ export async function registerLoanFundedExpense(
     const otherCategory: LoanDestinationCategory =
       input.category === "necesidad" ? "ocio" : "necesidad";
 
+    const amountCents = toIntCents(input.amountCents);
     const loanName = loan.lender?.trim() || "Préstamo";
     const expense: WithFieldValue<ExpenseTransaction> = {
       type: "expense",
       category: input.category,
       subcategory: input.subcategory,
       paymentMethod: input.paymentMethod,
-      amountCents: input.amountCents,
+      amountCents,
       transactionDate: input.date,
       serverDate: serverTimestamp(),
       localDate: new Date().toISOString(),
@@ -412,19 +422,23 @@ export async function registerLoanFundedExpense(
 
     transaction.set(txRef, expense);
     transaction.update(monthRef, {
-      [`spentCents.${input.category}`]: increment(input.amountCents),
-      [`loanFundedSpentCents.${input.category}`]: increment(input.amountCents),
-      [`capsCents.${input.category}`]: increment(consumed.transferredCents),
-      [`capsCents.${otherCategory}`]: increment(-consumed.transferredCents),
+      [`spentCents.${input.category}`]: increment(amountCents),
+      [`loanFundedSpentCents.${input.category}`]: increment(amountCents),
+      [`capsCents.${input.category}`]: increment(
+        toIntCents(consumed.transferredCents),
+      ),
+      [`capsCents.${otherCategory}`]: increment(
+        toIntCents(-consumed.transferredCents),
+      ),
       [`borrowedCapsCents.${input.category}`]: increment(
-        consumed.transferredCents,
+        toIntCents(consumed.transferredCents),
       ),
       [`borrowedCapsCents.${otherCategory}`]: increment(
-        -consumed.transferredCents,
+        toIntCents(-consumed.transferredCents),
       ),
     });
     transaction.update(loanRef, {
-      borrowedAvailableCents: increment(-input.amountCents),
+      borrowedAvailableCents: increment(toIntCents(-amountCents)),
       borrowedAvailableByCategory: consumed.available,
       updatedAt: serverTimestamp(),
     });

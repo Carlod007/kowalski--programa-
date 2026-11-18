@@ -841,4 +841,53 @@ describe.skipIf(!enabled)('months y transactions: reglas reales en emulador', ()
     await updateDistributionNow('owner', { necesidad: 45, ocio: 35, ahorro: 20 }, 'next_income');
     expect((await admin.doc(localPath).get()).data()?.distribution).toEqual({ necesidad: 45, ocio: 35, ahorro: 20 });
   });
+
+  it('SERVICIO Y REGLAS: mes con doubles enteros (capsCents.ocio 4435 y borrowedCapsCents.ocio -0) acepta ingreso y egreso, y rechaza decimal con fracción', async () => {
+    const { registerIncome, registerExpense } = await import('./transactionService');
+    const localDate = toDateInputValue();
+    const localMonth = getMonthId();
+    const localPath = `users/owner/months/${localMonth}`;
+    await seed(profilePath, {
+      distribution: { necesidad: 50, ocio: 30, ahorro: 20 },
+      savingsTotalCents: 0,
+      savingsGoals: [],
+      lastClosedMonth: localMonth,
+    });
+    await seed(localPath, month({
+      capsCents: { necesidad: 7391, ocio: 4435 },
+      borrowedCapsCents: { necesidad: 0, ocio: 0 },
+    }));
+
+    // Reproducir la conversión a double en Firestore causada por -0 en el SDK cliente
+    await updateDoc(doc(db, localPath), {
+      'capsCents.ocio': increment(-0),
+      'borrowedCapsCents.ocio': -0,
+    });
+
+    // Registrar ingreso real con registerIncome sobre el mes con doubles enteros
+    await registerIncome('owner', {
+      monthId: localMonth,
+      amountCents: 15_000,
+      source: 'P',
+      sourceId: '550e8400-e29b-41d4-a716-446655440000',
+      date: localDate,
+    });
+
+    // Registrar egreso real con registerExpense
+    await registerExpense('owner', {
+      monthId: localMonth,
+      category: 'ocio',
+      subcategory: 'Cine',
+      paymentMethod: 'Efectivo',
+      amountCents: 1_000,
+      date: localDate,
+    });
+
+    const afterSnap = (await admin.doc(localPath).get()).data()!;
+    expect(afterSnap.capsCents).toEqual({ necesidad: 14_891, ocio: 8_935 });
+    expect(afterSnap.spentCents).toEqual({ necesidad: 0, ocio: 1_000 });
+
+    // Un decimal con fracción sigue rechazándose por las reglas
+    await deny(updateDoc(doc(db, localPath), { 'capsCents.ocio': 4435.5 }));
+  });
 });

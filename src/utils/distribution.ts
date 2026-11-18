@@ -1,4 +1,5 @@
 import type { Distribution, IncomeTransaction } from "../types/transaction";
+import { toIntCents } from "./currency";
 
 export function isValidDistributionPercentage(
   value: unknown,
@@ -42,9 +43,12 @@ export function calculateDistribution(
   incomeCents: number,
   distribution: Distribution,
 ): Distribution {
-  const necesidad = Math.floor((incomeCents * distribution.necesidad) / 100);
-  const ocio = Math.floor((incomeCents * distribution.ocio) / 100);
-  const ahorro = incomeCents - necesidad - ocio;
+  const total = toIntCents(incomeCents);
+  const necesidad = toIntCents(
+    Math.floor((total * distribution.necesidad) / 100),
+  );
+  const ocio = toIntCents(Math.floor((total * distribution.ocio) / 100));
+  const ahorro = toIntCents(total - necesidad - ocio);
 
   return { necesidad, ocio, ahorro };
 }
@@ -137,9 +141,10 @@ export function calculateProportionalSplit(
       ? originalDistribution.ocio / originalAmountCents
       : 0;
 
-  const necesidad = Math.floor(newAmountCents * necesidadShare);
-  const ocio = Math.floor(newAmountCents * ocioShare);
-  const ahorro = newAmountCents - necesidad - ocio;
+  const total = toIntCents(newAmountCents);
+  const necesidad = toIntCents(Math.floor(total * necesidadShare));
+  const ocio = toIntCents(Math.floor(total * ocioShare));
+  const ahorro = toIntCents(total - necesidad - ocio);
 
   return { necesidad, ocio, ahorro };
 }
