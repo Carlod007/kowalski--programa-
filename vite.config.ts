@@ -5,6 +5,11 @@ import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 
 export default defineConfig({
+  define: {
+    __APP_BUILD_ID__: JSON.stringify(
+      `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`,
+    ),
+  },
   plugins: [
     react(),
     tailwindcss(),

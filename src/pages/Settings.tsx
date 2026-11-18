@@ -62,6 +62,7 @@ import {
   saveTheme,
   type AppTheme,
 } from "@/utils/theme";
+import { formatAppBuildLabel } from "@/utils/diagnostics";
 
 const THEME_OPTIONS: {
   value: AppTheme;
@@ -1486,6 +1487,9 @@ export default function Settings() {
         >
           {loggingOut ? "Cerrando sesión..." : "Cerrar sesión"}
         </button>
+        <p className="mt-4 text-center text-xs text-stone-400">
+          {formatAppBuildLabel()}
+        </p>
       </div>
     </div>
   );

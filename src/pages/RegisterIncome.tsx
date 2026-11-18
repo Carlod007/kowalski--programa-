@@ -16,6 +16,10 @@ import TransactionDateTimeFields from "@/components/TransactionDateTimeFields";
 import DistributionMismatchBanner from "@/components/DistributionMismatchBanner";
 import { calculateDistribution } from "@/utils/distribution";
 import { formatCents } from "@/utils/currency";
+import {
+  extractFirestoreErrorCode,
+  formatSaveErrorMessage,
+} from "@/utils/diagnostics";
 import type { Distribution } from "@/types/transaction";
 import BackButton from "@/components/BackButton";
 
@@ -131,10 +135,9 @@ export default function RegisterIncome() {
       });
       navigate("/dashboard");
     } catch (err) {
-      console.error("Error al registrar ingreso:", err);
-      setSubmitError(
-        "No se pudo guardar. Revisa tu conexión e intenta de nuevo.",
-      );
+      const code = extractFirestoreErrorCode(err);
+      console.error("Error al registrar ingreso:", code ?? "sin-codigo", err);
+      setSubmitError(formatSaveErrorMessage(err));
     }
   }
 
